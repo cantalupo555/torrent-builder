@@ -17,6 +17,15 @@ endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBTORRENT REQUIRED libtorrent-rasterbar)
 
+# Adicionar cxxopts
+include(FetchContent)
+FetchContent_Declare(
+    cxxopts
+    GIT_REPOSITORY https://github.com/jarro2783/cxxopts.git
+    GIT_TAG        v3.1.1
+)
+FetchContent_MakeAvailable(cxxopts)
+
 # Adicionar executável principal
 add_executable(torrent_maker
     src/torrent_maker.cpp
@@ -32,6 +41,7 @@ target_include_directories(torrent_maker PRIVATE
 # Linkar bibliotecas
 target_link_libraries(torrent_maker PRIVATE
     ${LIBTORRENT_LIBRARIES}
+    cxxopts::cxxopts
 )
 
 # Configurações de instalação (opcional)

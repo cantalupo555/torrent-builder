@@ -2,6 +2,7 @@
 #include <iostream>
 #include <vector>
 #include <optional>
+#include <cxxopts.hpp>
 
 std::vector<std::string> default_trackers = {
     "udp://open.stealth.si:80/announce",
@@ -80,16 +81,76 @@ TorrentConfig get_interactive_config() {
     );
 }
 
+TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
+    if (!result.count("path")) {
+        throw std::runtime_error("Path is required");
+    }
+    if (!result.count("output")) {
+        throw std::runtime_error("Output path is required");
+    }
+
+    std::string version = result["version"].as<std::string>();
+    TorrentVersion tv = TorrentVersion::V1;
+    if (version == "2") tv = TorrentVersion::V2;
+    else if (version == "3") tv = TorrentVersion::HYBRID;
+
+    std::optional<std::string> comment = std::nullopt;
+    if (result.count("comment")) {
+        comment = result["comment"].as<std::string>();
+    }
+
+    std::vector<std::string> web_seeds;
+    if (result.count("webseed")) {
+        web_seeds = result["webseed"].as<std::vector<std::string>>();
+    }
+
+    return TorrentConfig(
+        result["path"].as<std::string>(),
+        result["output"].as<std::string>(),
+        default_trackers,
+        tv,
+        comment,
+        result.count("private"),
+        web_seeds
+    );
+}
+
 int main(int argc, char* argv[]) {
     try {
-        if (argc > 1 && std::string(argv[1]) == "-i") {
+        cxxopts::Options options("torrent_maker", "Create torrent files");
+        options.add_options()
+            ("h,help", "Show help")
+            ("i,interactive", "Run in interactive mode")
+            ("path", "Path to file or directory", cxxopts::value<std::string>(), "PATH")
+            ("output", "Output torrent file path", cxxopts::value<std::string>(), "OUTPUT")
+            ("version", "Torrent version (1=v1, 2=v2, 3=hybrid)", cxxopts::value<std::string>()->default_value("1"), "{1,2,3}")
+            ("comment", "Torrent comment", cxxopts::value<std::string>(), "COMMENT")
+            ("private", "Make torrent private")
+            ("webseed", "Add web seed URL", cxxopts::value<std::vector<std::string>>(), "URL")
+        ;
+
+        options.positional_help("PATH OUTPUT");
+        options.parse_positional({"path", "output"});
+        auto result = options.parse(argc, argv);
+
+        if (result.count("help") || argc == 1) {
+            std::cout << "Create a torrent file\n\n";
+            std::cout << options.help() << "\n";
+            std::cout << "Examples:\n";
+            std::cout << "  ./torrent_maker --path /data/file --output file.torrent\n";
+            std::cout << "  ./torrent_maker --path /data/folder --output folder.torrent --version 2 --private\n";
+            std::cout << "  ./torrent_maker -i\n";
+            return 0;
+        }
+
+        if (result.count("interactive")) {
             auto config = get_interactive_config();
             TorrentCreator creator(config);
             creator.create_torrent();
         } else {
-            // TODO: Add command line argument parsing
-            std::cerr << "Command line mode not implemented yet. Use -i for interactive mode.\n";
-            return 1;
+            auto config = get_commandline_config(result);
+            TorrentCreator creator(config);
+            creator.create_torrent();
         }
     }
     catch (const std::exception& e) {
