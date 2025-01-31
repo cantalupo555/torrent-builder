@@ -16,6 +16,7 @@ endif()
 # Encontrar libtorrent
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBTORRENT REQUIRED libtorrent-rasterbar)
+find_package(OpenSSL REQUIRED) # Adicionar OpenSSL
 
 # Adicionar cxxopts
 include(FetchContent)
@@ -42,6 +43,7 @@ target_include_directories(torrent_builder PRIVATE
 target_link_libraries(torrent_builder PRIVATE
     ${LIBTORRENT_LIBRARIES}
     cxxopts::cxxopts
+    OpenSSL::Crypto # Linkar OpenSSL
 )
 
 # Configurações de instalação (opcional)

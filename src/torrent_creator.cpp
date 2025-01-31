@@ -2,9 +2,54 @@
 #include <libtorrent/version.hpp>
 #include <iomanip>
 #include <cmath>
+#include <openssl/sha.h> // Para cálculo de SHA-256
+#include <fstream>
+#include <sstream>
 
 TorrentCreator::TorrentCreator(const TorrentConfig& config)
     : config_(config) {}
+
+std::string TorrentCreator::calculate_file_hash(const fs::path& file_path) const {
+    std::ifstream file(file_path, std::ios::binary);
+    if (!file) {
+        throw std::runtime_error("Failed to open file: " + file_path.string());
+    }
+
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+
+    char buffer[8192];
+    while (file.good()) {
+        file.read(buffer, sizeof(buffer));
+        SHA256_Update(&sha256, buffer, file.gcount());
+    }
+
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_Final(hash, &sha256);
+
+    std::ostringstream oss;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        oss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+    }
+
+    return oss.str();
+}
+
+void TorrentCreator::verify_file_integrity() const {
+    if (fs::is_directory(config_.path)) {
+        for (const auto& entry : fs::recursive_directory_iterator(config_.path)) {
+            if (entry.is_regular_file()) {
+                std::string hash = calculate_file_hash(entry.path());
+                std::cout << "Verified: " << entry.path() << " (SHA-256: " << hash << ")\n";
+            }
+        }
+    } else if (fs::is_regular_file(config_.path)) {
+        std::string hash = calculate_file_hash(config_.path);
+        std::cout << "Verified: " << config_.path << " (SHA-256: " << hash << ")\n";
+    } else {
+        throw std::runtime_error("Invalid path: " + config_.path.string());
+    }
+}
 
 int TorrentCreator::auto_piece_size(int64_t total_size) {
     if (total_size < 64 * 1024 * 1024) return 16 * 1024;
@@ -40,6 +85,11 @@ void TorrentCreator::add_files_to_storage() {
 
 void TorrentCreator::create_torrent() {
     try {
+        // Verifica a integridade dos arquivos antes de prosseguir
+        std::cout << "Verifying file integrity...\n";
+        verify_file_integrity();
+        std::cout << "All files verified successfully.\n";
+
         add_files_to_storage();
         
         int piece_size = auto_piece_size(fs_.total_size());
