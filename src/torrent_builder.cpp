@@ -117,7 +117,7 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
 
 int main(int argc, char* argv[]) {
     try {
-        cxxopts::Options options("torrent_maker", "Create torrent files");
+        cxxopts::Options options("torrent_builder", "Create torrent files");
         options.add_options()
             ("h,help", "Show help")
             ("i,interactive", "Run in interactive mode")
@@ -137,9 +137,9 @@ int main(int argc, char* argv[]) {
             std::cout << "Create a torrent file\n\n";
             std::cout << options.help() << "\n";
             std::cout << "Examples:\n";
-            std::cout << "  ./torrent_maker --path /data/file --output file.torrent\n";
-            std::cout << "  ./torrent_maker --path /data/folder --output folder.torrent --version 2 --private\n";
-            std::cout << "  ./torrent_maker -i\n";
+            std::cout << "  ./torrent_builder --path /data/file --output file.torrent\n";
+            std::cout << "  ./torrent_builder --path /data/folder --output folder.torrent --version 2 --private\n";
+            std::cout << "  ./torrent_builder -i\n";
             return 0;
         }
 

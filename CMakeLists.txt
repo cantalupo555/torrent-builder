@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(torrent_maker VERSION 1.0 LANGUAGES CXX)
+project(torrent_builder VERSION 1.0 LANGUAGES CXX)
 
 # Configurações básicas do projeto
 set(CMAKE_CXX_STANDARD 20)
@@ -27,25 +27,25 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(cxxopts)
 
 # Adicionar executável principal
-add_executable(torrent_maker
-    src/torrent_maker.cpp
+add_executable(torrent_builder
+    src/torrent_builder.cpp
     src/torrent_creator.cpp
 )
 
 # Incluir diretórios
-target_include_directories(torrent_maker PRIVATE
+target_include_directories(torrent_builder PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${LIBTORRENT_INCLUDE_DIRS}
 )
 
 # Linkar bibliotecas
-target_link_libraries(torrent_maker PRIVATE
+target_link_libraries(torrent_builder PRIVATE
     ${LIBTORRENT_LIBRARIES}
     cxxopts::cxxopts
 )
 
 # Configurações de instalação (opcional)
-install(TARGETS torrent_maker
+install(TARGETS torrent_builder
     RUNTIME DESTINATION bin
 )
 

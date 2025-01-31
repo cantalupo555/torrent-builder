@@ -56,13 +56,13 @@ cmake --build .
 ### Interactive Mode
 
 ```bash
-./torrent_maker -i
+./torrent_builder -i
 ```
 
 ### Command-line Mode
 
 ```bash
-./torrent_maker --path /path/to/file_or_directory --output output.torrent [options]
+./torrent_builder --path /path/to/file_or_directory --output output.torrent [options]
 ```
 
 ## Options
@@ -82,24 +82,24 @@ cmake --build .
 
 ### Create a hybrid torrent (default)
 ```bash
-./torrent_maker --path /data/file --output file.torrent
+./torrent_builder --path /data/file --output file.torrent
 ```
 
 ### Create a private V2 torrent
 ```bash
-./torrent_maker --path /data/folder --output folder.torrent --version 2 --private
+./torrent_builder --path /data/folder --output folder.torrent --version 2 --private
 ```
 
 ### Add multiple web seeds
 ```bash
-./torrent_maker --path /data/file --output file.torrent \
+./torrent_builder --path /data/file --output file.torrent \
   --webseed http://example.com/file \
   --webseed http://mirror.com/file
 ```
 
 ### Create torrent with comment
 ```bash
-./torrent_maker --path /data/file --output file.torrent \
+./torrent_builder --path /data/file --output file.torrent \
   --comment "My important file"
 ```
 
