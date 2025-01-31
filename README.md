@@ -1,6 +1,6 @@
-# Torrent Maker
+# Torrent Builder
 
-A command-line tool for creating torrent files with support for both interactive and non-interactive modes.
+The **Torrent Builder** is a command-line tool for creating torrent files, offering a complete and customizable experience. With support for interactive and non-interactive modes, you can create torrents quickly and efficiently, either through a step-by-step wizard or with direct commands. The tool allows you to configure various aspects of the torrent, such as version (V1, V2, or Hybrid), comments, privacy, web seeds, and trackers, ensuring your torrents are created exactly as you need them.
 
 ## Features
 
@@ -14,13 +14,33 @@ A command-line tool for creating torrent files with support for both interactive
 - Include comments in torrent metadata
 - Detailed summary output after creation
 
+## Prerequisites
+
+Before building, ensure you have the following installed:
+
+### Linux
+
+-   **Build Tools:** `build-essential`
+-   **CMake:**  `cmake` (>= 3.28.3)
+-   **libtorrent:** `libtorrent-rasterbar-dev` (>= 2.0.11)
+
+Install them using:
+```bash
+sudo apt-get install build-essential cmake libtorrent-rasterbar-dev
+```
+
+### macOS
+
+-   **CMake:** `cmake` (>= 3.28.3)
+-   **libtorrent:** `libtorrent-rasterbar` (>= 2.0.11)
+
+Install them using:
+```bash
+brew install cmake libtorrent-rasterbar
+```
+
 ## Installation
-
-### Requirements
-
-- CMake (>= 3.14)
-- Libtorrent
-- C++20 compatible compiler
+To build the project, you will need a C++20 compatible compiler.
 
 ### Build Instructions
 
@@ -28,7 +48,7 @@ A command-line tool for creating torrent files with support for both interactive
 mkdir build
 cd build
 cmake ..
-make
+cmake --build .
 ```
 
 ## Usage
@@ -60,22 +80,29 @@ make
 
 ## Examples
 
-Create a hybrid torrent (default):
-
+### Create a hybrid torrent (default)
 ```bash
 ./torrent_maker --path /data/file --output file.torrent
 ```
 
-Create a private V2 torrent:
-
+### Create a private V2 torrent
 ```bash
 ./torrent_maker --path /data/folder --output folder.torrent --version 2 --private
 ```
 
-Add web seeds:
-
+### Add multiple web seeds
 ```bash
 ./torrent_maker --path /data/file --output file.torrent \
   --webseed http://example.com/file \
   --webseed http://mirror.com/file
 ```
+
+### Create torrent with comment
+```bash
+./torrent_maker --path /data/file --output file.torrent \
+  --comment "My important file"
+```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
