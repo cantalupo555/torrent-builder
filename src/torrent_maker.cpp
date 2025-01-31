@@ -41,9 +41,9 @@ TorrentConfig get_interactive_config() {
 
     // Get version
     std::string version;
-    std::cout << "Torrent version (1-v1, 2-v2, 3-Hybrid) [1]: ";
+    std::cout << "Torrent version (1-v1, 2-v2, 3-Hybrid) [3]: ";
     std::getline(std::cin, version);
-    if (version.empty()) version = "1";
+    if (version.empty()) version = "3";
     
     TorrentVersion tv = TorrentVersion::V1;
     if (version == "2") tv = TorrentVersion::V2;
@@ -123,7 +123,7 @@ int main(int argc, char* argv[]) {
             ("i,interactive", "Run in interactive mode")
             ("path", "Path to file or directory", cxxopts::value<std::string>(), "PATH")
             ("output", "Output torrent file path", cxxopts::value<std::string>(), "OUTPUT")
-            ("version", "Torrent version (1=v1, 2=v2, 3=hybrid)", cxxopts::value<std::string>()->default_value("1"), "{1,2,3}")
+            ("version", "Torrent version (1=v1, 2=v2, 3=hybrid)", cxxopts::value<std::string>()->default_value("3"), "{1,2,3}")
             ("comment", "Torrent comment", cxxopts::value<std::string>(), "COMMENT")
             ("private", "Make torrent private")
             ("webseed", "Add web seed URL", cxxopts::value<std::vector<std::string>>(), "URL")

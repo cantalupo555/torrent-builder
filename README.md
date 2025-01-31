@@ -52,7 +52,7 @@ make
   -i, --interactive  Run in interactive mode
   --path arg         Path to file or directory (required)
   --output arg       Output torrent file path (required)
-  --version arg      Torrent version (1=v1, 2=v2, 3=hybrid) (default: 1)
+  --version arg      Torrent version (1=v1, 2=v2, 3=hybrid) (default: 3)
   --comment arg      Torrent comment
   --private          Make torrent private
   --webseed arg      Add web seed URL (can be used multiple times)
@@ -60,7 +60,7 @@ make
 
 ## Examples
 
-Create a V1 torrent:
+Create a hybrid torrent (default):
 
 ```bash
 ./torrent_maker --path /data/file --output file.torrent
