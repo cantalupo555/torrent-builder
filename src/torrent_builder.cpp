@@ -3,6 +3,9 @@
 #include <vector>
 #include <optional>
 #include <cxxopts.hpp>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 std::vector<std::string> default_trackers = {
     "udp://open.stealth.si:80/announce",
@@ -18,10 +21,28 @@ TorrentConfig get_interactive_config() {
 
     // Get input path
     std::string path;
-    std::cout << "Path to file or directory: ";
-    std::getline(std::cin, path);
-    if (path.empty()) {
-        throw std::runtime_error("Input path cannot be empty");
+    while (true) {
+        std::cout << "Path to file or directory: ";
+        std::getline(std::cin, path);
+        if (path.empty()) {
+            std::cout << "Error: Input path cannot be empty\n";
+            continue;
+        }
+        try {
+            if (!fs::exists(path)) {
+                std::cout << "Error: Path does not exist\n";
+                continue;
+            }
+            // Check if we have read permissions
+            fs::file_status status = fs::status(path);
+            if ((status.permissions() & fs::perms::owner_read) == fs::perms::none) {
+                std::cout << "Error: No read permissions for path\n";
+                continue;
+            }
+            break;
+        } catch (const fs::filesystem_error& e) {
+            std::cout << "Error: " << e.what() << "\n";
+        }
     }
 
     // Get output path
@@ -30,13 +51,41 @@ TorrentConfig get_interactive_config() {
         std::cout << "Path to save torrent: ";
         std::getline(std::cin, output);
         if (output.empty()) {
-            throw std::runtime_error("Output path cannot be empty");
+            std::cout << "Error: Output path cannot be empty\n";
+            continue;
         }
         if (output.size() < 8 || output.substr(output.size() - 8) != ".torrent") {
             std::cout << "Error: Output path must end with '.torrent'\n";
             continue;
         }
-        break;
+        
+        // Check if file exists and prompt for overwrite
+        if (fs::exists(output)) {
+            std::string overwrite;
+            std::cout << "File " << output << " already exists. Overwrite? (y/N): ";
+            std::getline(std::cin, overwrite);
+            if (overwrite != "y" && overwrite != "Y") {
+                continue;
+            }
+        }
+        
+        // Check if parent directory exists and is writable
+        try {
+            fs::path parent_dir = fs::path(output).parent_path();
+            if (!parent_dir.empty() && !fs::exists(parent_dir)) {
+                std::cout << "Error: Parent directory does not exist\n";
+                continue;
+            }
+            // Check write permissions
+            fs::file_status status = fs::status(parent_dir);
+            if ((status.permissions() & fs::perms::owner_write) == fs::perms::none) {
+                std::cout << "Error: No write permissions for directory\n";
+                continue;
+            }
+            break;
+        } catch (const fs::filesystem_error& e) {
+            std::cout << "Error: " << e.what() << "\n";
+        }
     }
 
     // Get version
@@ -134,7 +183,6 @@ int main(int argc, char* argv[]) {
         auto result = options.parse(argc, argv);
 
         if (result.count("help") || argc == 1) {
-            std::cout << "Create a torrent file\n\n";
             std::cout << options.help() << "\n";
             std::cout << "Examples:\n";
             std::cout << "  ./torrent_builder --path /data/file --output file.torrent\n";
