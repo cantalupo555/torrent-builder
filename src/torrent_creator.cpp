@@ -2,7 +2,7 @@
 #include <libtorrent/version.hpp>
 #include <iomanip>
 #include <cmath>
-#include <openssl/sha.h> // Para cálculo de SHA-256
+#include <openssl/evp.h> // Para cálculo de SHA-256 usando API EVP
 #include <fstream>
 #include <sstream>
 
@@ -15,20 +15,42 @@ std::string TorrentCreator::calculate_file_hash(const fs::path& file_path) const
         throw std::runtime_error("Failed to open file: " + file_path.string());
     }
 
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
+    // Criar contexto EVP
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx) {
+        throw std::runtime_error("Failed to create EVP context");
+    }
 
+    // Inicializar o contexto para SHA-256
+    if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1) {
+        EVP_MD_CTX_free(ctx);
+        throw std::runtime_error("Failed to initialize SHA-256 digest");
+    }
+
+    // Ler o arquivo em blocos e atualizar o hash
     char buffer[8192];
     while (file.good()) {
         file.read(buffer, sizeof(buffer));
-        SHA256_Update(&sha256, buffer, file.gcount());
+        if (EVP_DigestUpdate(ctx, buffer, file.gcount()) != 1) {
+            EVP_MD_CTX_free(ctx);
+            throw std::runtime_error("Failed to update SHA-256 digest");
+        }
     }
 
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256_Final(hash, &sha256);
+    // Finalizar o cálculo do hash
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int length;
+    if (EVP_DigestFinal_ex(ctx, hash, &length) != 1) {
+        EVP_MD_CTX_free(ctx);
+        throw std::runtime_error("Failed to finalize SHA-256 digest");
+    }
 
+    // Liberar o contexto
+    EVP_MD_CTX_free(ctx);
+
+    // Converter o hash para uma string hexadecimal
     std::ostringstream oss;
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+    for (unsigned int i = 0; i < length; i++) {
         oss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
     }
 
