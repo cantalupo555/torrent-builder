@@ -31,12 +31,13 @@ struct TorrentConfig {
     std::optional<std::string> comment;
     bool is_private;
     std::vector<std::string> web_seeds;
+    std::optional<int> piece_size; // Adicionado piece_size opcional
 
-    TorrentConfig(fs::path p, fs::path o, std::vector<std::string> t, 
+    TorrentConfig(fs::path p, fs::path o, std::vector<std::string> t,
                  TorrentVersion v, std::optional<std::string> c = std::nullopt,
-                 bool priv = false, std::vector<std::string> ws = {})
-        : path(p), output(o), trackers(t), version(v), 
-          comment(c), is_private(priv), web_seeds(ws) 
+                 bool priv = false, std::vector<std::string> ws = {}, std::optional<int> ps = std::nullopt) // Modificado construtor
+        : path(p), output(o), trackers(t), version(v),
+          comment(c), is_private(priv), web_seeds(ws), piece_size(ps) // Inicializa piece_size
     {
         if (!fs::exists(path)) {
             throw std::runtime_error("Invalid path: " + path.string());
@@ -52,7 +53,7 @@ public:
 private:
     TorrentConfig config_;
     lt::file_storage fs_;
-    
+
 
     // Outras funções
     static int auto_piece_size(int64_t total_size);

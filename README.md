@@ -9,6 +9,7 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 - Interactive mode with step-by-step configuration
 - Command-line interface with options for all features
 - Automatic piece size calculation based on file size
+- **Manual piece size configuration**
 - Support for private torrents
 - Add multiple trackers and web seeds
 - Include comments in torrent metadata
@@ -76,6 +77,7 @@ cmake --build .
   --comment arg      Torrent comment
   --private          Make torrent private
   --webseed arg      Add web seed URL (can be used multiple times)
+  --piece-size arg   Piece size in KB (must be one of: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)
 ```
 
 ## Examples
@@ -101,6 +103,11 @@ cmake --build .
 ```bash
 ./torrent_builder --path /data/file --output file.torrent \
   --comment "My important file"
+```
+### Create torrent with custom piece size
+```bash
+./torrent_builder --path /data/file --output file.torrent \
+  --piece-size 1024
 ```
 
 ## License

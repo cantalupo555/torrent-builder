@@ -4,6 +4,8 @@
 #include <optional>
 #include <cxxopts.hpp>
 #include <filesystem>
+#include <cmath>
+#include <algorithm> // Para std::find
 
 namespace fs = std::filesystem;
 
@@ -15,6 +17,9 @@ std::vector<std::string> default_trackers = {
     "udp://tracker.cyberia.is:6969/announce",
     "udp://retracker.hotplug.ru:2710/announce"
 };
+
+// Lista de tamanhos de pedaço permitidos (em KB)
+const std::vector<int> allowed_piece_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768};
 
 TorrentConfig get_interactive_config() {
     std::cout << "=== TORRENT CONFIGURATION ===" << std::endl;
@@ -58,7 +63,7 @@ TorrentConfig get_interactive_config() {
             std::cout << "Error: Output path must end with '.torrent'\n";
             continue;
         }
-        
+
         // Check if file exists and prompt for overwrite
         if (fs::exists(output)) {
             std::string overwrite;
@@ -68,7 +73,7 @@ TorrentConfig get_interactive_config() {
                 continue;
             }
         }
-        
+
         // Check if parent directory exists and is writable
         try {
             fs::path parent_dir = fs::path(output).parent_path();
@@ -93,7 +98,7 @@ TorrentConfig get_interactive_config() {
     std::cout << "Torrent version (1-v1, 2-v2, 3-Hybrid) [3]: ";
     std::getline(std::cin, version);
     if (version.empty()) version = "3";
-    
+
     TorrentVersion tv = TorrentVersion::V1;
     if (version == "2") tv = TorrentVersion::V2;
     else if (version == "3") tv = TorrentVersion::HYBRID;
@@ -119,6 +124,38 @@ TorrentConfig get_interactive_config() {
         web_seeds.push_back(seed);
     }
 
+    // Get piece size
+    std::optional<int> piece_size = std::nullopt;
+    std::string piece_size_str;
+    std::cout << "Piece size in KB (leave blank for auto): \n";
+
+    // Mostra as opções válidas, incluindo "auto"
+    std::cout << "Valid options: auto, ";
+    for (size_t i = 0; i < allowed_piece_sizes.size(); ++i) {
+        std::cout << allowed_piece_sizes[i];
+        if (i < allowed_piece_sizes.size() - 1) {
+            std::cout << ", ";
+        }
+    }
+    std::cout << "\n";
+
+
+    std::getline(std::cin, piece_size_str);
+    if (!piece_size_str.empty()) {
+        try {
+            int ps = std::stoi(piece_size_str);
+            // Validate: Must be in the allowed list
+            if (std::find(allowed_piece_sizes.begin(), allowed_piece_sizes.end(), ps) != allowed_piece_sizes.end()) {
+                piece_size = ps * 1024; // Store in bytes
+            } else {
+                std::cout << "Warning: Invalid piece size. Using auto.\n";
+            }
+        } catch (const std::exception& e) {
+            std::cout << "Warning: Invalid piece size input. Using auto.\n";
+        }
+    }
+
+
     return TorrentConfig(
         path,
         output,
@@ -126,7 +163,8 @@ TorrentConfig get_interactive_config() {
         tv,
         comment.empty() ? std::nullopt : std::optional<std::string>(comment),
         is_private,
-        web_seeds
+        web_seeds,
+        piece_size
     );
 }
 
@@ -153,14 +191,33 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
         web_seeds = result["webseed"].as<std::vector<std::string>>();
     }
 
+    std::optional<int> piece_size = std::nullopt;
+    if (result.count("piece-size")) {
+        int ps = result["piece-size"].as<int>();
+        // Validate: Must be in the allowed list
+        if (std::find(allowed_piece_sizes.begin(), allowed_piece_sizes.end(), ps) != allowed_piece_sizes.end()) {
+            piece_size = ps * 1024; // Store in bytes
+        } else {
+            std::cerr << "Error: Invalid piece size. Must be one of: ";
+            for (size_t i = 0; i < allowed_piece_sizes.size(); ++i) {
+                std::cerr << allowed_piece_sizes[i];
+                if (i < allowed_piece_sizes.size() - 1) {
+                    std::cerr << ", ";
+                }
+            }
+            std::cerr << " KB\n";
+            throw std::runtime_error("Invalid piece size");
+        }
+    }
     return TorrentConfig(
-        result["path"].as<std::string>(),
+         result["path"].as<std::string>(),
         result["output"].as<std::string>(),
         default_trackers,
         tv,
         comment,
         result.count("private"),
-        web_seeds
+        web_seeds,
+        piece_size
     );
 }
 
@@ -176,6 +233,7 @@ int main(int argc, char* argv[]) {
             ("comment", "Torrent comment", cxxopts::value<std::string>(), "COMMENT")
             ("private", "Make torrent private")
             ("webseed", "Add web seed URL", cxxopts::value<std::vector<std::string>>(), "URL")
+            ("piece-size", "Piece size in KB", cxxopts::value<int>(), "SIZE") // Nova opção
         ;
 
         options.positional_help("PATH OUTPUT");
@@ -187,6 +245,7 @@ int main(int argc, char* argv[]) {
             std::cout << "Examples:\n";
             std::cout << "  ./torrent_builder --path /data/file --output file.torrent\n";
             std::cout << "  ./torrent_builder --path /data/folder --output folder.torrent --version 2 --private\n";
+            std::cout << "  ./torrent_builder --path /data/file --output file.torrent --piece-size 1024\n";
             std::cout << "  ./torrent_builder -i\n";
             return 0;
         }
