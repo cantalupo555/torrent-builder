@@ -5,10 +5,11 @@
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <cmath>
-#include <algorithm> // Para std::find
+#include <algorithm> // For std::find
 
 namespace fs = std::filesystem;
 
+// Default trackers to be used if none are provided
 std::vector<std::string> default_trackers = {
     "udp://open.stealth.si:80/announce",
     "udp://tracker.opentrackr.org:1337/announce",
@@ -18,7 +19,7 @@ std::vector<std::string> default_trackers = {
     "udp://retracker.hotplug.ru:2710/announce"
 };
 
-// Lista de tamanhos de pedaço permitidos (em KB)
+// List of allowed piece sizes (in KB). These are powers of 2
 const std::vector<int> allowed_piece_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768};
 
 TorrentConfig get_interactive_config() {
@@ -34,6 +35,7 @@ TorrentConfig get_interactive_config() {
             continue;
         }
         try {
+            // Check if the path exists
             if (!fs::exists(path)) {
                 std::cout << "Error: Path does not exist\n";
                 continue;
@@ -93,7 +95,7 @@ TorrentConfig get_interactive_config() {
         }
     }
 
-    // Get version
+    // Get torrent version
     std::string version;
     std::cout << "Torrent version (1-v1, 2-v2, 3-Hybrid) [3]: ";
     std::getline(std::cin, version);
@@ -103,7 +105,7 @@ TorrentConfig get_interactive_config() {
     if (version == "2") tv = TorrentVersion::V2;
     else if (version == "3") tv = TorrentVersion::HYBRID;
 
-    // Get comment
+    // Get optional comment
     std::string comment;
     std::cout << "Comment (optional): ";
     std::getline(std::cin, comment);
@@ -134,7 +136,7 @@ TorrentConfig get_interactive_config() {
         std::string piece_size_str;
         std::cout << "Piece size in KB: \n";
 
-        // Mostra as opções válidas, incluindo "auto"
+        // Show valid options
         std::cout << "Valid options: ";
         for (size_t i = 0; i < allowed_piece_sizes.size(); ++i) {
             std::cout << allowed_piece_sizes[i];
@@ -180,21 +182,25 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
         throw std::runtime_error("Output path is required");
     }
 
+    // Get torrent version
     std::string version = result["version"].as<std::string>();
     TorrentVersion tv = TorrentVersion::V1;
     if (version == "2") tv = TorrentVersion::V2;
     else if (version == "3") tv = TorrentVersion::HYBRID;
 
+    // Get optional comment
     std::optional<std::string> comment = std::nullopt;
     if (result.count("comment")) {
         comment = result["comment"].as<std::string>();
     }
 
+    // Get web seeds
     std::vector<std::string> web_seeds;
     if (result.count("webseed")) {
         web_seeds = result["webseed"].as<std::vector<std::string>>();
     }
 
+    // Get and validate piece size
     std::optional<int> piece_size = std::nullopt;
     if (result.count("piece-size")) {
         int ps = result["piece-size"].as<int>();
@@ -227,6 +233,7 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
 
 int main(int argc, char* argv[]) {
     try {
+        // Define command-line options
         cxxopts::Options options("torrent_builder", "Create torrent files");
         options.add_options()
             ("h,help", "Show help")
@@ -237,13 +244,15 @@ int main(int argc, char* argv[]) {
             ("comment", "Torrent comment", cxxopts::value<std::string>(), "COMMENT")
             ("private", "Make torrent private")
             ("webseed", "Add web seed URL", cxxopts::value<std::vector<std::string>>(), "URL")
-            ("piece-size", "Piece size in KB", cxxopts::value<int>(), "SIZE") // Nova opção
+            ("piece-size", "Piece size in KB", cxxopts::value<int>(), "SIZE") // New option
         ;
 
         options.positional_help("PATH OUTPUT");
         options.parse_positional({"path", "output"});
         auto result = options.parse(argc, argv);
 
+        // Parse arguments. Show help if requested or if no arguments are provided
+        // Run in interactive or command-line mode based on the arguments
         if (result.count("help") || argc == 1) {
             std::cout << options.help() << "\n";
             std::cout << "Examples:\n";
@@ -254,6 +263,7 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
+        // Run in interactive or command-line mode based on arguments
         if (result.count("interactive")) {
             auto config = get_interactive_config();
             TorrentCreator creator(config);
