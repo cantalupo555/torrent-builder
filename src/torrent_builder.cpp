@@ -126,35 +126,39 @@ TorrentConfig get_interactive_config() {
 
     // Get piece size
     std::optional<int> piece_size = std::nullopt;
-    std::string piece_size_str;
-    std::cout << "Piece size in KB (leave blank for auto): \n";
+    std::string set_piece_size;
+    std::cout << "Set custom piece size? (y/N): ";
+    std::getline(std::cin, set_piece_size);
 
-    // Mostra as opções válidas, incluindo "auto"
-    std::cout << "Valid options: auto, ";
-    for (size_t i = 0; i < allowed_piece_sizes.size(); ++i) {
-        std::cout << allowed_piece_sizes[i];
-        if (i < allowed_piece_sizes.size() - 1) {
-            std::cout << ", ";
-        }
-    }
-    std::cout << "\n";
+    if (set_piece_size == "y" || set_piece_size == "Y") {
+        std::string piece_size_str;
+        std::cout << "Piece size in KB: \n";
 
-
-    std::getline(std::cin, piece_size_str);
-    if (!piece_size_str.empty()) {
-        try {
-            int ps = std::stoi(piece_size_str);
-            // Validate: Must be in the allowed list
-            if (std::find(allowed_piece_sizes.begin(), allowed_piece_sizes.end(), ps) != allowed_piece_sizes.end()) {
-                piece_size = ps * 1024; // Store in bytes
-            } else {
-                std::cout << "Warning: Invalid piece size. Using auto.\n";
+        // Mostra as opções válidas, incluindo "auto"
+        std::cout << "Valid options: ";
+        for (size_t i = 0; i < allowed_piece_sizes.size(); ++i) {
+            std::cout << allowed_piece_sizes[i];
+            if (i < allowed_piece_sizes.size() - 1) {
+                std::cout << ", ";
             }
-        } catch (const std::exception& e) {
-            std::cout << "Warning: Invalid piece size input. Using auto.\n";
+        }
+        std::cout << "\n";
+
+        std::getline(std::cin, piece_size_str);
+        if (!piece_size_str.empty()) {
+            try {
+                int ps = std::stoi(piece_size_str);
+                // Validate: Must be in the allowed list
+                if (std::find(allowed_piece_sizes.begin(), allowed_piece_sizes.end(), ps) != allowed_piece_sizes.end()) {
+                    piece_size = ps * 1024; // Store in bytes
+                } else {
+                    std::cout << "Warning: Invalid piece size. Using auto.\n";
+                }
+            } catch (const std::exception& e) {
+                std::cout << "Warning: Invalid piece size input. Using auto.\n";
+            }
         }
     }
-
 
     return TorrentConfig(
         path,
