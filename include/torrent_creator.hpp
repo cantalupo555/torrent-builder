@@ -53,9 +53,6 @@ private:
     TorrentConfig config_;
     lt::file_storage fs_;
     
-    // Funções para cálculo de hash e verificação de integridade
-    std::string calculate_file_hash(const fs::path& file_path) const;
-    void verify_file_integrity() const;
 
     // Outras funções
     static int auto_piece_size(int64_t total_size);
