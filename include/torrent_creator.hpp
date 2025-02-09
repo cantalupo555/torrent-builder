@@ -17,6 +17,9 @@
 
 namespace fs = std::filesystem;
 
+// Default trackers to be used if none are provided
+extern std::vector<std::string> default_trackers;
+
 // Enum for supported torrent versions
 enum class TorrentVersion {
     V1,

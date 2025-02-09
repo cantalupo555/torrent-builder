@@ -116,6 +116,16 @@ TorrentConfig get_interactive_config() {
     std::getline(std::cin, priv);
     bool is_private = (priv == "y" || priv == "Y");
 
+    // Get trackers
+    std::vector<std::string> trackers;
+    while (true) {
+        std::string tracker;
+        std::cout << "Add tracker (leave blank to finish): ";
+        std::getline(std::cin, tracker);
+        if (tracker.empty()) break;
+        trackers.push_back(tracker);
+    }
+
     // Get web seeds
     std::vector<std::string> web_seeds;
     while (true) {
@@ -165,7 +175,7 @@ TorrentConfig get_interactive_config() {
     return TorrentConfig(
         path,
         output,
-        default_trackers,
+        trackers, // Use user-provided trackers
         tv,
         comment.empty() ? std::nullopt : std::optional<std::string>(comment),
         is_private,
@@ -192,6 +202,12 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
     std::optional<std::string> comment = std::nullopt;
     if (result.count("comment")) {
         comment = result["comment"].as<std::string>();
+    }
+
+    // Get trackers
+    std::vector<std::string> trackers;
+    if (result.count("tracker")) {
+        trackers = result["tracker"].as<std::vector<std::string>>();
     }
 
     // Get web seeds
@@ -222,7 +238,7 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
     return TorrentConfig(
          result["path"].as<std::string>(),
         result["output"].as<std::string>(),
-        default_trackers,
+        trackers, // Use user-provided trackers
         tv,
         comment,
         result.count("private"),
@@ -243,6 +259,7 @@ int main(int argc, char* argv[]) {
             ("version", "Torrent version (1=v1, 2=v2, 3=hybrid)", cxxopts::value<std::string>()->default_value("3"), "{1,2,3}")
             ("comment", "Torrent comment", cxxopts::value<std::string>(), "COMMENT")
             ("private", "Make torrent private")
+            ("tracker", "Add tracker URL", cxxopts::value<std::vector<std::string>>(), "URL")
             ("webseed", "Add web seed URL", cxxopts::value<std::vector<std::string>>(), "URL")
             ("piece-size", "Piece size in KB", cxxopts::value<int>(), "SIZE") // New option
         ;

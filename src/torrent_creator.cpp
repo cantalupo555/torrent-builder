@@ -63,9 +63,13 @@ void TorrentCreator::create_torrent() {
             t.set_priv(true);
         }
 
-        // Add trackers
+        // Add trackers with automatic tier assignment
+        int current_tier = 0;
+        for (const auto& tracker : default_trackers) {
+            t.add_tracker(tracker, current_tier++);
+        }
         for (const auto& tracker : config_.trackers) {
-            t.add_tracker(tracker);
+            t.add_tracker(tracker, current_tier++);
         }
 
         // Add web seeds

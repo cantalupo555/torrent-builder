@@ -76,6 +76,7 @@ cmake --build .
   --version arg      Torrent version (1=v1, 2=v2, 3=hybrid) (default: 3)
   --comment arg      Torrent comment
   --private          Make torrent private
+  --tracker arg      Add tracker URL (can be used multiple times)
   --webseed arg      Add web seed URL (can be used multiple times)
   --piece-size arg   Piece size in KB (must be one of: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)
 ```
@@ -90,6 +91,14 @@ cmake --build .
 ### Create a private V2 torrent
 ```bash
 ./torrent_builder --path /data/folder --output folder.torrent --version 2 --private
+```
+
+### Add multiple trackers
+Trackers are added in ascending order of priority. The first tracker has the highest priority (tier 0).
+```bash
+./torrent_builder --path /data/file --output file.torrent \
+  --tracker udp://tracker.example.com:80 \
+  --tracker http://backup-tracker.org:6969
 ```
 
 ### Add multiple web seeds
