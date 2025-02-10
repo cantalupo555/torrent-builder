@@ -65,9 +65,14 @@ void TorrentCreator::create_torrent() {
 
         // Add trackers with automatic tier assignment
         int current_tier = 0;
-        for (const auto& tracker : default_trackers) {
-            t.add_tracker(tracker, current_tier++);
+
+        if (config_.trackers.empty()) {
+            // Only add default trackers if the user didn't provide any
+            for (const auto& tracker : default_trackers) {
+                t.add_tracker(tracker, current_tier++);
+            }
         }
+
         for (const auto& tracker : config_.trackers) {
             t.add_tracker(tracker, current_tier++);
         }
