@@ -4,6 +4,7 @@
 #include <cmath>
 #include <fstream>
 #include <sstream>
+#include <ctime>
 
 // Constructor for TorrentCreator
 TorrentCreator::TorrentCreator(const TorrentConfig& config)
@@ -89,6 +90,16 @@ void TorrentCreator::create_torrent() {
 
         // Set piece hashes. This is the computationally intensive part
         lt::set_piece_hashes(t, config_.path.parent_path().string());
+
+        if (config_.include_creation_date) {
+            t.set_creation_date(std::time(nullptr)); // Set to current time
+        } else {
+            t.set_creation_date(0); // Remove creation date
+        }
+
+        if (config_.creator) {
+            t.set_creator(config_.creator->c_str()); // Set creator string
+        }
 
         // Generate and save torrent file
         std::ofstream out(config_.output, std::ios_base::binary);
