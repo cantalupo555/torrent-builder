@@ -172,20 +172,21 @@ TorrentConfig get_interactive_config() {
         }
     }
 
+    // Get creator
+    std::string set_creator;
+    std::cout << "Set \"Torrent Builder\" as creator? (y/N): ";
+    std::getline(std::cin, set_creator);
+    std::optional<std::string> creator_str = std::nullopt;
+    if (set_creator == "y" || set_creator == "Y") {
+        creator_str = "Torrent Builder";
+    }
+
     // Get creation date
     std::string set_creation_date;
     std::cout << "Set creation date? (y/N): ";
     std::getline(std::cin, set_creation_date);
     bool include_creation_date = (set_creation_date == "y" || set_creation_date == "Y");
 
-    // Get creator
-    std::string set_creator;
-    std::cout << "Set creator string to 'Torrent Builder'? (y/N): ";
-    std::getline(std::cin, set_creator);
-    std::optional<std::string> creator_str = std::nullopt;
-    if (set_creator == "y" || set_creator == "Y") {
-        creator_str = "Torrent Builder";
-    }
 
     return TorrentConfig(
         path,
@@ -196,8 +197,9 @@ TorrentConfig get_interactive_config() {
         is_private,
         web_seeds,
         piece_size,
-        include_creation_date, // Pass creation date flag
-        creator_str // Pass creator string
+        creator_str, // Pass creator string
+        include_creation_date // Pass creation date flag
+
     );
 }
 
@@ -253,14 +255,15 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
         }
     }
 
-     // Get creation date flag
-    bool include_creation_date = result.count("creation-date") > 0;
-
     // Get creator string
     std::optional<std::string> creator_str = std::nullopt;
     if (result.count("creator")) {
         creator_str = "Torrent Builder";
     }
+
+     // Get creation date flag
+    bool include_creation_date = result.count("creation-date") > 0;
+
 
     return TorrentConfig(
          result["path"].as<std::string>(),
@@ -271,8 +274,8 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
         result.count("private"),
         web_seeds,
         piece_size,
-        include_creation_date, // Pass creation date flag
-        creator_str // Pass creator string
+        creator_str, // Pass creator string
+        include_creation_date // Pass creation date flag
     );
 }
 
@@ -291,8 +294,8 @@ int main(int argc, char* argv[]) {
             ("tracker", "Add tracker URL", cxxopts::value<std::vector<std::string>>(), "URL")
             ("webseed", "Add web seed URL", cxxopts::value<std::vector<std::string>>(), "URL")
             ("piece-size", "Piece size in KB", cxxopts::value<int>(), "SIZE")
-            ("creation-date", "Include creation date")
-            ("creator", "Set creator string to 'Torrent Builder' (optional)")
+            ("creator", "Set \"Torrent Builder\" as creator")
+            ("creation-date", "Set creation date")
         ;
 
         options.positional_help("PATH OUTPUT");

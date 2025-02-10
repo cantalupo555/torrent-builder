@@ -69,16 +69,18 @@ cmake --build .
 ## Options
 
 ```
-  -h, --help         Show help
-  -i, --interactive  Run in interactive mode
-  --path arg         Path to file or directory (required)
-  --output arg       Output torrent file path (required)
-  --version arg      Torrent version (1=v1, 2=v2, 3=hybrid) (default: 3)
-  --comment arg      Torrent comment
-  --private          Make torrent private
-  --tracker arg      Add tracker URL (can be used multiple times)
-  --webseed arg      Add web seed URL (can be used multiple times)
-  --piece-size arg   Piece size in KB (must be one of: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)
+  -h, --help                 Show help
+  -i, --interactive          Run in interactive mode
+  --path arg                 Path to file or directory (required)
+  --output arg               Output torrent file path (required)
+  --version arg              Torrent version (1=v1, 2=v2, 3=hybrid) (default: 3)
+  --comment arg              Torrent comment
+  --private                  Make torrent private
+  --tracker arg              Add tracker URL (can be used multiple times)
+  --webseed arg              Add web seed URL (can be used multiple times)
+  --piece-size arg           Piece size in KB (must be one of: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)
+  --creator                  Set creator string to 'Torrent Builder'
+  --creation-date            Include creation date
 ```
 
 ## Examples
