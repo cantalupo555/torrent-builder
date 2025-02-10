@@ -124,7 +124,11 @@ void TorrentCreator::print_torrent_summary(int64_t total_size, int piece_size, i
     // number of trackers, number of web seeds, and whether the torrent is private
     std::cout << "Total size: " << format_size(total_size) << "\n";
     std::cout << "Pieces: " << num_pieces << " of " << piece_size/1024 << "KB\n"; // Show piece_size in KB
-    std::cout << "Trackers: " << config_.trackers.size() << "\n";
+    if (config_.trackers.empty()) {
+        std::cout << "Trackers: " << default_trackers.size() << "\n";
+    } else {
+        std::cout << "Trackers: " << config_.trackers.size() << "\n";
+    }
     std::cout << "Web seeds: " << config_.web_seeds.size() << "\n";
     std::cout << "Private: " << (config_.is_private ? "Yes" : "No") << "\n";
 }
