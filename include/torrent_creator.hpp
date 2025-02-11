@@ -7,6 +7,10 @@
 #include <libtorrent/entry.hpp>
 #include <libtorrent/bencode.hpp>
 #include <libtorrent/error_code.hpp>
+// Add the following includes:
+#include <libtorrent/alert_types.hpp>
+#include <libtorrent/session.hpp>
+
 
 #include <string>
 #include <vector>
@@ -69,15 +73,18 @@ public:
 private:
     TorrentConfig config_;       // Configuration for the torrent
     lt::file_storage fs_;        // libtorrent file storage object. Stores information about the files in the torrent
+    lt::session ses; // Add a session object
 
     // Calculates a suitable piece size automatically based on total file size
     static int auto_piece_size(int64_t total_size);
     // Gets the torrent flags based on the configured version
-    int get_torrent_flags() const;
+    lt::create_flags_t get_torrent_flags() const;
     // Adds files to the file storage
     void add_files_to_storage();
     // Prints a summary of the created torrent
     void print_torrent_summary(int64_t total_size, int piece_size, int num_pieces) const;
+    // Displays a progress bar
+    void print_progress_bar(int progress, int total) const;
 };
 
 #endif // CREATE_TORRENT_HPP

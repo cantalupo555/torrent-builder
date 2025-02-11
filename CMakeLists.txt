@@ -15,7 +15,14 @@ endif()
 
 # Find libtorrent
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBTORRENT REQUIRED libtorrent-rasterbar)
+pkg_check_modules(LIBTORRENT REQUIRED libtorrent-rasterbar>=2.0)
+
+# Add compile definitions for libtorrent
+add_compile_definitions(
+    TORRENT_USE_LIBCRYPTO
+    TORRENT_USE_OPENSSL
+    TORRENT_USE_IPV6=1
+)
 
 # Add cxxopts
 include(FetchContent)
@@ -41,8 +48,13 @@ target_include_directories(torrent_builder PRIVATE
 # Link libraries
 target_link_libraries(torrent_builder PRIVATE
     ${LIBTORRENT_LIBRARIES}
+    ${LIBTORRENT_LDFLAGS}
     cxxopts::cxxopts
 )
+
+# Add compiler and linker flags
+target_compile_options(torrent_builder PRIVATE ${LIBTORRENT_CFLAGS})
+target_link_options(torrent_builder PRIVATE ${LIBTORRENT_LDFLAGS})
 
 # Installation settings (optional)
 install(TARGETS torrent_builder
