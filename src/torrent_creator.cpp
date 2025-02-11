@@ -3,9 +3,10 @@
 #include <iomanip>
 #include <cmath>
 #include <fstream>
-#include <sstream>
 #include <ctime>
 #include <thread> // Required for std::this_thread::sleep_for
+#include <format> // Adicione este include para std::format
+
 
 // Constructor for TorrentCreator
 TorrentCreator::TorrentCreator(const TorrentConfig& config)
@@ -170,9 +171,8 @@ void TorrentCreator::print_torrent_summary(int64_t total_size, int piece_size, i
             unit++;
         }
 
-        std::ostringstream oss;
-        oss << std::fixed << std::setprecision(2) << size << " " << units[unit];
-        return oss.str();
+        // Use std::format instead of stringstream
+        return std::format("{:.2f} {}", size, units[unit]);
     };
 
     // Print torrent summary details: total size, number and size of pieces,

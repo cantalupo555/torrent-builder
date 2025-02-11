@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 project(torrent_builder VERSION 1.0 LANGUAGES CXX)
 
 # Basic project settings
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 

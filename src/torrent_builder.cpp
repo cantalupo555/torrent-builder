@@ -5,8 +5,8 @@
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <cmath>
-#include <algorithm> // For std::find
 #include <regex>
+#include <ranges> // Adicione este include
 
 namespace fs = std::filesystem;
 
@@ -185,8 +185,8 @@ TorrentConfig get_interactive_config() {
                     continue;
                 }
 
-                // Check if the tracker already exists
-                if (std::find(trackers.begin(), trackers.end(), tracker) != trackers.end()) {
+                // Check if the tracker already exists using std::ranges::contains
+                if (std::ranges::contains(trackers, tracker)) {
                     std::cout << "Error: Tracker already added.\n";
                     continue;
                 }
@@ -246,8 +246,8 @@ TorrentConfig get_interactive_config() {
 
                 try {
                     int ps = std::stoi(piece_size_str);
-                    // Validate: Must be in the allowed list
-                    if (std::find(allowed_piece_sizes.begin(), allowed_piece_sizes.end(), ps) != allowed_piece_sizes.end()) {
+                    // Validate using std::ranges::contains
+                    if (std::ranges::contains(allowed_piece_sizes, ps)) {
                         piece_size = ps * 1024; // Store in bytes
                         break; // Exit the loop if input is valid
                     } else {
@@ -366,8 +366,8 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
             if (!is_valid_url(tracker)) {
                 throw std::runtime_error("Invalid tracker URL: " + tracker);
             }
-            // Check for duplicates BEFORE adding
-            if (std::find(trackers.begin(), trackers.end(), tracker) != trackers.end()) {
+            // Check for duplicates using std::ranges::contains
+            if (std::ranges::contains(trackers, tracker)) {
                 throw std::runtime_error("Duplicate tracker URL: " + tracker);
             }
         }
@@ -389,8 +389,8 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
     std::optional<int> piece_size = std::nullopt;
     if (result.count("piece-size")) {
         int ps = result["piece-size"].as<int>();
-        // Validate: Must be in the allowed list
-        if (std::find(allowed_piece_sizes.begin(), allowed_piece_sizes.end(), ps) != allowed_piece_sizes.end()) {
+        // Validate using std::ranges::contains
+        if (std::ranges::contains(allowed_piece_sizes, ps)) {
             piece_size = ps * 1024; // Store in bytes
         } else {
             std::cerr << "Error: Invalid piece size. Must be one of: ";
