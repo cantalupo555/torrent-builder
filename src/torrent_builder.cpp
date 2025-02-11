@@ -322,6 +322,25 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
         throw std::runtime_error("Output path is required");
     }
 
+    // --- Start of modification: Overwrite check ---
+    std::string output_path = result["output"].as<std::string>();
+    if (fs::exists(output_path)) {
+        while (true) {
+            std::string overwrite;
+            std::cout << "File " << output_path << " already exists. Overwrite? (y/N): ";
+            std::getline(std::cin, overwrite);
+            if (overwrite == "y" || overwrite == "Y") {
+                break; // Allow overwrite
+            } else if (overwrite == "n" || overwrite == "N" || overwrite.empty()) {
+                // Do not allow overwrite: throw exception
+                throw std::runtime_error("Output file already exists. User chose not to overwrite.");
+            } else {
+                std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
+            }
+        }
+    }
+    // --- End of modification ---
+
     // Get torrent version
     std::string version = result["version"].as<std::string>();
     TorrentVersion tv = TorrentVersion::V1;
@@ -398,7 +417,7 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
 
     return TorrentConfig(
          result["path"].as<std::string>(),
-        result["output"].as<std::string>(),
+        output_path, // Use the validated output path
         trackers, // Use user-provided trackers
         tv,
         comment,
