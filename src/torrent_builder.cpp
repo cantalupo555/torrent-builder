@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <cmath>
 #include <algorithm> // For std::find
+#include <regex>
 
 namespace fs = std::filesystem;
 
@@ -22,6 +23,14 @@ std::vector<std::string> default_trackers = {
 // List of allowed piece sizes (in KB). These are powers of 2
 const std::vector<int> allowed_piece_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768};
 
+// Function to validate URLs. Checks if the URL starts with http://, https://, or udp://
+bool is_valid_url(const std::string& url) {
+    // Simple regular expression to validate URLs.
+    static const std::regex url_regex(R"(^(http|https|udp)://.+$)", std::regex::icase);
+    return std::regex_match(url, url_regex);
+}
+
+// Get torrent configuration from user input (interactive mode)
 TorrentConfig get_interactive_config() {
     std::cout << "=== TORRENT CONFIGURATION ===" << std::endl;
 
@@ -68,7 +77,7 @@ TorrentConfig get_interactive_config() {
 
         // Check if file exists and prompt for overwrite
         if (fs::exists(output)) {
-            while(true) { // Added loop for overwrite validation
+            while(true) { // Loop for overwrite validation
                 std::string overwrite;
                 std::cout << "File " << output << " already exists. Overwrite? (y/N): ";
                 std::getline(std::cin, overwrite);
@@ -170,6 +179,18 @@ TorrentConfig get_interactive_config() {
                 std::cout << "Add tracker (leave blank to finish): ";
                 std::getline(std::cin, tracker);
                 if (tracker.empty()) break;
+
+                if (!is_valid_url(tracker)) {
+                    std::cout << "Error: Invalid tracker URL. Must start with http://, https://, or udp://\n";
+                    continue;
+                }
+
+                // Check if the tracker already exists
+                if (std::find(trackers.begin(), trackers.end(), tracker) != trackers.end()) {
+                    std::cout << "Error: Tracker already added.\n";
+                    continue;
+                }
+
                 trackers.push_back(tracker);
             }
             break;
@@ -188,6 +209,12 @@ TorrentConfig get_interactive_config() {
         std::cout << "Add web seed (leave blank to finish): ";
         std::getline(std::cin, seed);
         if (seed.empty()) break;
+
+        if (!is_valid_url(seed)) {
+            std::cout << "Error: Invalid web seed URL. Must start with http://, https://, or udp://\n";
+            continue;
+        }
+
         web_seeds.push_back(seed);
     }
 
@@ -198,7 +225,7 @@ TorrentConfig get_interactive_config() {
         std::cout << "Set custom piece size? (y/N): ";
         std::getline(std::cin, set_piece_size);
         if (set_piece_size == "y" || set_piece_size == "Y") {
-            while (true) { // Loop para repetir a pergunta
+            while (true) { // Loop to repeat the question
                 std::string piece_size_str;
                 std::cout << "Piece size in KB: \n";
 
@@ -286,6 +313,7 @@ TorrentConfig get_interactive_config() {
     );
 }
 
+// Get torrent configuration from command line arguments
 TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
     if (!result.count("path")) {
         throw std::runtime_error("Path is required");
@@ -315,15 +343,27 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
     }
     if (result.count("tracker")) {
         std::vector<std::string> custom_trackers = result["tracker"].as<std::vector<std::string>>();
+        for (const auto& tracker : custom_trackers) {
+            if (!is_valid_url(tracker)) {
+                throw std::runtime_error("Invalid tracker URL: " + tracker);
+            }
+            // Check for duplicates BEFORE adding
+            if (std::find(trackers.begin(), trackers.end(), tracker) != trackers.end()) {
+                throw std::runtime_error("Duplicate tracker URL: " + tracker);
+            }
+        }
         trackers.insert(trackers.end(), custom_trackers.begin(), custom_trackers.end());
     }
-
-
 
     // Get web seeds
     std::vector<std::string> web_seeds;
     if (result.count("webseed")) {
         web_seeds = result["webseed"].as<std::vector<std::string>>();
+        for (const auto& webseed : web_seeds) {
+            if (!is_valid_url(webseed)) {
+                throw std::runtime_error("Invalid web seed URL: " + webseed);
+            }
+        }
     }
 
     // Get and validate piece size
@@ -370,6 +410,7 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
     );
 }
 
+// Main function
 int main(int argc, char* argv[]) {
     try {
         // Define command-line options
