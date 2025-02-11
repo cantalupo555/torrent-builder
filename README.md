@@ -76,23 +76,22 @@ cmake --build .
   --version arg              Torrent version (1=v1, 2=v2, 3=hybrid) (default: 3)
   --comment arg              Torrent comment
   --private                  Make torrent private
+  --default-trackers         Use default trackers
   --tracker arg              Add tracker URL (can be used multiple times)
   --webseed arg              Add web seed URL (can be used multiple times)
   --piece-size arg           Piece size in KB (must be one of: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)
-  --creator                  Set creator string to 'Torrent Builder'
-  --creation-date            Include creation date
+  --creator                  Set "Torrent Builder" as creator
+  --creation-date            Set creation date
 ```
 
 ## Examples
 
-### Create a hybrid torrent (default)
 ```bash
-./torrent_builder --path /data/file --output file.torrent
-```
-
-### Create a private V2 torrent
-```bash
-./torrent_builder --path /data/folder --output folder.torrent --version 2 --private
+  ./torrent_builder -i
+  ./torrent_builder --path /data/file --output file.torrent
+  ./torrent_builder --path /data/file --output file.torrent --default-trackers
+  ./torrent_builder --path /data/folder --output folder.torrent --version 2 --private
+  ./torrent_builder --path /data/file --output file.torrent --piece-size 1024
 ```
 
 ### Add multiple trackers
@@ -115,10 +114,10 @@ Trackers are added in ascending order of priority. The first tracker has the hig
 ./torrent_builder --path /data/file --output file.torrent \
   --comment "My important file"
 ```
-### Create torrent with custom piece size
+
+### Create a torrent with default trackers and custom trackers
 ```bash
-./torrent_builder --path /data/file --output file.torrent \
-  --piece-size 1024
+./torrent_builder --path /data/file --output file.torrent --default-trackers --tracker udp://mytracker.com:8080
 ```
 
 ## License

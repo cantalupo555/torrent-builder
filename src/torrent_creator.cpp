@@ -67,13 +67,6 @@ void TorrentCreator::create_torrent() {
         // Add trackers with automatic tier assignment
         int current_tier = 0;
 
-        if (config_.trackers.empty()) {
-            // Only add default trackers if the user didn't provide any
-            for (const auto& tracker : default_trackers) {
-                t.add_tracker(tracker, current_tier++);
-            }
-        }
-
         for (const auto& tracker : config_.trackers) {
             t.add_tracker(tracker, current_tier++);
         }
@@ -140,11 +133,7 @@ void TorrentCreator::print_torrent_summary(int64_t total_size, int piece_size, i
     // number of trackers, number of web seeds, and whether the torrent is private
     std::cout << "Total size: " << format_size(total_size) << "\n";
     std::cout << "Pieces: " << num_pieces << " of " << piece_size/1024 << "KB\n"; // Show piece_size in KB
-    if (config_.trackers.empty()) {
-        std::cout << "Trackers: " << default_trackers.size() << "\n";
-    } else {
-        std::cout << "Trackers: " << config_.trackers.size() << "\n";
-    }
+    std::cout << "Trackers: " << config_.trackers.size() << "\n"; // Simplified tracker count
     std::cout << "Web seeds: " << config_.web_seeds.size() << "\n";
     std::cout << "Private: " << (config_.is_private ? "Yes" : "No") << "\n";
 }

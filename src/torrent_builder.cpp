@@ -118,13 +118,26 @@ TorrentConfig get_interactive_config() {
 
     // Get trackers
     std::vector<std::string> trackers;
-    while (true) {
-        std::string tracker;
-        std::cout << "Add tracker (leave blank to finish): ";
-        std::getline(std::cin, tracker);
-        if (tracker.empty()) break;
-        trackers.push_back(tracker);
+    std::string use_default;
+    std::cout << "Use default trackers? (y/N): ";
+    std::getline(std::cin, use_default);
+    if (use_default == "y" || use_default == "Y") {
+        trackers.insert(trackers.end(), default_trackers.begin(), default_trackers.end());
     }
+
+    std::string add_trackers;
+    std::cout << "Add custom trackers? (y/N): ";
+    std::getline(std::cin, add_trackers);
+    if (add_trackers == "y" || add_trackers == "Y") {
+        while (true) {
+            std::string tracker;
+            std::cout << "Add tracker (leave blank to finish): ";
+            std::getline(std::cin, tracker);
+            if (tracker.empty()) break;
+            trackers.push_back(tracker);
+        }
+    }
+
 
     // Get web seeds
     std::vector<std::string> web_seeds;
@@ -223,11 +236,19 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
         comment = result["comment"].as<std::string>();
     }
 
-    // Get trackers
+   // Get trackers
     std::vector<std::string> trackers;
-    if (result.count("tracker")) {
-        trackers = result["tracker"].as<std::vector<std::string>>();
+    bool use_default = result.count("default-trackers") > 0;
+
+    if (use_default) {
+        trackers.insert(trackers.end(), default_trackers.begin(), default_trackers.end());
     }
+    if (result.count("tracker")) {
+        std::vector<std::string> custom_trackers = result["tracker"].as<std::vector<std::string>>();
+        trackers.insert(trackers.end(), custom_trackers.begin(), custom_trackers.end());
+    }
+
+
 
     // Get web seeds
     std::vector<std::string> web_seeds;
@@ -291,26 +312,28 @@ int main(int argc, char* argv[]) {
             ("version", "Torrent version (1=v1, 2=v2, 3=hybrid)", cxxopts::value<std::string>()->default_value("3"), "{1,2,3}")
             ("comment", "Torrent comment", cxxopts::value<std::string>(), "COMMENT")
             ("private", "Make torrent private")
+            ("default-trackers", "Use default trackers")
             ("tracker", "Add tracker URL", cxxopts::value<std::vector<std::string>>(), "URL")
             ("webseed", "Add web seed URL", cxxopts::value<std::vector<std::string>>(), "URL")
             ("piece-size", "Piece size in KB", cxxopts::value<int>(), "SIZE")
             ("creator", "Set \"Torrent Builder\" as creator")
             ("creation-date", "Set creation date")
-        ;
+            ;
 
         options.positional_help("PATH OUTPUT");
         options.parse_positional({"path", "output"});
         auto result = options.parse(argc, argv);
 
-        // Parse arguments. Show help if requested or if no arguments are provided
-        // Run in interactive or command-line mode based on the arguments
+        // Help and version
         if (result.count("help") || argc == 1) {
             std::cout << options.help() << "\n";
             std::cout << "Examples:\n";
+            // Reordered examples here:
+            std::cout << "  ./torrent_builder -i\n";
             std::cout << "  ./torrent_builder --path /data/file --output file.torrent\n";
+            std::cout << "  ./torrent_builder --path /data/file --output file.torrent --default-trackers\n";
             std::cout << "  ./torrent_builder --path /data/folder --output folder.torrent --version 2 --private\n";
             std::cout << "  ./torrent_builder --path /data/file --output file.torrent --piece-size 1024\n";
-            std::cout << "  ./torrent_builder -i\n";
             return 0;
         }
 
