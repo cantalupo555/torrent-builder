@@ -6,7 +6,8 @@
 #include <filesystem>
 #include <cmath>
 #include <regex>
-#include <ranges> // Adicione este include
+#include <ranges>
+#include <stdexcept> // For std::runtime_error and std::invalid_argument
 
 namespace fs = std::filesystem;
 
@@ -56,8 +57,9 @@ TorrentConfig get_interactive_config() {
                 continue;
             }
             break;
-        } catch (const fs::filesystem_error& e) {
-            std::cout << "Error: " << e.what() << "\n";
+        } catch (const fs::filesystem_error& e) { // Catch filesystem errors
+            std::cout << "Filesystem error: " << e.what() << "\n";
+            continue; // or return, depending on how you want to handle it
         }
     }
 
@@ -105,8 +107,9 @@ TorrentConfig get_interactive_config() {
                 continue;
             }
             break;
-        } catch (const fs::filesystem_error& e) {
-            std::cout << "Error: " << e.what() << "\n";
+        } catch (const fs::filesystem_error& e) { // Catch filesystem errors
+            std::cout << "Filesystem error: " << e.what() << "\n";
+            continue;
         }
     }
 
@@ -253,8 +256,12 @@ TorrentConfig get_interactive_config() {
                     } else {
                         std::cout << "Error: Invalid piece size. Please enter a valid option.\n";
                     }
-                } catch (const std::exception& e) {
-                    std::cout << "Error: Invalid input. Please enter a number.\n";
+                } catch (const std::invalid_argument& e) { // Catch invalid argument exception
+                    std::cout << "Invalid input. Please enter a valid integer.\n";
+                    continue;
+                } catch (const std::out_of_range& e) { // Catch out of range exception
+                    std::cout << "Input out of range. Please enter a valid integer.\n";
+                    continue;
                 }
             }
             break; // Exit the outer piece_size loop
@@ -478,8 +485,17 @@ int main(int argc, char* argv[]) {
             creator.create_torrent();
         }
     }
-    catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+    catch (const fs::filesystem_error& e) {
+        std::cerr << "Filesystem error: " << e.what() << std::endl;
+        return 1;
+    } catch (const std::invalid_argument& e) {
+        std::cerr << "Invalid argument: " << e.what() << std::endl;
+        return 1;
+    } catch (const std::runtime_error& e) {
+        std::cerr << "Runtime error: " << e.what() << std::endl;
+        return 1;
+    } catch (const std::exception& e) {
+        std::cerr << "An unexpected error occurred: " << e.what() << std::endl;
         return 1;
     }
 

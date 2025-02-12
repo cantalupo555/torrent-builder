@@ -4,9 +4,10 @@
 #include <cmath>
 #include <fstream>
 #include <ctime>
-#include <thread> // Required for std::this_thread::sleep_for
-#include <format> // Adicione este include para std::format
-
+#include <thread>
+#include <format>
+#include <stdexcept> // For std::runtime_error
+#include <system_error> // For std::error_code
 
 // Constructor for TorrentCreator
 TorrentCreator::TorrentCreator(const TorrentConfig& config)
@@ -149,8 +150,11 @@ void TorrentCreator::create_torrent() {
 
         print_torrent_summary(fs_.total_size(), piece_size, t.num_pieces());
 
-    } catch (const std::exception& e) {
-        std::cerr << "Error creating torrent: " << e.what() << std::endl;
+    } catch (const std::runtime_error& e) {
+        std::cerr << "Runtime error: " << e.what() << std::endl;
+        throw;
+    } catch (const std::exception& e) { // Catch-all for other standard exceptions
+        std::cerr << "An unexpected error occurred: " << e.what() << std::endl;
         throw;
     }
 }
