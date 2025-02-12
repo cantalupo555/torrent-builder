@@ -141,22 +141,32 @@ void TorrentCreator::create_torrent() {
     try {
         log_message("Starting torrent creation for: " + config_.path.string());
         // Check available disk space
-        fs::space_info si = fs::space(config_.output.parent_path());
-        int64_t required_space = 0;
-        if (fs::is_directory(config_.path)) {
-            for (const auto& entry : fs::recursive_directory_iterator(config_.path)) {
-                if (entry.is_regular_file()) {
-                    required_space += entry.file_size();
-                }
-            }
-        } else {
-            required_space = fs::file_size(config_.path);
+        fs::path output_dir = config_.output.parent_path();
+        if (output_dir.empty()) {
+            output_dir = fs::current_path(); // Use current directory if no parent path
         }
-        
-        if (si.available < required_space * 1.1) { // 10% buffer
-            throw std::runtime_error("Not enough disk space. Required: " + 
-                std::to_string(required_space) + " bytes, Available: " + 
-                std::to_string(si.available) + " bytes");
+
+        try {
+            fs::space_info si = fs::space(output_dir);
+            int64_t required_space = 0;
+            if (fs::is_directory(config_.path)) {
+                for (const auto& entry : fs::recursive_directory_iterator(config_.path)) {
+                    if (entry.is_regular_file()) {
+                        required_space += entry.file_size();
+                    }
+                }
+            } else {
+                required_space = fs::file_size(config_.path);
+            }
+            
+            if (si.available < required_space * 1.1) { // 10% buffer
+                throw std::runtime_error("Not enough disk space. Required: " + 
+                    std::to_string(required_space) + " bytes, Available: " + 
+                    std::to_string(si.available) + " bytes");
+            }
+        } catch (const fs::filesystem_error& e) {
+            // Log the error but continue, as space check is not critical
+            log_message("Warning: Could not verify disk space: " + std::string(e.what()));
         }
 
         // Add files to the file storage
