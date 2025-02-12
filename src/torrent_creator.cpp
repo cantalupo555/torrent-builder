@@ -164,8 +164,8 @@ void TorrentCreator::create_torrent() {
                     std::to_string(required_space) + " bytes, Available: " + 
                     std::to_string(si.available) + " bytes");
             }
+            log_message("Disk space check passed. Required: " + std::to_string(required_space) + " bytes, Available: " + std::to_string(si.available) + " bytes");
         } catch (const fs::filesystem_error& e) {
-            // Log the error but continue, as space check is not critical
             log_message("Warning: Could not verify disk space: " + std::string(e.what()));
         }
 
@@ -181,6 +181,7 @@ void TorrentCreator::create_torrent() {
 
         // Set piece hashes using streaming for large files
         std::cout << "Hashing pieces...\n";
+        log_message("Starting hashing process for: " + config_.path.string());
         int num_pieces = t.num_pieces();
         
         if (fs::is_directory(config_.path)) {
@@ -240,6 +241,7 @@ void TorrentCreator::create_torrent() {
         lt::error_code ec;
         lt::set_piece_hashes(t, config_.path.parent_path().string(), progress_callback, ec);
         if (ec) {
+            log_message("Error setting piece hashes: " + ec.message());
             throw std::runtime_error("Error setting piece hashes: " + ec.message());
         }
 
@@ -250,12 +252,14 @@ void TorrentCreator::create_torrent() {
             
             // Check for user interruption
             if (std::cin.peek() == 'q' || std::cin.peek() == 'Q') {
+                log_message("Process interrupted by user");
                 throw std::runtime_error("Process interrupted by user");
             }
         }
 
         // If there was an error, throw an exception
         if (!error_message.empty()) {
+            log_message("Error during torrent creation: " + error_message);
             throw std::runtime_error(error_message);
         }
 
@@ -269,9 +273,11 @@ void TorrentCreator::create_torrent() {
 
     } catch (const std::runtime_error& e) {
         std::cerr << "Runtime error: " << e.what() << std::endl;
+        log_message("Runtime error: " + std::string(e.what()));
         throw;
     } catch (const std::exception& e) { // Catch-all for other standard exceptions
         std::cerr << "An unexpected error occurred: " << e.what() << std::endl;
+        log_message("Unexpected error: " + std::string(e.what()));
         throw;
     }
 }

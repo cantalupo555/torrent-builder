@@ -11,3 +11,6 @@ build/
 
 # Ignore generated files
 *.torrent
+
+# Ignore log files
+*.log
