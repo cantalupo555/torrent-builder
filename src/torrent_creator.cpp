@@ -1,4 +1,18 @@
 #include "torrent_creator.hpp"
+#include "constants.hpp"
+#include <fstream>
+#include <iomanip>
+#include <chrono>
+
+// Simple logging function
+void log_message(const std::string& message) {
+    auto now = std::chrono::system_clock::now();
+    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    
+    std::ofstream logfile("torrent_builder.log", std::ios_base::app);
+    logfile << std::put_time(std::localtime(&now_time_t), "%Y-%m-%d %H:%M:%S") 
+            << " - " << message << "\n";
+}
 #include <libtorrent/version.hpp>
 #include <iomanip>
 #include <cmath>
@@ -16,9 +30,11 @@ TorrentCreator::TorrentCreator(const TorrentConfig& config)
 
 // Automatically determines a suitable piece size based on the total size
 int TorrentCreator::auto_piece_size(int64_t total_size) {
-    if (total_size < 64 * 1024 * 1024) return 16 * 1024;  // Smaller files get 16KB pieces
-    if (total_size < 512 * 1024 * 1024) return 32 * 1024; // Medium files get 32KB pieces
-    return 64 * 1024; // Larger files get 64KB pieces
+    using namespace PieceSizes;
+    
+    if (total_size < 64 * 1024 * 1024) return k16KB;  // Smaller files get 16KB pieces
+    if (total_size < 512 * 1024 * 1024) return k32KB; // Medium files get 32KB pieces
+    return k64KB; // Larger files get 64KB pieces
 }
 
 // Returns flags for torrent creation based on the specified version
@@ -51,6 +67,57 @@ void TorrentCreator::add_files_to_storage() {
     }
 }
 
+// Hashing with streaming for large files
+void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size) {
+    const size_t buffer_size = 16 * 1024 * 1024; // 16MB buffer
+    std::vector<char> buffer(buffer_size);
+    std::ifstream file(path, std::ios::binary);
+    
+    if (!file) {
+        throw std::runtime_error("Failed to open file: " + path.string());
+    }
+
+    int64_t total_bytes = fs::file_size(path);
+    int64_t bytes_processed = 0;
+    lt::piece_index_t piece_index(0);
+    lt::hasher piece_hasher;
+    int bytes_in_current_piece = 0;
+
+    while (file) {
+        file.read(buffer.data(), buffer.size());
+        size_t bytes_read = file.gcount();
+        
+        // Process buffer
+        size_t remaining = bytes_read;
+        size_t offset = 0;
+        
+        while (remaining > 0) {
+            size_t chunk = std::min(remaining, static_cast<size_t>(piece_size - bytes_in_current_piece));
+            piece_hasher.update(buffer.data() + offset, chunk);
+            offset += chunk;
+            remaining -= chunk;
+            bytes_processed += chunk;
+            bytes_in_current_piece += chunk;
+            
+            if (bytes_in_current_piece == piece_size) {
+                t.set_hash(piece_index, piece_hasher.final());
+                piece_index = lt::piece_index_t(static_cast<int>(piece_index) + 1);
+                piece_hasher.reset();
+                bytes_in_current_piece = 0;
+            }
+        }
+        
+        // Update progress
+        print_progress_bar(static_cast<int>(bytes_processed / piece_size), 
+                         static_cast<int>(total_bytes / piece_size));
+    }
+
+    // Final piece if any
+    if (bytes_in_current_piece > 0) {
+        t.set_hash(piece_index, piece_hasher.final());
+    }
+}
+
 // Displays a progress bar
 void TorrentCreator::print_progress_bar(int progress, int total) const {
     const int bar_width = 50;
@@ -72,6 +139,26 @@ void TorrentCreator::print_progress_bar(int progress, int total) const {
 // Creates the torrent file
 void TorrentCreator::create_torrent() {
     try {
+        log_message("Starting torrent creation for: " + config_.path.string());
+        // Check available disk space
+        fs::space_info si = fs::space(config_.output.parent_path());
+        int64_t required_space = 0;
+        if (fs::is_directory(config_.path)) {
+            for (const auto& entry : fs::recursive_directory_iterator(config_.path)) {
+                if (entry.is_regular_file()) {
+                    required_space += entry.file_size();
+                }
+            }
+        } else {
+            required_space = fs::file_size(config_.path);
+        }
+        
+        if (si.available < required_space * 1.1) { // 10% buffer
+            throw std::runtime_error("Not enough disk space. Required: " + 
+                std::to_string(required_space) + " bytes, Available: " + 
+                std::to_string(si.available) + " bytes");
+        }
+
         // Add files to the file storage
         add_files_to_storage();
 
@@ -82,9 +169,21 @@ void TorrentCreator::create_torrent() {
         // Simplify the torrent for debugging
         lt::create_torrent t(fs_, piece_size, flags);
 
-        // Set piece hashes.  Explicitly call set_hashes.
+        // Set piece hashes using streaming for large files
         std::cout << "Hashing pieces...\n";
         int num_pieces = t.num_pieces();
+        
+        if (fs::is_directory(config_.path)) {
+            // For directories, use libtorrent's built-in hashing
+            lt::set_piece_hashes(t, config_.path.parent_path().string(), 
+                [this, num_pieces](lt::piece_index_t piece) {
+                    print_progress_bar(static_cast<int>(piece), num_pieces);
+                });
+        } else {
+            // For single large files, use our streaming hasher
+            hash_large_file(config_.path, t, piece_size);
+        }
+
 
         // Set creation date if requested
         if (config_.include_creation_date) {
@@ -134,9 +233,16 @@ void TorrentCreator::create_torrent() {
             throw std::runtime_error("Error setting piece hashes: " + ec.message());
         }
 
-        // Wait a bit to ensure all alerts are processed
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        ses.pop_alerts(&alerts); // One last check for alerts
+        // Check for user interruption
+        for (int i = 0; i < 5; ++i) { // Check for 5 seconds max
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            ses.pop_alerts(&alerts);
+            
+            // Check for user interruption
+            if (std::cin.peek() == 'q' || std::cin.peek() == 'Q') {
+                throw std::runtime_error("Process interrupted by user");
+            }
+        }
 
         // If there was an error, throw an exception
         if (!error_message.empty()) {
@@ -149,6 +255,7 @@ void TorrentCreator::create_torrent() {
         lt::bencode(std::ostream_iterator<char>(out), e);
 
         print_torrent_summary(fs_.total_size(), piece_size, t.num_pieces());
+        log_message("Torrent created successfully: " + config_.output.string());
 
     } catch (const std::runtime_error& e) {
         std::cerr << "Runtime error: " << e.what() << std::endl;

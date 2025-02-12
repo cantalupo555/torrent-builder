@@ -45,6 +45,11 @@ target_include_directories(torrent_builder PRIVATE
     ${LIBTORRENT_INCLUDE_DIRS}
 )
 
+# Add constants header
+target_sources(torrent_builder PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/constants.hpp
+)
+
 # Link libraries
 target_link_libraries(torrent_builder PRIVATE
     ${LIBTORRENT_LIBRARIES}

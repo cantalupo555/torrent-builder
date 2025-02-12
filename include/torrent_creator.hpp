@@ -85,6 +85,8 @@ private:
     void print_torrent_summary(int64_t total_size, int piece_size, int num_pieces) const;
     // Displays a progress bar
     void print_progress_bar(int progress, int total) const;
+    // Hashes large files using streaming
+    void hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size);
 };
 
 #endif // CREATE_TORRENT_HPP
