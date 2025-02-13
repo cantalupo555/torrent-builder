@@ -83,14 +83,16 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
     lt::hasher piece_hasher;
     int bytes_in_current_piece = 0;
 
+    auto start_time = std::chrono::steady_clock::now(); // Start the timer here
+
     while (file) {
         file.read(buffer.data(), buffer.size());
         size_t bytes_read = file.gcount();
-        
+
         // Process buffer
         size_t remaining = bytes_read;
         size_t offset = 0;
-        
+
         while (remaining > 0) {
             size_t chunk = std::min(remaining, static_cast<size_t>(piece_size - bytes_in_current_piece));
             piece_hasher.update(buffer.data() + offset, chunk);
@@ -98,17 +100,39 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
             remaining -= chunk;
             bytes_processed += chunk;
             bytes_in_current_piece += chunk;
-            
+
             if (bytes_in_current_piece == piece_size) {
                 t.set_hash(piece_index, piece_hasher.final());
                 piece_index = lt::piece_index_t(static_cast<int>(piece_index) + 1);
                 piece_hasher.reset();
                 bytes_in_current_piece = 0;
+                start_time = std::chrono::steady_clock::now();  // Reset timeout timer when we make progress
             }
         }
-        
+
+        // --- Check for timeout and user interruption ---
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
+
+        // Timeout after 30 seconds of no progress
+        if (elapsed.count() > 30) {
+            log_message("Hanging piece detection triggered - No progress for 30 seconds");
+            std::cerr << "\nRuntime error: Hanging piece detection activated. Check disk performance and file integrity\n";
+            std::cerr.flush(); // Force flush the error message
+            throw std::runtime_error("Hashing timeout");
+        }
+
+        // Check for user interruption
+        if (std::cin.peek() == 'q' || std::cin.peek() == 'Q' || std::cin.peek() == '\x03') { // Ctrl+C
+            log_message("Process interrupted by user");
+            std::cerr << "\nProcess interrupted by user\n";
+            std::cerr.flush(); // Force flush the error message
+            throw std::runtime_error("Process interrupted by user");
+        }
+        // --- End of timeout and user interruption check ---
+
         // Update progress
-        print_progress_bar(static_cast<int>(bytes_processed / piece_size), 
+        print_progress_bar(static_cast<int>(bytes_processed / piece_size),
                          static_cast<int>(total_bytes / piece_size));
     }
 
@@ -183,42 +207,20 @@ void TorrentCreator::create_torrent() {
         std::cout << "Hashing pieces...\n";
         log_message("Starting hashing process for: " + config_.path.string());
         int num_pieces = t.num_pieces();
-        
-        if (fs::is_directory(config_.path)) {
-            // For directories, use libtorrent's built-in hashing
-            lt::set_piece_hashes(t, config_.path.parent_path().string(), 
-                [this, num_pieces](lt::piece_index_t piece) {
-                    print_progress_bar(static_cast<int>(piece), num_pieces);
-                });
-        } else {
-            // For single large files, use our streaming hasher
-            hash_large_file(config_.path, t, piece_size);
-        }
-
-
-        // Set creation date if requested
-        if (config_.include_creation_date) {
-            t.set_creation_date(std::time(nullptr)); // Set to current time
-        } else {
-            t.set_creation_date(0); // Remove creation date
-        }
-
-        // Set creator if requested
-        if (config_.creator) {
-            t.set_creator(config_.creator->c_str()); // Set creator string
-        }
 
         // libtorrent session for alerts
         lt::add_torrent_params p;
         p.save_path = config_.output.parent_path().string(); // Where to save the torrent (and potentially resume data)
 
-        // Create a vector to store alerts
+         // Create a vector to store alerts
         std::vector<lt::alert*> alerts;
         std::string error_message; // Store any error message
+        int progress = 0; // Declare progress variable
 
         // Use a lambda for the progress callback.  Correct parameter type here:
-        auto progress_callback = [&](lt::piece_index_t piece) {
-            print_progress_bar(static_cast<int>(piece), num_pieces);
+        auto progress_callback = [&](lt::piece_index_t piece) mutable {
+            progress = static_cast<int>(piece); // Update progress
+            print_progress_bar(progress, num_pieces);
             ses.pop_alerts(&alerts);
             for (lt::alert const* a : alerts) {
                 // Check for errors
@@ -239,21 +241,71 @@ void TorrentCreator::create_torrent() {
 
         // Set the hashes with the progress callback and error code
         lt::error_code ec;
-        lt::set_piece_hashes(t, config_.path.parent_path().string(), progress_callback, ec);
+
+        if (fs::is_directory(config_.path)) {
+            // For directories, use libtorrent's built-in hashing, and the progress callback
+            lt::set_piece_hashes(t, config_.path.parent_path().string(), progress_callback, ec);
+
+        } else {
+            // For single large files, use our streaming hasher
+            hash_large_file(config_.path, t, piece_size);
+        }
+
         if (ec) {
             log_message("Error setting piece hashes: " + ec.message());
             throw std::runtime_error("Error setting piece hashes: " + ec.message());
         }
 
-        // Check for user interruption
-        for (int i = 0; i < 5; ++i) { // Check for 5 seconds max
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-            ses.pop_alerts(&alerts);
-            
-            // Check for user interruption
-            if (std::cin.peek() == 'q' || std::cin.peek() == 'Q') {
-                log_message("Process interrupted by user");
-                throw std::runtime_error("Process interrupted by user");
+        // Set creation date if requested
+        if (config_.include_creation_date) {
+            t.set_creation_date(std::time(nullptr)); // Set to current time
+        } else {
+            t.set_creation_date(0); // Remove creation date
+        }
+
+        // Set creator if requested
+        if (config_.creator) {
+            t.set_creator(config_.creator->c_str()); // Set creator string
+        }
+
+        // Check for user interruption and timeout
+        auto start_time = std::chrono::steady_clock::now();
+        bool timeout_thrown = false;
+
+        while (true) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
+
+            // Timeout after 30 seconds of no progress
+            if (elapsed.count() > 30 && !timeout_thrown) {
+                timeout_thrown = true;
+                log_message("Hashing timeout after 30 seconds");
+                std::cout << "\n"; // New line before error message
+                std::cerr << "Runtime error: Hashing timeout" << std::endl;
+                std::cerr.flush();
+                std::exit(1); // Exit immediately with error code
+            }
+
+            // Check for user interruption without blocking
+            if (std::cin.rdbuf()->in_avail() > 0) {
+                char c = std::cin.get();
+                if (c == 'q' || c == 'Q' || c == '\x03') { // Ctrl+C
+                    log_message("Process interrupted by user");
+                    std::cerr << "\nProcess interrupted by user" << std::endl;
+                    std::cerr.flush();
+                    std::exit(1);
+                }
+            }
+
+            // Check if hashing is complete (handle potential off-by-one)
+            if (progress >= num_pieces - 1) {
+                break;
+            }
+
+            // Only sleep if we're not done yet
+            if (progress < num_pieces - 1) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                ses.pop_alerts(&alerts);
             }
         }
 
@@ -264,12 +316,26 @@ void TorrentCreator::create_torrent() {
         }
 
         // Generate and save torrent file
-        std::ofstream out(config_.output, std::ios_base::binary);
-        lt::entry e = t.generate();
-        lt::bencode(std::ostream_iterator<char>(out), e);
+        try {
+            std::ofstream out(config_.output, std::ios_base::binary);
+            if (!out) {
+                throw std::runtime_error("Failed to open output file: " + config_.output.string());
+            }
 
-        print_torrent_summary(fs_.total_size(), piece_size, t.num_pieces());
-        log_message("Torrent created successfully: " + config_.output.string());
+            lt::entry e = t.generate();
+            lt::bencode(std::ostream_iterator<char>(out), e);
+
+            if (!out) {
+                throw std::runtime_error("Failed to write torrent file: " + config_.output.string());
+            }
+
+            print_torrent_summary(fs_.total_size(), piece_size, t.num_pieces());
+            log_message("Torrent created successfully: " + config_.output.string());
+            log_message("Torrent size: " + std::to_string(fs::file_size(config_.output)) + " bytes");
+        } catch (const std::exception& e) {
+            log_message("Error saving torrent file: " + std::string(e.what()));
+            throw;
+        }
 
     } catch (const std::runtime_error& e) {
         std::cerr << "Runtime error: " << e.what() << std::endl;
