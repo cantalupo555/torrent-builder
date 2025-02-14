@@ -31,10 +31,19 @@ TorrentCreator::TorrentCreator(const TorrentConfig& config)
 // Automatically determines a suitable piece size based on the total size
 int TorrentCreator::auto_piece_size(int64_t total_size) {
     using namespace PieceSizes;
-    
-    if (total_size < 64 * 1024 * 1024) return k16KB;  // Smaller files get 16KB pieces
-    if (total_size < 512 * 1024 * 1024) return k32KB; // Medium files get 32KB pieces
-    return k64KB; // Larger files get 64KB pieces
+
+    if (total_size < 64LL * 1024 * 1024) return k16KB;        // < 64MB: 16KB
+    if (total_size < 128LL * 1024 * 1024) return k32KB;       // < 128MB: 32KB
+    if (total_size < 256LL * 1024 * 1024) return k64KB;       // < 256MB: 64KB
+    if (total_size < 512LL * 1024 * 1024) return k128KB;      // < 512MB: 128KB
+    if (total_size < 1LL * 1024 * 1024 * 1024) return k256KB;   // < 1GB: 256KB
+    if (total_size < 2LL * 1024 * 1024 * 1024) return k512KB;   // < 2GB: 512KB
+    if (total_size < 4LL * 1024 * 1024 * 1024) return k1024KB;  // < 4GB: 1MB
+    if (total_size < 8LL * 1024 * 1024 * 1024) return k2048KB;  // < 8GB: 2MB
+    if (total_size < 16LL * 1024 * 1024 * 1024) return k4096KB; // < 16GB: 4MB
+    if (total_size < 32LL * 1024 * 1024 * 1024) return k8192KB; // < 32GB: 8MB
+    if (total_size < 64LL * 1024 * 1024 * 1024) return k16384KB; // < 64GB: 16MB
+    return k32768KB; // >= 64GB: 32MB
 }
 
 // Returns flags for torrent creation based on the specified version
@@ -69,10 +78,10 @@ void TorrentCreator::add_files_to_storage() {
 
 // Hashing with streaming for large files
 void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size) {
-    const size_t buffer_size = 16 * 1024 * 1024; // 16MB buffer
+    const size_t buffer_size = PieceSizes::k16384KB; // 16MB buffer
     std::vector<char> buffer(buffer_size);
     std::ifstream file(path, std::ios::binary);
-    
+
     if (!file) {
         throw std::runtime_error("Failed to open file: " + path.string());
     }
@@ -371,7 +380,7 @@ void TorrentCreator::print_torrent_summary(int64_t total_size, int piece_size, i
     // Print torrent summary details: total size, number and size of pieces,
     // number of trackers, number of web seeds, and whether the torrent is private
     std::cout << "Total size: " << format_size(total_size) << "\n";
-    std::cout << "Pieces: " << num_pieces << " of " << piece_size/1024 << "KB\n"; // Show piece_size in KB
+    std::cout << "Pieces: " << num_pieces << " of " << piece_size / 1024 << "KB\n"; // Show piece_size in KB
     std::cout << "Trackers: " << config_.trackers.size() << "\n"; // Simplified tracker count
     std::cout << "Web seeds: " << config_.web_seeds.size() << "\n";
     std::cout << "Private: " << (config_.is_private ? "Yes" : "No") << "\n";
