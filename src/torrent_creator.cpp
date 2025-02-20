@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iomanip>
 #include <chrono>
+#include <format>
 
 // Simple logging function
 void log_message(const std::string& message) {
@@ -92,7 +93,9 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
     lt::hasher piece_hasher;
     int bytes_in_current_piece = 0;
 
-    auto start_time = std::chrono::steady_clock::now(); // Start the timer here
+    auto start_time = std::chrono::steady_clock::now(); // Start time
+    double speed = 0.0;
+    double eta = 0.0;
 
     while (file) {
         file.read(buffer.data(), buffer.size());
@@ -115,7 +118,20 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
                 piece_index = lt::piece_index_t(static_cast<int>(piece_index) + 1);
                 piece_hasher.reset();
                 bytes_in_current_piece = 0;
-                start_time = std::chrono::steady_clock::now();  // Reset timeout timer when we make progress
+
+                // Calculate speed and ETA
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+                if (elapsed > 0) {
+                    speed = static_cast<double>(bytes_processed) / elapsed; // bytes per second
+                    double remaining_bytes = total_bytes - bytes_processed;
+                    eta = remaining_bytes / speed; // in seconds
+                }
+
+                // Update progress bar
+                print_progress_bar(static_cast<int>(bytes_processed / piece_size),
+                                 static_cast<int>(total_bytes / piece_size),
+                                 speed, eta, bytes_processed, total_bytes);
             }
         }
 
@@ -123,39 +139,43 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
 
-        // Timeout after 30 seconds of no progress
         if (elapsed.count() > 30) {
             log_message("Hanging piece detection triggered - No progress for 30 seconds");
             std::cerr << "\nRuntime error: Hanging piece detection activated. Check disk performance and file integrity\n";
-            std::cerr.flush(); // Force flush the error message
+            std::cerr.flush();
             throw std::runtime_error("Hashing timeout");
         }
 
-        // Check for user interruption
-        if (std::cin.peek() == 'q' || std::cin.peek() == 'Q' || std::cin.peek() == '\x03') { // Ctrl+C
+        if (std::cin.peek() == 'q' || std::cin.peek() == 'Q' || std::cin.peek() == '\x03') {
             log_message("Process interrupted by user");
             std::cerr << "\nProcess interrupted by user\n";
-            std::cerr.flush(); // Force flush the error message
+            std::cerr.flush();
             throw std::runtime_error("Process interrupted by user");
         }
         // --- End of timeout and user interruption check ---
-
-        // Update progress
-        print_progress_bar(static_cast<int>(bytes_processed / piece_size),
-                         static_cast<int>(total_bytes / piece_size));
     }
 
     // Final piece if any
     if (bytes_in_current_piece > 0) {
         t.set_hash(piece_index, piece_hasher.final());
     }
+
+    // Update final progress bar
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+    if (elapsed > 0) {
+        speed = static_cast<double>(bytes_processed) / elapsed;
+    }
+    print_progress_bar(static_cast<int>(bytes_processed / piece_size),
+                     static_cast<int>(total_bytes / piece_size),
+                     speed, 0.0, bytes_processed, total_bytes);
 }
 
 // Displays a progress bar
-void TorrentCreator::print_progress_bar(int progress, int total) const {
+void TorrentCreator::print_progress_bar(int progress, int total, double speed, double eta, int64_t processed, int64_t total_size) const {
     const int bar_width = 50;
     float progress_percentage = static_cast<float>(progress) / total;
-    int filled_width = static_cast<int>(round(bar_width * progress_percentage));
+    int filled_width = static_cast<int>(std::round(bar_width * progress_percentage));
 
     std::cout << "[";
     for (int i = 0; i < bar_width; ++i) {
@@ -165,8 +185,40 @@ void TorrentCreator::print_progress_bar(int progress, int total) const {
             std::cout << " ";
         }
     }
-    std::cout << "] " << static_cast<int>(progress_percentage * 100) << "%\r";
+    std::cout << "] " << static_cast<int>(progress_percentage * 100) << "% ";
+
+    // Display processed data / total
+    std::cout << format_size(processed) << " / " << format_size(total_size) << " ";
+
+    // Display speed
+    std::cout << "Speed: " << format_speed(speed) << " ";
+
+    // Display ETA
+    std::cout << "ETA: " << format_eta(eta) << "\r";
     std::cout.flush();
+}
+
+std::string TorrentCreator::format_size(int64_t bytes) const {
+    const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+    int unit = 0;
+    double size = static_cast<double>(bytes);
+
+    while (size >= 1024 && unit < 4) {
+        size /= 1024;
+        unit++;
+    }
+    return std::format("{:.2f} {}", size, units[unit]);
+}
+
+std::string TorrentCreator::format_speed(double speed) const {
+    double mb_per_sec = speed / (1024 * 1024);
+    return std::format("{:.2f} MB/s", mb_per_sec);
+}
+
+std::string TorrentCreator::format_eta(double eta) const {
+    int minutes = static_cast<int>(eta / 60);
+    int seconds = static_cast<int>(eta) % 60;
+    return std::format("{}m {}s", minutes, seconds);
 }
 
 // Creates the torrent file
@@ -217,22 +269,45 @@ void TorrentCreator::create_torrent() {
         log_message("Starting hashing process for: " + config_.path.string());
         int num_pieces = t.num_pieces();
 
-        // libtorrent session for alerts
+        // Declaração de variáveis para rastrear o progresso e tempo
+        auto start_time = std::chrono::steady_clock::now();
+        double speed = 0.0;
+        double eta = 0.0;
+        int64_t total_size = fs_.total_size(); // Total size in bytes
+        int64_t piece_size_bytes = piece_size; // Piece size in bytes
         lt::add_torrent_params p;
-        p.save_path = config_.output.parent_path().string(); // Where to save the torrent (and potentially resume data)
+        p.save_path = config_.output.parent_path().string(); // Where to save the torrent
 
-         // Create a vector to store alerts
+        // Vector to store alerts
         std::vector<lt::alert*> alerts;
-        std::string error_message; // Store any error message
-        int progress = 0; // Declare progress variable
+        std::string error_message; // To store error messages
+        int progress = 0; // Progress variable
 
-        // Use a lambda for the progress callback.  Correct parameter type here:
+        // Define the progress_callback with additional calculations
         auto progress_callback = [&](lt::piece_index_t piece) mutable {
             progress = static_cast<int>(piece); // Update progress
-            print_progress_bar(progress, num_pieces);
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+            
+            if (elapsed > 0) {
+                // Calculate speed in pieces per second
+                double pieces_per_second = static_cast<double>(progress) / elapsed;
+                // Estimate bytes processed
+                int64_t processed = progress * piece_size_bytes;
+                // Calculate speed in bytes per second
+                speed = static_cast<double>(processed) / elapsed;
+                // Estimate ETA in seconds
+                int remaining_pieces = num_pieces - progress;
+                eta = (pieces_per_second > 0) ? (remaining_pieces / pieces_per_second) : 0.0;
+            } else {
+                speed = 0.0;
+                eta = 0.0;
+            }
+
+            // Call print_progress_bar with all six arguments
+            print_progress_bar(progress, num_pieces, speed, eta, progress * piece_size_bytes, total_size);
             ses.pop_alerts(&alerts);
             for (lt::alert const* a : alerts) {
-                // Check for errors
                 if (auto const* te = lt::alert_cast<lt::torrent_error_alert>(a)) {
                     error_message = "Torrent error: " + te->error.message();
                 }
@@ -241,9 +316,6 @@ void TorrentCreator::create_torrent() {
                 }
                 if (auto const* srdf = lt::alert_cast<lt::save_resume_data_failed_alert>(a)) {
                     error_message = "Save resume data failed: " + srdf->error.message();
-                }
-                if (lt::alert_cast<lt::save_resume_data_alert>(a)) {
-                    // This is just informational, no action needed
                 }
             }
         };
@@ -278,12 +350,12 @@ void TorrentCreator::create_torrent() {
         }
 
         // Check for user interruption and timeout
-        auto start_time = std::chrono::steady_clock::now();
+        auto loop_start_time = std::chrono::steady_clock::now();
         bool timeout_thrown = false;
 
         while (true) {
             auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - loop_start_time);
 
             // Timeout after 30 seconds of no progress
             if (elapsed.count() > 30 && !timeout_thrown) {

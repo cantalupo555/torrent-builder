@@ -84,7 +84,10 @@ private:
     // Prints a summary of the created torrent
     void print_torrent_summary(int64_t total_size, int piece_size, int num_pieces) const;
     // Displays a progress bar
-    void print_progress_bar(int progress, int total) const;
+    void print_progress_bar(int progress, int total, double speed, double eta, int64_t processed, int64_t total_size) const;
+    std::string format_size(int64_t bytes) const;
+    std::string format_speed(double speed) const;
+    std::string format_eta(double eta) const;
     // Hashes large files using streaming
     void hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size);
 };
