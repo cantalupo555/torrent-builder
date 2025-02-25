@@ -47,7 +47,7 @@ TorrentConfig get_interactive_config() {
         try {
             // Check if the path exists
             if (!fs::exists(path)) {
-                std::cout << "Error: Path does not exist\n";
+                std::cout << "Error: The specified path does not exist. Please check the path and try again.\n";
                 continue;
             }
             // Check if we have read permissions
@@ -57,9 +57,9 @@ TorrentConfig get_interactive_config() {
                 continue;
             }
             break;
-        } catch (const fs::filesystem_error& e) { // Catch filesystem errors
+        } catch (const fs::filesystem_error& e) {
             std::cout << "Filesystem error: " << e.what() << "\n";
-            continue; // or return, depending on how you want to handle it
+            continue;
         }
     }
 
@@ -107,7 +107,7 @@ TorrentConfig get_interactive_config() {
                 continue;
             }
             break;
-        } catch (const fs::filesystem_error& e) { // Catch filesystem errors
+        } catch (const fs::filesystem_error& e) {
             std::cout << "Filesystem error: " << e.what() << "\n";
             continue;
         }
@@ -340,7 +340,7 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
                 break; // Allow overwrite
             } else if (overwrite == "n" || overwrite == "N" || overwrite.empty()) {
                 // Do not allow overwrite: throw exception
-                throw std::runtime_error("Output file already exists. User chose not to overwrite.");
+                throw std::filesystem::filesystem_error("Output file already exists. User chose not to overwrite.", std::error_code());
             } else {
                 std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
             }
@@ -486,7 +486,7 @@ int main(int argc, char* argv[]) {
         }
     }
     catch (const fs::filesystem_error& e) {
-        std::cerr << "Filesystem error: " << e.what() << std::endl;
+        std::cerr << "Error: The specified path does not exist. Please check the path and try again." << std::endl;
         return 1;
     } catch (const std::invalid_argument& e) {
         std::cerr << "Invalid argument: " << e.what() << std::endl;

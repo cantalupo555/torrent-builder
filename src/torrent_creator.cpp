@@ -252,6 +252,8 @@ void TorrentCreator::create_torrent() {
             log_message("Disk space check passed. Required: " + std::to_string(required_space) + " bytes, Available: " + std::to_string(si.available) + " bytes");
         } catch (const fs::filesystem_error& e) {
             log_message("Warning: Could not verify disk space: " + std::string(e.what()));
+        } catch (const std::exception& e) {
+            log_message("Warning: Could not verify disk space: " + std::string(e.what()));
         }
 
         // Add files to the file storage
@@ -334,7 +336,7 @@ void TorrentCreator::create_torrent() {
 
         if (ec) {
             log_message("Error setting piece hashes: " + ec.message());
-            throw std::runtime_error("Error setting piece hashes: " + ec.message());
+            throw std::filesystem::filesystem_error("Error setting piece hashes: " + ec.message(), ec);
         }
 
         // Set creation date if requested

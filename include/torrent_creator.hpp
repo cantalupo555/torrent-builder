@@ -56,8 +56,9 @@ struct TorrentConfig {
           creator(creator), include_creation_date(include_creation_date) // Initialize new members
     {
         // Validate that the provided path exists. Throws an exception if not
-        if (!fs::exists(path)) {
-            throw std::runtime_error("Invalid path: " + path.string());
+        std::error_code ec;
+        if (!fs::exists(path, ec)) {
+            throw std::filesystem::filesystem_error("Error: The specified path does not exist. Please check the path and try again.", ec);
         }
     }
 };
