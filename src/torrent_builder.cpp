@@ -444,17 +444,17 @@ int main(int argc, char* argv[]) {
         options.add_options()
             ("h,help", "Show help")
             ("i,interactive", "Run in interactive mode")
-            ("path", "Path to file or directory", cxxopts::value<std::string>(), "PATH")
-            ("output", "Output torrent file path", cxxopts::value<std::string>(), "OUTPUT")
-            ("version", "Torrent version (1=v1, 2=v2, 3=hybrid)", cxxopts::value<std::string>()->default_value("3"), "{1,2,3}")
-            ("comment", "Torrent comment", cxxopts::value<std::string>(), "COMMENT")
+            ("v,version", "Torrent version (1=v1, 2=v2, 3=hybrid)", cxxopts::value<std::string>()->default_value("3"), "{1,2,3}")
+            ("c,comment", "Torrent comment", cxxopts::value<std::string>(), "COMMENT")
             ("private", "Make torrent private")
             ("default-trackers", "Use default trackers")
-            ("tracker", "Add tracker URL", cxxopts::value<std::vector<std::string>>(), "URL")
-            ("webseed", "Add web seed URL", cxxopts::value<std::vector<std::string>>(), "URL")
-            ("piece-size", "Piece size in KB", cxxopts::value<int>(), "SIZE")
+            ("t,tracker", "Add tracker URL", cxxopts::value<std::vector<std::string>>(), "URL")
+            ("w,webseed", "Add web seed URL", cxxopts::value<std::vector<std::string>>(), "URL")
+            ("s,piece-size", "Piece size in KB", cxxopts::value<int>(), "SIZE")
             ("creator", "Set \"Torrent Builder\" as creator")
             ("creation-date", "Set creation date")
+            ("p,path", "Path to file or directory", cxxopts::value<std::string>(), "PATH")
+            ("o,output", "Output torrent file path", cxxopts::value<std::string>(), "OUTPUT")
             ;
 
         options.positional_help("PATH OUTPUT");
@@ -467,7 +467,7 @@ int main(int argc, char* argv[]) {
             std::cout << "Examples:\n";
             // Reordered examples here:
             std::cout << "  ./torrent_builder -i\n";
-            std::cout << "  ./torrent_builder --path /data/file --output file.torrent\n";
+            std::cout << "  ./torrent_builder -p /data/file -o file.torrent\n";
             std::cout << "  ./torrent_builder --path /data/file --output file.torrent --default-trackers\n";
             std::cout << "  ./torrent_builder --path /data/folder --output folder.torrent --version 2 --private\n";
             std::cout << "  ./torrent_builder --path /data/file --output file.torrent --piece-size 1024\n";
