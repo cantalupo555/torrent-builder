@@ -422,18 +422,22 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
     bool include_creation_date = result.count("creation-date") > 0;
 
 
-    return TorrentConfig(
-         result["path"].as<std::string>(),
-        output_path, // Use the validated output path
-        trackers, // Use user-provided trackers
-        tv,
-        comment,
-        result.count("private"),
-        web_seeds,
-        piece_size,
-        creator_str, // Pass creator string
-        include_creation_date // Pass creation date flag
-    );
+    try {
+        return TorrentConfig(
+            result["path"].as<std::string>(),
+            output_path, // Use the validated output path
+            trackers, // Use user-provided trackers
+            tv,
+            comment,
+            result.count("private"),
+            web_seeds,
+            piece_size,
+            creator_str, // Pass creator string
+            include_creation_date // Pass creation date flag
+        );
+    } catch (const fs::filesystem_error& e) {
+        throw std::runtime_error("Error: The specified path does not exist. Please check the path and try again.");
+    }
 }
 
 // Main function
@@ -484,9 +488,8 @@ int main(int argc, char* argv[]) {
             TorrentCreator creator(config);
             creator.create_torrent();
         }
-    }
-    catch (const fs::filesystem_error& e) {
-        std::cerr << "Error: The specified path does not exist. Please check the path and try again." << std::endl;
+    } catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << e.what() << std::endl;
         return 1;
     } catch (const std::invalid_argument& e) {
         std::cerr << e.what() << std::endl;
