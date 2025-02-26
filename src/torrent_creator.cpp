@@ -427,7 +427,7 @@ void TorrentCreator::create_torrent() {
         }
 
     } catch (const std::runtime_error& e) {
-        std::cerr << "Runtime error: " << e.what() << std::endl;
+        std::cerr << e.what() << std::endl;
         log_message("Runtime error: " + std::string(e.what()));
         throw;
     } catch (const std::exception& e) { // Catch-all for other standard exceptions

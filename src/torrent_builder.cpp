@@ -340,7 +340,7 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
                 break; // Allow overwrite
             } else if (overwrite == "n" || overwrite == "N" || overwrite.empty()) {
                 // Do not allow overwrite: throw exception
-                throw std::filesystem::filesystem_error("Output file already exists. User chose not to overwrite.", std::error_code());
+                throw std::runtime_error("Warning: Output file '" + output_path + "' already exists. User chose not to overwrite. Aborting.");
             } else {
                 std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
             }
@@ -489,10 +489,10 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: The specified path does not exist. Please check the path and try again." << std::endl;
         return 1;
     } catch (const std::invalid_argument& e) {
-        std::cerr << "Invalid argument: " << e.what() << std::endl;
+        std::cerr << e.what() << std::endl;
         return 1;
     } catch (const std::runtime_error& e) {
-        std::cerr << "Runtime error: " << e.what() << std::endl;
+        std::cerr << e.what() << std::endl;
         return 1;
     } catch (const std::exception& e) {
         std::cerr << "An unexpected error occurred: " << e.what() << std::endl;
