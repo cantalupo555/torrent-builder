@@ -266,6 +266,12 @@ void TorrentCreator::create_torrent() {
         // Simplify the torrent for debugging
         lt::create_torrent t(fs_, piece_size, flags);
 
+        // Add trackers to create_torrent object
+        int tier = 0;
+        for (const auto& tracker : config_.trackers) {
+            t.add_tracker(tracker, tier++);
+        }
+
         // Set piece hashes using streaming for large files
         std::cout << "Hashing pieces...\n";
         log_message("Starting hashing process for: " + config_.path.string());
