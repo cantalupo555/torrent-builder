@@ -454,7 +454,7 @@ int main(int argc, char* argv[]) {
             ("default-trackers", "Use default trackers")
             ("t,tracker", "Add tracker URL", cxxopts::value<std::vector<std::string>>(), "URL")
             ("w,webseed", "Add web seed URL", cxxopts::value<std::vector<std::string>>(), "URL")
-            ("s,piece-size", "Piece size in KB", cxxopts::value<int>(), "SIZE")
+            ("s,piece-size", "Piece size in KB (allowed: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)", cxxopts::value<int>(), "SIZE")
             ("creator", "Set \"Torrent Builder\" as creator")
             ("creation-date", "Set creation date")
             ("p,path", "Path to file or directory", cxxopts::value<std::string>(), "PATH")
@@ -475,6 +475,7 @@ int main(int argc, char* argv[]) {
             std::cout << "  ./torrent_builder --path /data/file --output file.torrent --default-trackers\n";
             std::cout << "  ./torrent_builder --path /data/folder --output folder.torrent --version 2 --private\n";
             std::cout << "  ./torrent_builder --path /data/file --output file.torrent --piece-size 1024\n";
+            std::cout << "\nNote: Allowed piece sizes (in KB): 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768\n";
             return 0;
         }
 
