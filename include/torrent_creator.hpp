@@ -11,6 +11,13 @@
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/session.hpp>
 
+// Enum for log levels
+enum class LogLevel {
+    INFO,
+    WARNING,
+    ERROR
+};
+
 #include <thread>
 #include <mutex>
 #include <vector>

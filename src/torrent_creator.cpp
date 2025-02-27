@@ -5,14 +5,23 @@
 #include <chrono>
 #include <format>
 
-// Simple logging function
-void log_message(const std::string& message) {
+// Logging function with levels
+void log_message(const std::string& message, LogLevel level = LogLevel::INFO) {
     auto now = std::chrono::system_clock::now();
     auto now_time_t = std::chrono::system_clock::to_time_t(now);
     
     std::ofstream logfile("torrent_builder.log", std::ios_base::app);
+    
+    // Get level string
+    std::string level_str;
+    switch(level) {
+        case LogLevel::INFO: level_str = "INFO"; break;
+        case LogLevel::WARNING: level_str = "WARNING"; break;
+        case LogLevel::ERROR: level_str = "ERROR"; break;
+    }
+    
     logfile << std::put_time(std::localtime(&now_time_t), "%Y-%m-%d %H:%M:%S") 
-            << " - " << message << "\n";
+            << " [" << level_str << "] - " << message << "\n";
 }
 #include <libtorrent/version.hpp>
 #include <iomanip>
@@ -231,14 +240,14 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
 
         if (elapsed.count() > 30) {
-            log_message("Hanging piece detection triggered - No progress for 30 seconds");
+            log_message("Hanging piece detection triggered - No progress for 30 seconds", LogLevel::WARNING);
             std::cerr << "\nRuntime error: Hanging piece detection activated. Check disk performance and file integrity\n";
             std::cerr.flush();
             throw std::runtime_error("Hashing timeout");
         }
 
         if (std::cin.peek() == 'q' || std::cin.peek() == 'Q' || std::cin.peek() == '\x03') {
-            log_message("Process interrupted by user");
+            log_message("Process interrupted by user", LogLevel::WARNING);
             std::cerr << "\nProcess interrupted by user\n";
             std::cerr.flush();
             throw std::runtime_error("Process interrupted by user");
@@ -315,7 +324,7 @@ std::string TorrentCreator::format_eta(double eta) const {
 // Creates the torrent file
 void TorrentCreator::create_torrent() {
     try {
-        log_message("Starting torrent creation for: " + config_.path.string());
+        log_message("Starting torrent creation for: " + config_.path.string(), LogLevel::INFO);
         // Check available disk space
         fs::path output_dir = config_.output.parent_path();
         if (output_dir.empty()) {
@@ -340,9 +349,9 @@ void TorrentCreator::create_torrent() {
                     std::to_string(required_space) + " bytes, Available: " + 
                     std::to_string(si.available) + " bytes");
             }
-            log_message("Disk space check passed. Required: " + std::to_string(required_space) + " bytes, Available: " + std::to_string(si.available) + " bytes");
+            log_message("Disk space check passed. Required: " + std::to_string(required_space) + " bytes, Available: " + std::to_string(si.available) + " bytes", LogLevel::INFO);
         } catch (const fs::filesystem_error& e) {
-            log_message("Warning: Could not verify disk space: " + std::string(e.what()));
+            log_message("Could not verify disk space: " + std::string(e.what()), LogLevel::WARNING);
         } catch (const std::exception& e) {
             log_message("Warning: Could not verify disk space: " + std::string(e.what()));
         }
@@ -365,7 +374,7 @@ void TorrentCreator::create_torrent() {
 
         // Set piece hashes using streaming for large files
         std::cout << "Hashing pieces...\n";
-        log_message("Starting hashing process for: " + config_.path.string());
+        log_message("Starting hashing process for: " + config_.path.string(), LogLevel::INFO);
         int num_pieces = t.num_pieces();
 
         // Declaração de variáveis para rastrear o progresso e tempo
@@ -436,7 +445,7 @@ void TorrentCreator::create_torrent() {
         }
 
         if (ec) {
-            log_message("Error setting piece hashes: " + ec.message());
+            log_message("Error setting piece hashes: " + ec.message(), LogLevel::ERROR);
             throw std::filesystem::filesystem_error("Error setting piece hashes: " + ec.message(), ec);
         }
 
@@ -463,7 +472,7 @@ void TorrentCreator::create_torrent() {
             // Timeout after 30 seconds of no progress
             if (elapsed.count() > 30 && !timeout_thrown) {
                 timeout_thrown = true;
-                log_message("Hashing timeout after 30 seconds");
+                log_message("Hashing timeout after 30 seconds", LogLevel::ERROR);
                 std::cout << "\n"; // New line before error message
                 std::cerr << "Runtime error: Hashing timeout" << std::endl;
                 std::cerr.flush();
@@ -474,7 +483,7 @@ void TorrentCreator::create_torrent() {
             if (std::cin.rdbuf()->in_avail() > 0) {
                 char c = std::cin.get();
                 if (c == 'q' || c == 'Q' || c == '\x03') { // Ctrl+C
-                    log_message("Process interrupted by user");
+                    log_message("Process interrupted by user", LogLevel::WARNING);
                     std::cerr << "\nProcess interrupted by user" << std::endl;
                     std::cerr.flush();
                     std::exit(1);
@@ -495,7 +504,7 @@ void TorrentCreator::create_torrent() {
 
         // If there was an error, throw an exception
         if (!error_message.empty()) {
-            log_message("Error during torrent creation: " + error_message);
+            log_message("Error during torrent creation: " + error_message, LogLevel::ERROR);
             throw std::runtime_error(error_message);
         }
 
@@ -514,20 +523,20 @@ void TorrentCreator::create_torrent() {
             }
 
             print_torrent_summary(fs_.total_size(), piece_size, t.num_pieces());
-            log_message("Torrent created successfully: " + config_.output.string());
-            log_message("Torrent size: " + std::to_string(fs::file_size(config_.output)) + " bytes");
+            log_message("Torrent created successfully: " + config_.output.string(), LogLevel::INFO);
+            log_message("Torrent size: " + std::to_string(fs::file_size(config_.output)) + " bytes", LogLevel::INFO);
         } catch (const std::exception& e) {
-            log_message("Error saving torrent file: " + std::string(e.what()));
+            log_message("Error saving torrent file: " + std::string(e.what()), LogLevel::ERROR);
             throw;
         }
 
     } catch (const std::runtime_error& e) {
         std::cerr << e.what() << std::endl;
-        log_message("Runtime error: " + std::string(e.what()));
+        log_message("Runtime error: " + std::string(e.what()), LogLevel::ERROR);
         throw;
     } catch (const std::exception& e) { // Catch-all for other standard exceptions
         std::cerr << "An unexpected error occurred: " << e.what() << std::endl;
-        log_message("Unexpected error: " + std::string(e.what()));
+        log_message("Unexpected error: " + std::string(e.what()), LogLevel::ERROR);
         throw;
     }
 }
