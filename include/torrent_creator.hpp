@@ -11,7 +11,9 @@
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/session.hpp>
 
-
+#include <thread>
+#include <mutex>
+#include <vector>
 #include <string>
 #include <vector>
 #include <optional>
@@ -75,6 +77,8 @@ private:
     TorrentConfig config_;       // Configuration for the torrent
     lt::file_storage fs_;        // libtorrent file storage object. Stores information about the files in the torrent
     lt::session ses; // Add a session object
+    std::mutex progress_mutex_; // To synchronize progress between threads
+    int64_t total_processed_ = 0; // Total bytes processed
 
     // Calculates a suitable piece size automatically based on total file size
     static int auto_piece_size(int64_t total_size);
@@ -91,6 +95,9 @@ private:
     std::string format_eta(double eta) const;
     // Hashes large files using streaming
     void hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size);
+    // Parallel hashing
+    void hash_large_file_parallel(const fs::path& path, lt::create_torrent& t, int piece_size);
+    void hash_block(const fs::path& path, lt::create_torrent& t, int piece_size, int64_t start_offset, int64_t end_offset, std::mutex& mutex);
 };
 
 #endif // CREATE_TORRENT_HPP

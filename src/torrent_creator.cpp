@@ -78,6 +78,97 @@ void TorrentCreator::add_files_to_storage() {
 }
 
 // Hashing with streaming for large files
+void TorrentCreator::hash_large_file_parallel(const fs::path& path, lt::create_torrent& t, int piece_size) {
+    const int64_t file_size = fs::file_size(path);
+    const int num_threads = std::thread::hardware_concurrency(); // Number of available threads
+    const int64_t block_size = (file_size / num_threads) + 1; // Size of each block
+
+    std::vector<std::thread> threads;
+    std::mutex mutex; // To synchronize access to object `t`
+
+    for (int i = 0; i < num_threads; ++i) {
+        int64_t start_offset = i * block_size;
+        int64_t end_offset = std::min(start_offset + block_size, file_size);
+
+        threads.emplace_back(&TorrentCreator::hash_block, this, path, std::ref(t), piece_size, start_offset, end_offset, std::ref(mutex));
+    }
+
+    // Wait for all threads to finish
+    for (auto& thread : threads) {
+        thread.join();
+    }
+}
+
+void TorrentCreator::hash_block(const fs::path& path, lt::create_torrent& t, int piece_size, int64_t start_offset, int64_t end_offset, std::mutex& mutex) {
+    const size_t buffer_size = PieceSizes::k16384KB; // 16MB buffer
+    std::vector<char> buffer(buffer_size);
+    std::ifstream file(path, std::ios::binary);
+
+    if (!file) {
+        throw std::runtime_error("Failed to open file: " + path.string());
+    }
+
+    file.seekg(start_offset); // Position the file at the start of the block
+
+    int64_t bytes_processed = 0;
+    lt::piece_index_t piece_index(static_cast<int>(start_offset / piece_size));
+    lt::hasher piece_hasher;
+    int bytes_in_current_piece = 0;
+    
+    // Add these variables
+    int64_t file_size = fs::file_size(path);
+    auto start_time = std::chrono::steady_clock::now();
+
+    while (file && (start_offset + bytes_processed) < end_offset) {
+        size_t bytes_to_read = std::min(buffer_size, static_cast<size_t>(end_offset - (start_offset + bytes_processed)));
+        file.read(buffer.data(), bytes_to_read);
+        size_t bytes_read = file.gcount();
+
+        // Process the buffer
+        size_t remaining = bytes_read;
+        size_t offset = 0;
+
+        while (remaining > 0) {
+            size_t chunk = std::min(remaining, static_cast<size_t>(piece_size - bytes_in_current_piece));
+            piece_hasher.update(buffer.data() + offset, chunk);
+            offset += chunk;
+            bytes_processed += chunk;
+            bytes_in_current_piece += chunk;
+
+            if (bytes_in_current_piece == piece_size) {
+                std::lock_guard<std::mutex> lock(mutex); // Synchronize access to object `t`
+                t.set_hash(piece_index, piece_hasher.final());
+                piece_index = lt::piece_index_t(static_cast<int>(piece_index) + 1);
+                piece_hasher.reset();
+                bytes_in_current_piece = 0;
+            }
+        }
+
+        // Update progress safely
+        {
+            std::lock_guard<std::mutex> lock(progress_mutex_);
+            total_processed_ += bytes_read;
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+            double speed = elapsed > 0 ? static_cast<double>(total_processed_) / elapsed : 0.0;
+            double eta = speed > 0 ? (file_size - total_processed_) / speed : 0.0;
+            
+            print_progress_bar(static_cast<int>(total_processed_ / piece_size),
+                             static_cast<int>(file_size / piece_size),
+                             speed,
+                             eta,
+                             total_processed_, 
+                             file_size);
+        }
+    }
+
+    // Finalize the last piece if necessary
+    if (bytes_in_current_piece > 0) {
+        std::lock_guard<std::mutex> lock(mutex);
+        t.set_hash(piece_index, piece_hasher.final());
+    }
+}
+
 void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size) {
     const size_t buffer_size = PieceSizes::k16384KB; // 16MB buffer
     std::vector<char> buffer(buffer_size);
@@ -337,7 +428,11 @@ void TorrentCreator::create_torrent() {
 
         } else {
             // For single large files, use our streaming hasher
-            hash_large_file(config_.path, t, piece_size);
+            if (fs::file_size(config_.path) > 1 * 1024 * 1024 * 1024) { // Use parallel hashing for files larger than 1GB
+                hash_large_file_parallel(config_.path, t, piece_size);
+            } else {
+                hash_large_file(config_.path, t, piece_size);
+            }
         }
 
         if (ec) {
