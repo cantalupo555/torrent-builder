@@ -4,6 +4,8 @@
 #include <iomanip>
 #include <chrono>
 #include <format>
+#include <unistd.h>
+#include <termios.h>
 
 // Logging function with levels
 void log_message(const std::string& message, LogLevel level = LogLevel::INFO) {
@@ -168,6 +170,17 @@ void TorrentCreator::hash_block(const fs::path& path, lt::create_torrent& t, int
                              eta,
                              total_processed_, 
                              file_size);
+            
+            // Check for user interruption
+            char c = 0;
+            if (read(STDIN_FILENO, &c, 1) > 0) {
+                if (c == 'q' || c == 'Q' || c == '\x03') {
+                    log_message("Process interrupted by user", LogLevel::WARNING);
+                    std::cerr << "\nProcess interrupted by user\n";
+                    std::cerr.flush();
+                    std::exit(1); // Exit immediately
+                }
+            }
         }
     }
 
@@ -246,11 +259,15 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
             throw std::runtime_error("Hashing timeout");
         }
 
-        if (std::cin.peek() == 'q' || std::cin.peek() == 'Q' || std::cin.peek() == '\x03') {
-            log_message("Process interrupted by user", LogLevel::WARNING);
-            std::cerr << "\nProcess interrupted by user\n";
-            std::cerr.flush();
-            throw std::runtime_error("Process interrupted by user");
+        // Non-blocking check for user input
+        char c = 0;
+        if (read(STDIN_FILENO, &c, 1) > 0) {
+            if (c == 'q' || c == 'Q' || c == '\x03') {
+                log_message("Process interrupted by user", LogLevel::WARNING);
+                std::cerr << "\nProcess interrupted by user\n";
+                std::cerr.flush();
+                std::exit(1); // Exit immediately instead of throwing exception
+            }
         }
         // --- End of timeout and user interruption check ---
     }
@@ -322,7 +339,35 @@ std::string TorrentCreator::format_eta(double eta) const {
 }
 
 // Creates the torrent file
+// Function to restore terminal settings on program exit
+void cleanup_terminal(struct termios* old_settings) {
+    if (old_settings && isatty(STDIN_FILENO)) {
+        tcsetattr(STDIN_FILENO, TCSANOW, old_settings);
+    }
+}
+
 void TorrentCreator::create_torrent() {
+    // Set up terminal for non-blocking input
+    struct termios old_tio, new_tio;
+    bool terminal_changed = false;
+    
+    // Only change terminal settings if stdin is a terminal
+    if (isatty(STDIN_FILENO)) {
+        // Get current terminal settings
+        tcgetattr(STDIN_FILENO, &old_tio);
+        // Make a copy
+        new_tio = old_tio;
+        // Disable canonical mode and echo
+        new_tio.c_lflag &= (~ICANON & ~ECHO);
+        // Set minimum number of characters for non-canonical read
+        new_tio.c_cc[VMIN] = 0;
+        // Set timeout to 0.1 seconds
+        new_tio.c_cc[VTIME] = 1;
+        // Apply new settings
+        tcsetattr(STDIN_FILENO, TCSANOW, &new_tio);
+        terminal_changed = true;
+    }
+    
     try {
         log_message("Starting torrent creation for: " + config_.path.string(), LogLevel::INFO);
         // Check available disk space
@@ -377,7 +422,7 @@ void TorrentCreator::create_torrent() {
         log_message("Starting hashing process for: " + config_.path.string(), LogLevel::INFO);
         int num_pieces = t.num_pieces();
 
-        // Declaração de variáveis para rastrear o progresso e tempo
+        // Declaring variables to track progress and time
         auto start_time = std::chrono::steady_clock::now();
         double speed = 0.0;
         double eta = 0.0;
@@ -426,6 +471,17 @@ void TorrentCreator::create_torrent() {
                     error_message = "Save resume data failed: " + srdf->error.message();
                 }
             }
+            
+            // Check for user interruption
+            char c = 0;
+            if (read(STDIN_FILENO, &c, 1) > 0) {
+                if (c == 'q' || c == 'Q' || c == '\x03') {
+                    log_message("Process interrupted by user", LogLevel::WARNING);
+                    std::cerr << "\nProcess interrupted by user\n";
+                    std::cerr.flush();
+                    std::exit(1); // Exit immediately
+                }
+            }
         };
 
         // Set the hashes with the progress callback and error code
@@ -461,6 +517,27 @@ void TorrentCreator::create_torrent() {
             t.set_creator(config_.creator->c_str()); // Set creator string
         }
 
+        // Set up non-blocking input for interruption
+        struct termios old_tio, new_tio;
+        bool terminal_changed = false;
+        
+        // Only change terminal settings if stdin is a terminal
+        if (isatty(STDIN_FILENO)) {
+            // Get current terminal settings
+            tcgetattr(STDIN_FILENO, &old_tio);
+            // Make a copy
+            new_tio = old_tio;
+            // Disable canonical mode and echo
+            new_tio.c_lflag &= (~ICANON & ~ECHO);
+            // Set minimum number of characters for non-canonical read
+            new_tio.c_cc[VMIN] = 0;
+            // Set timeout to 0 seconds (non-blocking)
+            new_tio.c_cc[VTIME] = 0;
+            // Apply new settings
+            tcsetattr(STDIN_FILENO, TCSANOW, &new_tio);
+            terminal_changed = true;
+        }
+        
         // Check for user interruption and timeout
         auto loop_start_time = std::chrono::steady_clock::now();
         bool timeout_thrown = false;
@@ -476,19 +553,34 @@ void TorrentCreator::create_torrent() {
                 std::cout << "\n"; // New line before error message
                 std::cerr << "Runtime error: Hashing timeout" << std::endl;
                 std::cerr.flush();
+                
+                // Restore terminal settings if changed
+                if (terminal_changed) {
+                    tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
+                }
+                
                 std::exit(1); // Exit immediately with error code
             }
 
             // Check for user interruption without blocking
-            if (std::cin.rdbuf()->in_avail() > 0) {
-                char c = std::cin.get();
-                if (c == 'q' || c == 'Q' || c == '\x03') { // Ctrl+C
+            char c = 0;
+            if (read(STDIN_FILENO, &c, 1) > 0) {
+                if (c == 'q' || c == 'Q' || c == '\x03') { // q, Q or Ctrl+C
                     log_message("Process interrupted by user", LogLevel::WARNING);
                     std::cerr << "\nProcess interrupted by user" << std::endl;
                     std::cerr.flush();
+                    
+                    // Restore terminal settings if changed
+                    if (terminal_changed) {
+                        tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
+                    }
+                    
                     std::exit(1);
                 }
             }
+            
+            // Sleep a tiny bit to prevent CPU spinning
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
             // Check if hashing is complete (handle potential off-by-one)
             if (progress >= num_pieces - 1) {
@@ -533,11 +625,24 @@ void TorrentCreator::create_torrent() {
     } catch (const std::runtime_error& e) {
         std::cerr << e.what() << std::endl;
         log_message("Runtime error: " + std::string(e.what()), LogLevel::ERROR);
+        // Restore terminal settings if changed
+        if (terminal_changed) {
+            tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
+        }
         throw;
     } catch (const std::exception& e) { // Catch-all for other standard exceptions
         std::cerr << "An unexpected error occurred: " << e.what() << std::endl;
         log_message("Unexpected error: " + std::string(e.what()), LogLevel::ERROR);
+        // Restore terminal settings if changed
+        if (terminal_changed) {
+            tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
+        }
         throw;
+    }
+    
+    // Restore terminal settings if changed
+    if (terminal_changed) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
     }
 }
 
