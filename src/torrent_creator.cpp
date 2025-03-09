@@ -658,6 +658,15 @@ void TorrentCreator::create_torrent() {
 void TorrentCreator::print_torrent_summary(int64_t total_size, int piece_size, int num_pieces) const {
     std::cout << "\n=== TORRENT CREATED SUCCESSFULLY ===\n";
     std::cout << "File: " << config_.output << "\n";
+    
+    // Display torrent version
+    std::string version_str;
+    switch(config_.version) {
+        case TorrentVersion::V1: version_str = "v1"; break;
+        case TorrentVersion::V2: version_str = "v2"; break;
+        case TorrentVersion::HYBRID: version_str = "hybrid"; break;
+    }
+    std::cout << "Version: " << version_str << "\n";
 
     // Lambda function to format file sizes with appropriate units (B, KB, MB, GB, TB).
     auto format_size = [](int64_t bytes) -> std::string {
