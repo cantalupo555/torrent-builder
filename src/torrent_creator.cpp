@@ -542,56 +542,64 @@ void TorrentCreator::create_torrent() {
         auto loop_start_time = std::chrono::steady_clock::now();
         bool timeout_thrown = false;
 
-        while (true) {
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - loop_start_time);
+        // Only run progress loop for directory hashing (libtorrent async)
+        if (fs::is_directory(config_.path)) {
+            while (true) {
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - loop_start_time);
 
-            // Timeout after 30 seconds of no progress
-            if (elapsed.count() > 30 && !timeout_thrown) {
-                timeout_thrown = true;
-                log_message("Hashing timeout after 30 seconds", LogLevel::ERROR);
-                std::cout << "\n"; // New line before error message
-                std::cerr << "Runtime error: Hashing timeout" << std::endl;
-                std::cerr.flush();
-                
-                // Restore terminal settings if changed
-                if (terminal_changed) {
-                    tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
+                // Reset timeout timer only if we're making meaningful progress
+                if (progress > 0 && progress < num_pieces - 1) {
+                    loop_start_time = std::chrono::steady_clock::now();
+                    progress = 0;
                 }
                 
-                std::exit(1); // Exit immediately with error code
-            }
-
-            // Check for user interruption without blocking
-            char c = 0;
-            if (read(STDIN_FILENO, &c, 1) > 0) {
-                if (c == 'q' || c == 'Q' || c == '\x03') { // q, Q or Ctrl+C
-                    log_message("Process interrupted by user", LogLevel::WARNING);
-                    std::cerr << "\nProcess interrupted by user" << std::endl;
+                // Timeout after 30 seconds of no progress
+                if (elapsed.count() > 30 && !timeout_thrown && progress == 0) {
+                    timeout_thrown = true;
+                    log_message("Hashing timeout after 30 seconds", LogLevel::ERROR);
+                    std::cout << "\n"; 
+                    std::cerr << "Runtime error: Hashing timeout" << std::endl;
                     std::cerr.flush();
                     
-                    // Restore terminal settings if changed
                     if (terminal_changed) {
                         tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
                     }
                     
                     std::exit(1);
                 }
-            }
-            
-            // Sleep a tiny bit to prevent CPU spinning
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-            // Check if hashing is complete (handle potential off-by-one)
-            if (progress >= num_pieces - 1) {
-                break;
-            }
+                // Check for user interruption
+                char c = 0;
+                if (read(STDIN_FILENO, &c, 1) > 0) {
+                    if (c == 'q' || c == 'Q' || c == '\x03') {
+                        log_message("Process interrupted by user", LogLevel::WARNING);
+                        std::cerr << "\nProcess interrupted by user" << std::endl;
+                        std::cerr.flush();
+                        
+                        if (terminal_changed) {
+                            tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
+                        }
+                        
+                        std::exit(1);
+                    }
+                }
+                
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-            // Only sleep if we're not done yet
-            if (progress < num_pieces - 1) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                if (progress >= num_pieces - 1) {
+                    print_progress_bar(num_pieces, num_pieces, speed, 0.0, total_size, total_size);
+                    std::cout << "\n";
+                    break;
+                }
+
                 ses.pop_alerts(&alerts);
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
+        } else {
+            // For single files, hashing is already complete - just show final progress
+            print_progress_bar(num_pieces, num_pieces, speed, 0.0, total_size, total_size);
+            std::cout << "\n";
         }
 
         // If there was an error, throw an exception
