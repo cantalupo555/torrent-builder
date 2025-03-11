@@ -487,8 +487,10 @@ void TorrentCreator::create_torrent() {
         // Set the hashes with the progress callback and error code
         lt::error_code ec;
 
-        if (fs::is_directory(config_.path)) {
-            // For directories, use libtorrent's built-in hashing, and the progress callback
+        if (fs::is_directory(config_.path) || config_.version == TorrentVersion::HYBRID) {
+            // Use libtorrent's native hashing to guarantee hybrid spec compliance for:
+            // 1. Directory inputs (always require both v1 and v2 hashes)
+            // 2. Explicitly requested hybrid torrents (even with single file inputs)
             lt::set_piece_hashes(t, config_.path.parent_path().string(), progress_callback, ec);
 
         } else {
