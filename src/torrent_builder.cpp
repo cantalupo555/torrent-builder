@@ -7,6 +7,7 @@
 #include <cmath>
 #include <regex>
 #include <ranges>
+#include <cctype>
 #include <stdexcept> // For std::runtime_error and std::invalid_argument
 
 namespace fs = std::filesystem;
@@ -24,7 +25,56 @@ std::vector<std::string> default_trackers = {
 // List of allowed piece sizes (in KB). These are powers of 2
 const std::vector<int> allowed_piece_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768};
 
-// Function to validate URLs. Checks if the URL starts with http://, https://, or udp://
+namespace {
+std::string sanitize_path(std::string input) {
+    auto is_space = [](unsigned char c) { return std::isspace(c); };
+    auto ltrim = [&](std::string& s) { s.erase(s.begin(), std::find_if_not(s.begin(), s.end(), is_space)); };
+    auto rtrim = [&](std::string& s) { s.erase(std::find_if_not(s.rbegin(), s.rend(), is_space).base(), s.end()); };
+
+    rtrim(input);
+    ltrim(input);
+
+    if (input.size() >= 2) {
+        if ((input.front() == '"' && input.back() == '"') ||
+            (input.front() == '\'' && input.back() == '\'')) {
+            input = input.substr(1, input.size() - 2);
+            ltrim(input);
+            rtrim(input);
+        }
+    }
+
+    std::string result;
+    result.reserve(input.size());
+    for (size_t i = 0; i < input.size(); ++i) {
+        if (input[i] == '\\' && i + 1 < input.size()) {
+            result += input[i + 1];
+            ++i;
+        } else if (input[i] == '\\' && i + 1 == input.size()) {
+            break;
+        } else {
+            result += input[i];
+        }
+    }
+    return result;
+}
+
+enum class OverwriteDecision { Proceed, Declined };
+
+OverwriteDecision prompt_overwrite(const std::string& filepath) {
+    while (true) {
+        std::string overwrite;
+        std::cout << "File " << filepath << " already exists. Overwrite? (y/N): ";
+        std::getline(std::cin, overwrite);
+        if (overwrite == "y" || overwrite == "Y") {
+            return OverwriteDecision::Proceed;
+        } else if (overwrite == "n" || overwrite == "N" || overwrite.empty()) {
+            return OverwriteDecision::Declined;
+        }
+        std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
+    }
+}
+}
+
 bool is_valid_url(const std::string& url) {
     // Simple regular expression to validate URLs.
     static const std::regex url_regex(R"(^(http|https|udp)://.+$)", std::regex::icase);
@@ -40,6 +90,7 @@ TorrentConfig get_interactive_config() {
     while (true) {
         std::cout << "Path to file or directory: ";
         std::getline(std::cin, path);
+        path = sanitize_path(path);
         if (path.empty()) {
             std::cout << "Error: Input path cannot be empty\n";
             continue;
@@ -68,6 +119,7 @@ TorrentConfig get_interactive_config() {
     while (true) {
         std::cout << "Path to save torrent: ";
         std::getline(std::cin, output);
+        output = sanitize_path(output);
         if (output.empty()) {
             std::cout << "Error: Output path cannot be empty\n";
             continue;
@@ -79,17 +131,8 @@ TorrentConfig get_interactive_config() {
 
         // Check if file exists and prompt for overwrite
         if (fs::exists(output)) {
-            while(true) { // Loop for overwrite validation
-                std::string overwrite;
-                std::cout << "File " << output << " already exists. Overwrite? (y/N): ";
-                std::getline(std::cin, overwrite);
-                if (overwrite == "y" || overwrite == "Y") {
-                    break; // Exit overwrite loop
-                } else if (overwrite == "n" || overwrite == "N" || overwrite.empty()) {
-                    goto get_version; // Exit the inner loop, continue to next question
-                } else {
-                    std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
-                }
+            if (prompt_overwrite(output) == OverwriteDecision::Declined) {
+                goto get_version;
             }
         }
 
@@ -332,21 +375,10 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
     // --- Start of modification: Overwrite check ---
     std::string output_path = result["output"].as<std::string>();
     if (fs::exists(output_path)) {
-        while (true) {
-            std::string overwrite;
-            std::cout << "File " << output_path << " already exists. Overwrite? (y/N): ";
-            std::getline(std::cin, overwrite);
-            if (overwrite == "y" || overwrite == "Y") {
-                break; // Allow overwrite
-            } else if (overwrite == "n" || overwrite == "N" || overwrite.empty()) {
-                // Do not allow overwrite: throw exception
-                throw std::runtime_error("Warning: Output file '" + output_path + "' already exists. User chose not to overwrite. Aborting.");
-            } else {
-                std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
-            }
+        if (prompt_overwrite(output_path) == OverwriteDecision::Declined) {
+            throw std::runtime_error("Warning: Output file '" + output_path + "' already exists. User chose not to overwrite. Aborting.");
         }
     }
-    // --- End of modification ---
 
     // Get torrent version
     std::string version = result["version"].as<std::string>();
