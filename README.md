@@ -18,10 +18,9 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 ## Prerequisites
 
 ### General Requirements
-- **C++23 Compiler**: GCC 13+ (e.g., Debian 13 "Trixie" or Ubuntu 24.04 LTS on Linux), Clang 15+ (macOS Sonoma+). Required for `<ranges>` library support (used in tracker and piece size validation). CMakeLists.txt checks this automatically and fails with a clear error if incompatible.
+- **C++23 Compiler**: GCC 13+, Clang 15+.
 - **CMake**: >= 3.28
 - **libtorrent-rasterbar**: >= 2.0.10 (for C++17/20+ support and compatibility)
-- **Git**: Required for FetchContent (cxxopts library)
 - **pkg-config**: Required for libtorrent detection via PkgConfig in CMake
 - **Build Tools**: Varies by OS (see below)
 
@@ -29,7 +28,7 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 
 Ubuntu/Debian
 ```
-sudo apt install build-essential cmake libtorrent-rasterbar-dev pkg-config git
+sudo apt install build-essential cmake libtorrent-rasterbar-dev pkg-config
 ```
 
 Fedora
@@ -129,9 +128,9 @@ Create a torrent with default trackers and custom trackers:
 
 - **Compilation Error: 'contains' is not a member of 'std::ranges'**: This occurs with older compilers (e.g., GCC 12 on Debian 12). CMakeLists.txt requires GCC 13+ for C++23. Solutions:
   - Upgrade GCC: `sudo apt install g++-13` (via backports on Debian 12) or upgrade to Debian 13/Ubuntu 24.04.
-  - Use Docker for testing: `docker run -v $(pwd):/app -w /app ubuntu:24.04 bash -c "apt update && apt install -y build-essential cmake git libtorrent-rasterbar-dev pkg-config && mkdir build && cd build && cmake .. && make"`.
+  - Use Docker for testing: `docker run -v $(pwd):/app -w /app ubuntu:24.04 bash -c "apt update && apt install -y build-essential cmake libtorrent-rasterbar-dev pkg-config && mkdir build && cd build && cmake .. && make"`.
 - **libtorrent Not Found or pkg-config Error**: Check your installation: `pkg-config --modversion libtorrent-rasterbar`. Reinstall if < 2.0.10 (e.g., `sudo apt install libtorrent-rasterbar-dev pkg-config`). pkg-config is required for dependency detection.
-- **FetchContent/cxxopts Failure**: Make sure you have Git and an internet connection (it downloads the repo during the configure step).
+- **FetchContent/cxxopts Failure**: Make sure you have an internet connection (it downloads the library during the configure step).
 - **Need More Help**: Open a [GitHub issue](https://github.com/cantalupo555/torrent-builder/issues) with logs (e.g., `cmake .. 2>&1 | tee cmake.log` and `make 2>&1 | tee make.log`).
 
 ## License

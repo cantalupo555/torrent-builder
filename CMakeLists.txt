@@ -51,8 +51,7 @@ add_compile_definitions(
 include(FetchContent)
 FetchContent_Declare(
     cxxopts
-    GIT_REPOSITORY https://github.com/jarro2783/cxxopts.git
-    GIT_TAG        v3.1.1
+    URL https://github.com/jarro2783/cxxopts/archive/refs/tags/v3.1.1.tar.gz
 )
 FetchContent_MakeAvailable(cxxopts)
 
