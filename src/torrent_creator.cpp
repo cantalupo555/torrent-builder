@@ -19,7 +19,7 @@ void log_message(const std::string& message, LogLevel level = LogLevel::INFO) {
     switch(level) {
         case LogLevel::INFO: level_str = "INFO"; break;
         case LogLevel::WARNING: level_str = "WARNING"; break;
-        case LogLevel::ERROR: level_str = "ERROR"; break;
+        case LogLevel::ERR: level_str = "ERROR"; break;
     }
     
     logfile << std::put_time(std::localtime(&now_time_t), "%Y-%m-%d %H:%M:%S") 
@@ -503,7 +503,7 @@ void TorrentCreator::create_torrent() {
         }
 
         if (ec) {
-            log_message("Error setting piece hashes: " + ec.message(), LogLevel::ERROR);
+            log_message("Error setting piece hashes: " + ec.message(), LogLevel::ERR);
             throw std::filesystem::filesystem_error("Error setting piece hashes: " + ec.message(), ec);
         }
 
@@ -559,7 +559,7 @@ void TorrentCreator::create_torrent() {
                 // Timeout after 30 seconds of no progress
                 if (elapsed.count() > 30 && !timeout_thrown && progress == 0) {
                     timeout_thrown = true;
-                    log_message("Hashing timeout after 30 seconds", LogLevel::ERROR);
+                    log_message("Hashing timeout after 30 seconds", LogLevel::ERR);
                     std::cout << "\n"; 
                     std::cerr << "Runtime error: Hashing timeout" << std::endl;
                     std::cerr.flush();
@@ -606,7 +606,7 @@ void TorrentCreator::create_torrent() {
 
         // If there was an error, throw an exception
         if (!error_message.empty()) {
-            log_message("Error during torrent creation: " + error_message, LogLevel::ERROR);
+            log_message("Error during torrent creation: " + error_message, LogLevel::ERR);
             throw std::runtime_error(error_message);
         }
 
@@ -628,13 +628,13 @@ void TorrentCreator::create_torrent() {
             log_message("Torrent created successfully: " + config_.output.string(), LogLevel::INFO);
             log_message("Torrent size: " + std::to_string(fs::file_size(config_.output)) + " bytes", LogLevel::INFO);
         } catch (const std::exception& e) {
-            log_message("Error saving torrent file: " + std::string(e.what()), LogLevel::ERROR);
+            log_message("Error saving torrent file: " + std::string(e.what()), LogLevel::ERR);
             throw;
         }
 
     } catch (const std::runtime_error& e) {
         std::cerr << e.what() << std::endl;
-        log_message("Runtime error: " + std::string(e.what()), LogLevel::ERROR);
+        log_message("Runtime error: " + std::string(e.what()), LogLevel::ERR);
         // Restore terminal settings if changed
         if (terminal_changed) {
             tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
@@ -642,7 +642,7 @@ void TorrentCreator::create_torrent() {
         throw;
     } catch (const std::exception& e) { // Catch-all for other standard exceptions
         std::cerr << "An unexpected error occurred: " << e.what() << std::endl;
-        log_message("Unexpected error: " + std::string(e.what()), LogLevel::ERROR);
+        log_message("Unexpected error: " + std::string(e.what()), LogLevel::ERR);
         // Restore terminal settings if changed
         if (terminal_changed) {
             tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
