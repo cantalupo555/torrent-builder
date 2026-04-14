@@ -1,0 +1,237 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+
+          if [[ "$CURRENT_TAG" == *"-rc"* ]]; then
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || echo "")
+          else
+            PREVIOUS_TAG=$(git tag -l --sort=-v:refname | grep -v "\-rc" | grep -v "^${CURRENT_TAG}$" | head -n1 || echo "")
+          fi
+
+          echo "Current tag: $CURRENT_TAG"
+          echo "Previous tag: $PREVIOUS_TAG"
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            COMMIT_SHAS=$(git log --format=%H "${PREVIOUS_TAG}..${CURRENT_TAG}" 2>/dev/null || echo "")
+            COMPARE_URL="**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREVIOUS_TAG}...${CURRENT_TAG}"
+          else
+            COMMIT_SHAS=$(git log --format=%H "${CURRENT_TAG}" 2>/dev/null || echo "")
+            COMPARE_URL=""
+          fi
+
+          COMMIT_COUNT=$(echo "$COMMIT_SHAS" | grep -c . || echo 0)
+          echo "Found ${COMMIT_COUNT} commits between tags"
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            DIFF_RANGE="${PREVIOUS_TAG}..${CURRENT_TAG}"
+          else
+            DIFF_RANGE="${CURRENT_TAG}"
+          fi
+
+          LINE_STATS=$(git log --format=tformat: --numstat "${DIFF_RANGE}" 2>/dev/null | \
+            awk '{ if ($1 ~ /^[0-9]+$/) add += $1; if ($2 ~ /^[0-9]+$/) del += $2 } END { printf "%d %d\n", add + 0, del + 0 }')
+
+          TOTAL_ADDITIONS=$(echo "$LINE_STATS" | awk '{print $1}')
+          TOTAL_DELETIONS=$(echo "$LINE_STATS" | awk '{print $2}')
+
+          if ! [[ "$TOTAL_ADDITIONS" =~ ^[0-9]+$ ]]; then TOTAL_ADDITIONS=0; fi
+          if ! [[ "$TOTAL_DELETIONS" =~ ^[0-9]+$ ]]; then TOTAL_DELETIONS=0; fi
+
+          PR_COUNT=0
+          FEATURES=""
+          FIXES=""
+          PERFORMANCE=""
+          DOCS=""
+          REFACTOR=""
+          TESTS=""
+          BUILD_CI=""
+          MAINTENANCE=""
+          OTHERS=""
+
+          PAGE=1
+          while true; do
+            RESPONSE=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/repos/${GITHUB_REPOSITORY}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${PAGE}" 2>/dev/null || echo "[]")
+
+            if [ "$RESPONSE" = "[]" ] || [ -z "$RESPONSE" ]; then break; fi
+
+            while IFS= read -r pr_data; do
+              [ -z "$pr_data" ] && continue
+              if ! echo "$pr_data" | jq -e 'type == "object"' > /dev/null 2>&1; then continue; fi
+
+              MERGED_AT=$(echo "$pr_data" | jq -r '.merged_at // empty' 2>/dev/null)
+              [ -z "$MERGED_AT" ] && continue
+
+              MERGE_COMMIT_SHA=$(echo "$pr_data" | jq -r '.merge_commit_sha // empty' 2>/dev/null)
+              [ -z "$MERGE_COMMIT_SHA" ] && continue
+
+              if ! echo "$COMMIT_SHAS" | grep -q "^${MERGE_COMMIT_SHA}$"; then continue; fi
+
+              PR_NUMBER=$(echo "$pr_data" | jq -r '.number')
+              PR_TITLE=$(echo "$pr_data" | jq -r '.title')
+              PR_AUTHOR=$(echo "$pr_data" | jq -r '.user.login')
+              PR_URL="https://github.com/${GITHUB_REPOSITORY}/pull/${PR_NUMBER}"
+
+              ENTRY="* ${PR_TITLE} ([#${PR_NUMBER}](${PR_URL})) (@${PR_AUTHOR})"
+              PR_COUNT=$((PR_COUNT + 1))
+
+              case "$PR_TITLE" in
+                feat:*|feat\(*) FEATURES="${ENTRY}"$'\n'"${FEATURES}" ;;
+                fix:*|fix\(*) FIXES="${ENTRY}"$'\n'"${FIXES}" ;;
+                perf:*|perf\(*) PERFORMANCE="${ENTRY}"$'\n'"${PERFORMANCE}" ;;
+                docs:*|docs\(*) DOCS="${ENTRY}"$'\n'"${DOCS}" ;;
+                refactor:*|refactor\(*) REFACTOR="${ENTRY}"$'\n'"${REFACTOR}" ;;
+                test:*|test\(*) TESTS="${ENTRY}"$'\n'"${TESTS}" ;;
+                build:*|build\(*|ci:*|ci\(*) BUILD_CI="${ENTRY}"$'\n'"${BUILD_CI}" ;;
+                chore:*|chore\(*|style:*|style\(*) MAINTENANCE="${ENTRY}"$'\n'"${MAINTENANCE}" ;;
+                *) OTHERS="${ENTRY}"$'\n'"${OTHERS}" ;;
+              esac
+            done < <(echo "$RESPONSE" | jq -c '.[]')
+
+            PAGE=$((PAGE + 1))
+            if [ $PAGE -gt 200 ]; then break; fi
+          done
+
+          if [ -z "$FEATURES" ] && [ -z "$FIXES" ] && [ -z "$PERFORMANCE" ] && \
+             [ -z "$DOCS" ] && [ -z "$REFACTOR" ] && [ -z "$TESTS" ] && \
+             [ -z "$BUILD_CI" ] && [ -z "$MAINTENANCE" ] && [ -z "$OTHERS" ]; then
+
+            echo "No PRs found, using direct commits..."
+
+            if [ -n "$PREVIOUS_TAG" ]; then
+              COMMITS=$(git log --format="%H|%s|%an" "${PREVIOUS_TAG}..${CURRENT_TAG}" 2>/dev/null || echo "")
+            else
+              COMMITS=$(git log --format="%H|%s|%an" "${CURRENT_TAG}" 2>/dev/null || echo "")
+            fi
+
+            while IFS='|' read -r COMMIT_SHA COMMIT_MSG COMMIT_AUTHOR; do
+              [ -z "$COMMIT_SHA" ] && continue
+              SHORT_SHA="${COMMIT_SHA:0:7}"
+              COMMIT_URL="https://github.com/${GITHUB_REPOSITORY}/commit/${COMMIT_SHA}"
+              ENTRY="* ${COMMIT_MSG} ([${SHORT_SHA}](${COMMIT_URL})) (@${COMMIT_AUTHOR})"
+
+              case "$COMMIT_MSG" in
+                feat:*|feat\(*) FEATURES="${ENTRY}"$'\n'"${FEATURES}" ;;
+                fix:*|fix\(*) FIXES="${ENTRY}"$'\n'"${FIXES}" ;;
+                perf:*|perf\(*) PERFORMANCE="${ENTRY}"$'\n'"${PERFORMANCE}" ;;
+                docs:*|docs\(*) DOCS="${ENTRY}"$'\n'"${DOCS}" ;;
+                refactor:*|refactor\(*) REFACTOR="${ENTRY}"$'\n'"${REFACTOR}" ;;
+                test:*|test\(*) TESTS="${ENTRY}"$'\n'"${TESTS}" ;;
+                build:*|build\(*|ci:*|ci\(*) BUILD_CI="${ENTRY}"$'\n'"${BUILD_CI}" ;;
+                chore:*|chore\(*|style:*|style\(*) MAINTENANCE="${ENTRY}"$'\n'"${MAINTENANCE}" ;;
+                *) OTHERS="${ENTRY}"$'\n'"${OTHERS}" ;;
+              esac
+            done <<< "$COMMITS"
+          fi
+
+          CHANGELOG="## Changelog"$'\n\n'
+
+          if [ "$COMMIT_COUNT" -eq 1 ]; then COMMIT_TEXT="1 commit"; else COMMIT_TEXT="${COMMIT_COUNT} commits"; fi
+          if [ "$PR_COUNT" -eq 1 ]; then PR_TEXT="1 pull request"; else PR_TEXT="${PR_COUNT} pull requests"; fi
+
+          TOTAL_LINES=$((TOTAL_ADDITIONS + TOTAL_DELETIONS))
+          DIFF_STAT=""
+
+          if [ "$TOTAL_LINES" -eq 0 ]; then
+            DIFF_STAT="⬜⬜⬜⬜⬜"
+          elif [ "$TOTAL_LINES" -le 5 ]; then
+            for ((i=0; i<$TOTAL_ADDITIONS; i++)); do DIFF_STAT="${DIFF_STAT}🟩"; done
+            for ((i=0; i<$TOTAL_DELETIONS; i++)); do DIFF_STAT="${DIFF_STAT}🟥"; done
+            EMPTY_BLOCKS=$((5 - TOTAL_LINES))
+            for ((i=0; i<$EMPTY_BLOCKS; i++)); do DIFF_STAT="${DIFF_STAT}⬜"; done
+          else
+            ADDED_BLOCKS=$(( (TOTAL_ADDITIONS * 5) / TOTAL_LINES ))
+            DELETED_BLOCKS=$(( (TOTAL_DELETIONS * 5) / TOTAL_LINES ))
+            EMPTY_BLOCKS=$(( 5 - ADDED_BLOCKS - DELETED_BLOCKS ))
+            for ((i=0; i<$ADDED_BLOCKS; i++)); do DIFF_STAT="${DIFF_STAT}🟩"; done
+            for ((i=0; i<$DELETED_BLOCKS; i++)); do DIFF_STAT="${DIFF_STAT}🟥"; done
+            for ((i=0; i<$EMPTY_BLOCKS; i++)); do DIFF_STAT="${DIFF_STAT}⬜"; done
+          fi
+
+          CHANGELOG="${CHANGELOG}📊 **${COMMIT_TEXT}** &nbsp;&nbsp;•&nbsp;&nbsp; 🔀 **${PR_TEXT}** &nbsp;&nbsp;•&nbsp;&nbsp; ✍️ 🟩 **+${TOTAL_ADDITIONS}** 🟥 **-${TOTAL_DELETIONS}** ${DIFF_STAT}"$'\n\n'
+
+          if [ -n "$FEATURES" ]; then CHANGELOG="${CHANGELOG}### 🚀 New Features"$'\n\n'"${FEATURES}"$'\n'; fi
+          if [ -n "$FIXES" ]; then CHANGELOG="${CHANGELOG}### 🐛 Bug Fixes"$'\n\n'"${FIXES}"$'\n'; fi
+          if [ -n "$REFACTOR" ]; then CHANGELOG="${CHANGELOG}### ♻️ Code Refactoring"$'\n\n'"${REFACTOR}"$'\n'; fi
+          if [ -n "$PERFORMANCE" ]; then CHANGELOG="${CHANGELOG}### ⚡ Performance Improvements"$'\n\n'"${PERFORMANCE}"$'\n'; fi
+          if [ -n "$DOCS" ]; then CHANGELOG="${CHANGELOG}### 📚 Documentation"$'\n\n'"${DOCS}"$'\n'; fi
+          if [ -n "$TESTS" ]; then CHANGELOG="${CHANGELOG}### 🧪 Tests"$'\n\n'"${TESTS}"$'\n'; fi
+          if [ -n "$BUILD_CI" ]; then CHANGELOG="${CHANGELOG}### 🔧 CI/CD"$'\n\n'"${BUILD_CI}"$'\n'; fi
+          if [ -n "$MAINTENANCE" ]; then CHANGELOG="${CHANGELOG}### 🧹 Maintenance"$'\n\n'"${MAINTENANCE}"$'\n'; fi
+          if [ -n "$OTHERS" ]; then CHANGELOG="${CHANGELOG}### 📦 Other Changes"$'\n\n'"${OTHERS}"$'\n'; fi
+          if [ -n "$COMPARE_URL" ]; then CHANGELOG="${CHANGELOG}"$'\n'"${COMPARE_URL}"; fi
+
+          {
+            echo 'changelog<<EOF'
+            echo "$CHANGELOG"
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
+  build:
+    needs: changelog
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libtorrent-rasterbar-dev pkg-config git
+
+      - name: Build
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build .
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: torrent-builder-linux-x86_64
+          path: build/torrent_builder
+
+  release:
+    needs: [changelog, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: torrent-builder-linux-x86_64
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          body: ${{ needs.changelog.outputs.changelog }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') }}
+          files: torrent_builder
