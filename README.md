@@ -9,7 +9,7 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 - Interactive mode with step-by-step configuration
 - Command-line interface with options for all features
 - Automatic piece size calculation based on file size
-- **Manual piece size configuration**
+- Manual piece size configuration
 - Support for private torrents
 - Add multiple trackers and web seeds
 - Include comments in torrent metadata
@@ -17,40 +17,45 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 
 ## Prerequisites
 
-Before building, ensure you have the following installed:
+### General Requirements
+- **C++23 Compiler**: GCC 13+ (e.g., Debian 13 "Trixie" or Ubuntu 24.04 LTS on Linux), Clang 15+ (macOS Sonoma+). Required for `<ranges>` library support (used in tracker and piece size validation). CMakeLists.txt checks this automatically and fails with a clear error if incompatible.
+- **CMake**: >= 3.28
+- **libtorrent-rasterbar**: >= 2.0.10 (for C++17/20+ support and compatibility)
+- **Git**: Required for FetchContent (cxxopts library)
+- **pkg-config**: Required for libtorrent detection via PkgConfig in CMake
+- **Build Tools**: Varies by OS (see below)
 
 ### Linux
 
--   **Build Tools:** `build-essential`
--   **CMake:**  `cmake` (>= 3.28.3)
--   **libtorrent:** `libtorrent-rasterbar-dev` (>= 2.0.11)
+Ubuntu/Debian
+```
+sudo apt install build-essential cmake libtorrent-rasterbar-dev pkg-config git
+```
 
-Install them using:
-```bash
-sudo apt-get install build-essential cmake libtorrent-rasterbar-dev
+Fedora
+```
+sudo dnf install gcc-c++ cmake rb_libtorrent-devel
 ```
 
 ### macOS
-
--   **CMake:** `cmake` (>= 3.28.3)
--   **libtorrent:** `libtorrent-rasterbar` (>= 2.0.11)
-
-Install them using:
-```bash
+```
 brew install cmake libtorrent-rasterbar
 ```
 
 ## Installation
-To build the project, you will need a C++20 compatible compiler.
+
+To build, you need a compatible C++23 compiler (see Prerequisites). CMake will automatically check and display a clear error if the compiler is inadequate (e.g., GCC < 13).
 
 ### Build Instructions
-
-```bash
+```
 mkdir build
 cd build
 cmake ..
 cmake --build .
 ```
+For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .`.
+
+**Note**: The executable will be generated at `build/torrent_builder`. For debugging, use `-DCMAKE_BUILD_TYPE=Debug`. If pkg-config fails, check your installation in Prerequisites.
 
 ## Usage
 
@@ -86,39 +91,48 @@ cmake --build .
 
 ## Examples
 
+Basic usage:
 ```bash
-  ./torrent_builder -i
-  ./torrent_builder --path /data/file --output file.torrent
-  ./torrent_builder --path /data/file --output file.torrent --default-trackers
-  ./torrent_builder --path /data/folder --output folder.torrent --version 2 --private
-  ./torrent_builder --path /data/file --output file.torrent --piece-size 1024
+./torrent_builder -i
+./torrent_builder --path /data/file --output file.torrent
+./torrent_builder --path /data/file --output file.torrent --default-trackers
+./torrent_builder --path /data/folder --output folder.torrent --version 2 --private
+./torrent_builder --path /data/file --output file.torrent --piece-size 1024
 ```
 
-### Add multiple trackers
-Trackers are added in ascending order of priority. The first tracker has the highest priority (tier 0).
+Add multiple trackers (added in ascending order of priority; the first tracker has the highest priority — tier 0):
 ```bash
 ./torrent_builder --path /data/file --output file.torrent \
   --tracker udp://tracker.example.com:80 \
   --tracker http://backup-tracker.org:6969
 ```
 
-### Add multiple web seeds
+Add multiple web seeds:
 ```bash
 ./torrent_builder --path /data/file --output file.torrent \
   --webseed http://example.com/file \
   --webseed http://mirror.com/file
 ```
 
-### Create torrent with comment
+Create torrent with comment:
 ```bash
 ./torrent_builder --path /data/file --output file.torrent \
   --comment "My important file"
 ```
 
-### Create a torrent with default trackers and custom trackers
+Create a torrent with default trackers and custom trackers:
 ```bash
 ./torrent_builder --path /data/file --output file.torrent --default-trackers --tracker udp://mytracker.com:8080
 ```
+
+## Troubleshooting
+
+- **Compilation Error: 'contains' is not a member of 'std::ranges'**: This occurs with older compilers (e.g., GCC 12 on Debian 12). CMakeLists.txt requires GCC 13+ for C++23. Solutions:
+  - Upgrade GCC: `sudo apt install g++-13` (via backports on Debian 12) or upgrade to Debian 13/Ubuntu 24.04.
+  - Use Docker for testing: `docker run -v $(pwd):/app -w /app ubuntu:24.04 bash -c "apt update && apt install -y build-essential cmake git libtorrent-rasterbar-dev pkg-config && mkdir build && cd build && cmake .. && make"`.
+- **libtorrent Not Found or pkg-config Error**: Check your installation: `pkg-config --modversion libtorrent-rasterbar`. Reinstall if < 2.0.10 (e.g., `sudo apt install libtorrent-rasterbar-dev pkg-config`). pkg-config is required for dependency detection.
+- **FetchContent/cxxopts Failure**: Make sure you have Git and an internet connection (it downloads the repo during the configure step).
+- **Need More Help**: Open a [GitHub issue](https://github.com/cantalupo555/torrent-builder/issues) with logs (e.g., `cmake .. 2>&1 | tee cmake.log` and `make 2>&1 | tee make.log`).
 
 ## License
 
