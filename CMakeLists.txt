@@ -1,5 +1,16 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.28)
 project(torrent_builder VERSION 1.0 LANGUAGES CXX)
+
+# Minimum GCC version check for C++23 Ranges support
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13)
+        message(FATAL_ERROR
+            "GCC 13 or later is required for C++23 Ranges support.\n"
+            "Detected version: ${CMAKE_CXX_COMPILER_VERSION}.\n"
+            "See README.md for build instructions."
+        )
+    endif()
+endif()
 
 # Basic project settings
 set(CMAKE_CXX_STANDARD 23)
@@ -15,7 +26,19 @@ endif()
 
 # Find libtorrent
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBTORRENT REQUIRED libtorrent-rasterbar>=2.0)
+pkg_check_modules(LIBTORRENT REQUIRED libtorrent-rasterbar>=2.0.10)
+
+# Explicit libtorrent version check
+if(LIBTORRENT_FOUND)
+    if(LIBTORRENT_VERSION VERSION_LESS 2.0.10)
+        message(FATAL_ERROR
+            "libtorrent-rasterbar >= 2.0.10 is required.\n"
+            "Detected version: ${LIBTORRENT_VERSION}.\n"
+            "See README.md for build instructions."
+        )
+    endif()
+    message(STATUS "libtorrent-rasterbar ${LIBTORRENT_VERSION} found.")
+endif()
 
 # Add compile definitions for libtorrent
 add_compile_definitions(
@@ -68,3 +91,4 @@ install(TARGETS torrent_builder
 
 # Test settings (to add future tests)
 enable_testing()
+
