@@ -264,6 +264,7 @@ jobs:
           install: >-
             git
             base-devel
+            ${{ matrix.prefix }}-toolchain
             ${{ matrix.prefix }}-cmake
             ${{ matrix.prefix }}-libtorrent-rasterbar
             ${{ matrix.prefix }}-pkg-config
@@ -304,7 +305,7 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
-        run: brew install cmake libtorrent-rasterbar pkg-config
+        run: brew install boost cmake libtorrent-rasterbar pkg-config
 
       - name: Build
         run: |
