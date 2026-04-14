@@ -4,8 +4,13 @@
 #include <iomanip>
 #include <chrono>
 #include <format>
+#ifndef _WIN32
 #include <unistd.h>
 #include <termios.h>
+#else
+#include <conio.h>
+#include <io.h>
+#endif
 
 // Logging function with levels
 void log_message(const std::string& message, LogLevel level = LogLevel::INFO) {
@@ -32,8 +37,32 @@ void log_message(const std::string& message, LogLevel level = LogLevel::INFO) {
 #include <ctime>
 #include <thread>
 #include <format>
-#include <stdexcept> // For std::runtime_error
-#include <system_error> // For std::error_code
+#include <stdexcept>
+#include <system_error>
+
+namespace {
+
+bool is_terminal() {
+#ifndef _WIN32
+    return isatty(STDIN_FILENO);
+#else
+    return _isatty(_fileno(stdin)) != 0;
+#endif
+}
+
+bool check_key_press(char& c) {
+#ifndef _WIN32
+    return read(STDIN_FILENO, &c, 1) > 0;
+#else
+    if (_kbhit()) {
+        c = static_cast<char>(_getch());
+        return true;
+    }
+    return false;
+#endif
+}
+
+}
 
 // Constructor for TorrentCreator
 TorrentCreator::TorrentCreator(const TorrentConfig& config)
@@ -173,12 +202,12 @@ void TorrentCreator::hash_block(const fs::path& path, lt::create_torrent& t, int
             
             // Check for user interruption
             char c = 0;
-            if (read(STDIN_FILENO, &c, 1) > 0) {
+            if (check_key_press(c)) {
                 if (c == 'q' || c == 'Q' || c == '\x03') {
                     log_message("Process interrupted by user", LogLevel::WARNING);
                     std::cerr << "\nProcess interrupted by user\n";
                     std::cerr.flush();
-                    std::exit(1); // Exit immediately
+                    std::exit(1);
                 }
             }
         }
@@ -261,12 +290,12 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
 
         // Non-blocking check for user input
         char c = 0;
-        if (read(STDIN_FILENO, &c, 1) > 0) {
+        if (check_key_press(c)) {
             if (c == 'q' || c == 'Q' || c == '\x03') {
                 log_message("Process interrupted by user", LogLevel::WARNING);
                 std::cerr << "\nProcess interrupted by user\n";
                 std::cerr.flush();
-                std::exit(1); // Exit immediately instead of throwing exception
+                std::exit(1);
             }
         }
         // --- End of timeout and user interruption check ---
@@ -340,33 +369,29 @@ std::string TorrentCreator::format_eta(double eta) const {
 
 // Creates the torrent file
 // Function to restore terminal settings on program exit
+#ifndef _WIN32
 void cleanup_terminal(struct termios* old_settings) {
     if (old_settings && isatty(STDIN_FILENO)) {
         tcsetattr(STDIN_FILENO, TCSANOW, old_settings);
     }
 }
+#endif
 
 void TorrentCreator::create_torrent() {
-    // Set up terminal for non-blocking input
-    struct termios old_tio, new_tio;
     bool terminal_changed = false;
+#ifndef _WIN32
+    struct termios old_tio, new_tio;
     
-    // Only change terminal settings if stdin is a terminal
-    if (isatty(STDIN_FILENO)) {
-        // Get current terminal settings
+    if (is_terminal()) {
         tcgetattr(STDIN_FILENO, &old_tio);
-        // Make a copy
         new_tio = old_tio;
-        // Disable canonical mode and echo
         new_tio.c_lflag &= (~ICANON & ~ECHO);
-        // Set minimum number of characters for non-canonical read
         new_tio.c_cc[VMIN] = 0;
-        // Set timeout to 0.1 seconds
         new_tio.c_cc[VTIME] = 1;
-        // Apply new settings
         tcsetattr(STDIN_FILENO, TCSANOW, &new_tio);
         terminal_changed = true;
     }
+#endif
     
     try {
         log_message("Starting torrent creation for: " + config_.path.string(), LogLevel::INFO);
@@ -474,12 +499,12 @@ void TorrentCreator::create_torrent() {
             
             // Check for user interruption
             char c = 0;
-            if (read(STDIN_FILENO, &c, 1) > 0) {
+            if (check_key_press(c)) {
                 if (c == 'q' || c == 'Q' || c == '\x03') {
                     log_message("Process interrupted by user", LogLevel::WARNING);
                     std::cerr << "\nProcess interrupted by user\n";
                     std::cerr.flush();
-                    std::exit(1); // Exit immediately
+                    std::exit(1);
                 }
             }
         };
@@ -520,25 +545,20 @@ void TorrentCreator::create_torrent() {
         }
 
         // Set up non-blocking input for interruption
-        struct termios old_tio, new_tio;
-        bool terminal_changed = false;
+#ifndef _WIN32
+        struct termios old_tio_inner, new_tio_inner;
+        bool inner_terminal_changed = false;
         
-        // Only change terminal settings if stdin is a terminal
         if (isatty(STDIN_FILENO)) {
-            // Get current terminal settings
-            tcgetattr(STDIN_FILENO, &old_tio);
-            // Make a copy
-            new_tio = old_tio;
-            // Disable canonical mode and echo
-            new_tio.c_lflag &= (~ICANON & ~ECHO);
-            // Set minimum number of characters for non-canonical read
-            new_tio.c_cc[VMIN] = 0;
-            // Set timeout to 0 seconds (non-blocking)
-            new_tio.c_cc[VTIME] = 0;
-            // Apply new settings
-            tcsetattr(STDIN_FILENO, TCSANOW, &new_tio);
-            terminal_changed = true;
+            tcgetattr(STDIN_FILENO, &old_tio_inner);
+            new_tio_inner = old_tio_inner;
+            new_tio_inner.c_lflag &= (~ICANON & ~ECHO);
+            new_tio_inner.c_cc[VMIN] = 0;
+            new_tio_inner.c_cc[VTIME] = 0;
+            tcsetattr(STDIN_FILENO, TCSANOW, &new_tio_inner);
+            inner_terminal_changed = true;
         }
+#endif
         
         // Check for user interruption and timeout
         auto loop_start_time = std::chrono::steady_clock::now();
@@ -564,24 +584,28 @@ void TorrentCreator::create_torrent() {
                     std::cerr << "Runtime error: Hashing timeout" << std::endl;
                     std::cerr.flush();
                     
+#ifndef _WIN32
                     if (terminal_changed) {
                         tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
                     }
+#endif
                     
                     std::exit(1);
                 }
 
                 // Check for user interruption
                 char c = 0;
-                if (read(STDIN_FILENO, &c, 1) > 0) {
+                if (check_key_press(c)) {
                     if (c == 'q' || c == 'Q' || c == '\x03') {
                         log_message("Process interrupted by user", LogLevel::WARNING);
                         std::cerr << "\nProcess interrupted by user" << std::endl;
                         std::cerr.flush();
                         
+#ifndef _WIN32
                         if (terminal_changed) {
                             tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
                         }
+#endif
                         
                         std::exit(1);
                     }
@@ -635,25 +659,28 @@ void TorrentCreator::create_torrent() {
     } catch (const std::runtime_error& e) {
         std::cerr << e.what() << std::endl;
         log_message("Runtime error: " + std::string(e.what()), LogLevel::ERR);
-        // Restore terminal settings if changed
+#ifndef _WIN32
         if (terminal_changed) {
             tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
         }
+#endif
         throw;
-    } catch (const std::exception& e) { // Catch-all for other standard exceptions
+    } catch (const std::exception& e) {
         std::cerr << "An unexpected error occurred: " << e.what() << std::endl;
         log_message("Unexpected error: " + std::string(e.what()), LogLevel::ERR);
-        // Restore terminal settings if changed
+#ifndef _WIN32
         if (terminal_changed) {
             tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
         }
+#endif
         throw;
     }
     
-    // Restore terminal settings if changed
+#ifndef _WIN32
     if (terminal_changed) {
         tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
     }
+#endif
 }
 
 // Prints a summary of the created torrent
