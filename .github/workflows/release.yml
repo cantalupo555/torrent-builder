@@ -227,11 +227,54 @@ jobs:
       - name: Rename binary
         run: mv build/torrent_builder torrent_builder_${{ steps.version.outputs.VERSION }}_linux_${{ matrix.arch }}
 
-      - name: Upload binary
+      - name: Install nfpm
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Create nfpm config
+        run: |
+          cat > nfpm.yaml <<EOF
+          name: torrent-builder
+          arch: ${{ matrix.arch }}
+          platform: linux
+          version: ${{ steps.version.outputs.VERSION }}
+          maintainer: cantalupo555 <cantalupo@protonmail.com>
+          description: |
+            CLI tool for creating .torrent files from files and directories.
+            Supports v1, v2, and hybrid torrents with multi-threaded hashing.
+          vendor: cantalupo555
+          homepage: https://github.com/cantalupo555/torrent-builder
+          license: GPL-3.0
+          contents:
+            - src: ./torrent_builder_${{ steps.version.outputs.VERSION }}_linux_${{ matrix.arch }}
+              dst: /usr/bin/torrent_builder
+              file_info:
+                mode: 0755
+            - src: ./README.md
+              dst: /usr/share/doc/torrent-builder/README.md
+              file_info:
+                mode: 0644
+          EOF
+
+      - name: Build .deb package
+        run: |
+          nfpm package -p deb -f nfpm.yaml
+          mv *.deb torrent_builder_${{ steps.version.outputs.VERSION }}_linux_${{ matrix.arch }}.deb
+
+      - name: Build .rpm package
+        run: |
+          nfpm package -p rpm -f nfpm.yaml
+          mv *.rpm torrent_builder_${{ steps.version.outputs.VERSION }}_linux_${{ matrix.arch }}.rpm
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: torrent-builder-linux-${{ matrix.arch }}
-          path: torrent_builder_${{ steps.version.outputs.VERSION }}_linux_${{ matrix.arch }}
+          path: |
+            torrent_builder_${{ steps.version.outputs.VERSION }}_linux_${{ matrix.arch }}
+            torrent_builder_${{ steps.version.outputs.VERSION }}_linux_${{ matrix.arch }}.deb
+            torrent_builder_${{ steps.version.outputs.VERSION }}_linux_${{ matrix.arch }}.rpm
 
   build-windows:
     needs: changelog
