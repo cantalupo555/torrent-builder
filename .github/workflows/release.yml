@@ -195,12 +195,23 @@ jobs:
             echo 'EOF'
           } >> $GITHUB_OUTPUT
 
-  build:
+  build-linux:
     needs: changelog
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
         run: |
@@ -213,20 +224,117 @@ jobs:
           cmake .. -DCMAKE_BUILD_TYPE=Release
           cmake --build .
 
+      - name: Rename binary
+        run: mv build/torrent_builder torrent_builder_${{ steps.version.outputs.VERSION }}_linux_${{ matrix.arch }}
+
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: torrent-builder-linux-x86_64
-          path: build/torrent_builder
+          name: torrent-builder-linux-${{ matrix.arch }}
+          path: torrent_builder_${{ steps.version.outputs.VERSION }}_linux_${{ matrix.arch }}
+
+  build-windows:
+    needs: changelog
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            arch: amd64
+            msystem: UCRT64
+            prefix: mingw-w64-ucrt-x86_64
+          - os: windows-11-arm
+            arch: arm64
+            msystem: CLANGARM64
+            prefix: mingw-w64-clang-aarch64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Get version from tag
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            git
+            base-devel
+            ${{ matrix.prefix }}-cmake
+            ${{ matrix.prefix }}-libtorrent-rasterbar
+            ${{ matrix.prefix }}-pkg-config
+
+      - name: Build
+        shell: msys2 {0}
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -G "MSYS Makefiles"
+          cmake --build .
+
+      - name: Rename binary
+        shell: bash
+        run: mv build/torrent_builder.exe torrent_builder_${{ steps.version.outputs.VERSION }}_windows_${{ matrix.arch }}.exe
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: torrent-builder-windows-${{ matrix.arch }}
+          path: torrent_builder_${{ steps.version.outputs.VERSION }}_windows_${{ matrix.arch }}.exe
+
+  build-macos:
+    needs: changelog
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+          - os: macos-15
+            arch: amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: brew install cmake libtorrent-rasterbar pkg-config
+
+      - name: Build
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build .
+
+      - name: Rename and package
+        run: |
+          mv build/torrent_builder torrent_builder
+          zip torrent_builder_${{ steps.version.outputs.VERSION }}_macos_${{ matrix.arch }}.zip torrent_builder
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: torrent-builder-macos-${{ matrix.arch }}
+          path: torrent_builder_${{ steps.version.outputs.VERSION }}_macos_${{ matrix.arch }}.zip
 
   release:
-    needs: [changelog, build]
+    needs: [changelog, build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
     steps:
-      - name: Download binary
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: torrent-builder-linux-x86_64
+          path: bin
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la bin/
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
@@ -234,4 +342,4 @@ jobs:
           body: ${{ needs.changelog.outputs.changelog }}
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') }}
-          files: torrent_builder
+          files: bin/*
