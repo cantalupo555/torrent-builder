@@ -15,7 +15,7 @@
 enum class LogLevel {
     INFO,
     WARNING,
-    ERROR
+    ERR
 };
 
 #include <thread>

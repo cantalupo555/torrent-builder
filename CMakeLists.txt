@@ -24,6 +24,9 @@ else()
     add_compile_options(-O2)
 endif()
 
+# Find Boost (required by libtorrent headers)
+find_package(Boost REQUIRED)
+
 # Find libtorrent
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBTORRENT REQUIRED libtorrent-rasterbar>=2.0.10)
@@ -65,6 +68,7 @@ add_executable(torrent_builder
 target_include_directories(torrent_builder PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${LIBTORRENT_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
 )
 
 # Add constants header
