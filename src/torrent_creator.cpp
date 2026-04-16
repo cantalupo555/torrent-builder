@@ -1,5 +1,6 @@
 #include "torrent_creator.hpp"
 #include "constants.hpp"
+#include "utils.hpp"
 #include <fstream>
 #include <iomanip>
 #include <chrono>
@@ -31,7 +32,6 @@ void log_message(const std::string& message, LogLevel level = LogLevel::INFO) {
             << " [" << level_str << "] - " << message << "\n";
 }
 #include <libtorrent/version.hpp>
-#include <iomanip>
 #include <cmath>
 #include <fstream>
 #include <ctime>
@@ -69,37 +69,18 @@ TorrentCreator::TorrentCreator(const TorrentConfig& config)
     : config_(config), ses(lt::session_params{}) { // Initialize session with default parameters
 }
 
-// Automatically determines a suitable piece size based on the total size
-int TorrentCreator::auto_piece_size(int64_t total_size) {
-    using namespace PieceSizes;
 
-    if (total_size < 64LL * 1024 * 1024) return k16KB;        // < 64MB: 16KB
-    if (total_size < 128LL * 1024 * 1024) return k32KB;       // < 128MB: 32KB
-    if (total_size < 256LL * 1024 * 1024) return k64KB;       // < 256MB: 64KB
-    if (total_size < 512LL * 1024 * 1024) return k128KB;      // < 512MB: 128KB
-    if (total_size < 1LL * 1024 * 1024 * 1024) return k256KB;   // < 1GB: 256KB
-    if (total_size < 2LL * 1024 * 1024 * 1024) return k512KB;   // < 2GB: 512KB
-    if (total_size < 4LL * 1024 * 1024 * 1024) return k1024KB;  // < 4GB: 1MB
-    if (total_size < 8LL * 1024 * 1024 * 1024) return k2048KB;  // < 8GB: 2MB
-    if (total_size < 16LL * 1024 * 1024 * 1024) return k4096KB; // < 16GB: 4MB
-    if (total_size < 32LL * 1024 * 1024 * 1024) return k8192KB; // < 32GB: 8MB
-    if (total_size < 64LL * 1024 * 1024 * 1024) return k16384KB; // < 64GB: 16MB
-    return k32768KB; // >= 64GB: 32MB
-}
-
-// Returns flags for torrent creation based on the specified version
-lt::create_flags_t TorrentCreator::get_torrent_flags() const {
+lt::create_flags_t TorrentCreator::get_torrent_flags(TorrentVersion version) {
     lt::create_flags_t flags = {};
 
-    switch(config_.version) {
+    switch(version) {
         case TorrentVersion::V1:
-            flags |= lt::create_torrent::v1_only; // Set v1_only flag for V1 torrents
+            flags |= lt::create_torrent::v1_only;
             break;
         case TorrentVersion::V2:
-            flags |= lt::create_torrent::v2_only; // Set v2_only flag for V2 torrents
+            flags |= lt::create_torrent::v2_only;
             break;
         case TorrentVersion::HYBRID:
-            // No flags for hybrid, it will create both v1 and v2 merkle trees
             break;
     }
 
@@ -334,38 +315,14 @@ void TorrentCreator::print_progress_bar(int progress, int total, double speed, d
     std::cout << "] " << static_cast<int>(progress_percentage * 100) << "% ";
 
     // Display processed data / total
-    std::cout << format_size(processed) << " / " << format_size(total_size) << " ";
+    std::cout << utils::format_size(processed) << " / " << utils::format_size(total_size) << " ";
 
-    // Display speed
-    std::cout << "Speed: " << format_speed(speed) << " ";
+    std::cout << "Speed: " << utils::format_speed(speed) << " ";
 
-    // Display ETA
-    std::cout << "ETA: " << format_eta(eta) << "\r";
+    std::cout << "ETA: " << utils::format_eta(eta) << "\r";
     std::cout.flush();
 }
 
-std::string TorrentCreator::format_size(int64_t bytes) const {
-    const char* units[] = {"B", "KB", "MB", "GB", "TB"};
-    int unit = 0;
-    double size = static_cast<double>(bytes);
-
-    while (size >= 1024 && unit < 4) {
-        size /= 1024;
-        unit++;
-    }
-    return std::format("{:.2f} {}", size, units[unit]);
-}
-
-std::string TorrentCreator::format_speed(double speed) const {
-    double mb_per_sec = speed / (1024 * 1024);
-    return std::format("{:.2f} MB/s", mb_per_sec);
-}
-
-std::string TorrentCreator::format_eta(double eta) const {
-    int minutes = static_cast<int>(eta / 60);
-    int seconds = static_cast<int>(eta) % 60;
-    return std::format("{}m {}s", minutes, seconds);
-}
 
 // Creates the torrent file
 // Function to restore terminal settings on program exit
@@ -430,8 +387,8 @@ void TorrentCreator::create_torrent() {
         add_files_to_storage();
 
         // Use the specified piece_size or calculate automatically
-        int piece_size = config_.piece_size ? *config_.piece_size : auto_piece_size(fs_.total_size());
-        lt::create_flags_t flags = get_torrent_flags();
+        int piece_size = config_.piece_size ? *config_.piece_size : utils::auto_piece_size(fs_.total_size());
+        lt::create_flags_t flags = get_torrent_flags(config_.version);
 
         // Simplify the torrent for debugging
         lt::create_torrent t(fs_, piece_size, flags);
@@ -697,24 +654,7 @@ void TorrentCreator::print_torrent_summary(int64_t total_size, int piece_size, i
     }
     std::cout << "Version: " << version_str << "\n";
 
-    // Lambda function to format file sizes with appropriate units (B, KB, MB, GB, TB).
-    auto format_size = [](int64_t bytes) -> std::string {
-        const char* units[] = {"B", "KB", "MB", "GB", "TB"};
-        int unit = 0;
-        double size = bytes;
-
-        while (size >= 1024 && unit < 4) {
-            size /= 1024;
-            unit++;
-        }
-
-        // Use std::format instead of stringstream
-        return std::format("{:.2f} {}", size, units[unit]);
-    };
-
-    // Print torrent summary details: total size, number and size of pieces,
-    // number of trackers, number of web seeds, and whether the torrent is private
-    std::cout << "Total size: " << format_size(total_size) << "\n";
+    std::cout << "Total size: " << utils::format_size(total_size) << "\n";
     std::cout << "Pieces: " << num_pieces << " of " << piece_size / 1024 << "KB\n"; // Show piece_size in KB
     std::cout << "Trackers: " << config_.trackers.size() << "\n"; // Simplified tracker count
     std::cout << "Web seeds: " << config_.web_seeds.size() << "\n";

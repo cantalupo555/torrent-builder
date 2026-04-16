@@ -1,19 +1,19 @@
 #include "torrent_creator.hpp"
+#include "constants.hpp"
+#include "utils.hpp"
 #include <iostream>
 #include <vector>
 #include <optional>
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <cmath>
-#include <regex>
 #include <ranges>
-#include <cctype>
-#include <stdexcept> // For std::runtime_error and std::invalid_argument
+#include <stdexcept>
 
 namespace fs = std::filesystem;
 
 // Default trackers to be used if none are provided
-std::vector<std::string> default_trackers = {
+const std::vector<std::string> default_trackers = {
     "udp://open.stealth.si:80/announce",
     "udp://tracker.opentrackr.org:1337/announce",
     "udp://tracker.torrent.eu.org:451/announce",
@@ -23,41 +23,9 @@ std::vector<std::string> default_trackers = {
 };
 
 // List of allowed piece sizes (in KB). These are powers of 2
-const std::vector<int> allowed_piece_sizes = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768};
+const std::vector<int> allowed_piece_sizes(AllowedPieceSizes::values.begin(), AllowedPieceSizes::values.end());
 
 namespace {
-std::string sanitize_path(std::string input) {
-    auto is_space = [](unsigned char c) { return std::isspace(c); };
-    auto ltrim = [&](std::string& s) { s.erase(s.begin(), std::find_if_not(s.begin(), s.end(), is_space)); };
-    auto rtrim = [&](std::string& s) { s.erase(std::find_if_not(s.rbegin(), s.rend(), is_space).base(), s.end()); };
-
-    rtrim(input);
-    ltrim(input);
-
-    if (input.size() >= 2) {
-        if ((input.front() == '"' && input.back() == '"') ||
-            (input.front() == '\'' && input.back() == '\'')) {
-            input = input.substr(1, input.size() - 2);
-            ltrim(input);
-            rtrim(input);
-        }
-    }
-
-    std::string result;
-    result.reserve(input.size());
-    for (size_t i = 0; i < input.size(); ++i) {
-        if (input[i] == '\\' && i + 1 < input.size()) {
-            result += input[i + 1];
-            ++i;
-        } else if (input[i] == '\\' && i + 1 == input.size()) {
-            break;
-        } else {
-            result += input[i];
-        }
-    }
-    return result;
-}
-
 enum class OverwriteDecision { Proceed, Declined };
 
 OverwriteDecision prompt_overwrite(const std::string& filepath) {
@@ -75,12 +43,6 @@ OverwriteDecision prompt_overwrite(const std::string& filepath) {
 }
 }
 
-bool is_valid_url(const std::string& url) {
-    // Simple regular expression to validate URLs.
-    static const std::regex url_regex(R"(^(http|https|udp)://.+$)", std::regex::icase);
-    return std::regex_match(url, url_regex);
-}
-
 // Get torrent configuration from user input (interactive mode)
 TorrentConfig get_interactive_config() {
     std::cout << "=== TORRENT CONFIGURATION ===" << std::endl;
@@ -90,7 +52,7 @@ TorrentConfig get_interactive_config() {
     while (true) {
         std::cout << "Path to file or directory: ";
         std::getline(std::cin, path);
-        path = sanitize_path(path);
+        path = utils::sanitize_path(path);
         if (path.empty()) {
             std::cout << "Error: Input path cannot be empty\n";
             continue;
@@ -119,7 +81,7 @@ TorrentConfig get_interactive_config() {
     while (true) {
         std::cout << "Path to save torrent: ";
         std::getline(std::cin, output);
-        output = sanitize_path(output);
+        output = utils::sanitize_path(output);
         if (output.empty()) {
             std::cout << "Error: Output path cannot be empty\n";
             continue;
@@ -226,7 +188,7 @@ TorrentConfig get_interactive_config() {
                 std::getline(std::cin, tracker);
                 if (tracker.empty()) break;
 
-                if (!is_valid_url(tracker)) {
+                if (!utils::is_valid_url(tracker)) {
                     std::cout << "Error: Invalid tracker URL. Must start with http://, https://, or udp://\n";
                     continue;
                 }
@@ -256,7 +218,7 @@ TorrentConfig get_interactive_config() {
         std::getline(std::cin, seed);
         if (seed.empty()) break;
 
-        if (!is_valid_url(seed)) {
+        if (!utils::is_valid_url(seed)) {
             std::cout << "Error: Invalid web seed URL. Must start with http://, https://, or udp://\n";
             continue;
         }
@@ -402,7 +364,7 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
     if (result.count("tracker")) {
         std::vector<std::string> custom_trackers = result["tracker"].as<std::vector<std::string>>();
         for (const auto& tracker : custom_trackers) {
-            if (!is_valid_url(tracker)) {
+            if (!utils::is_valid_url(tracker)) {
                 throw std::runtime_error("Invalid tracker URL: " + tracker);
             }
             // Check for duplicates using std::ranges::contains
@@ -418,7 +380,7 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
     if (result.count("webseed")) {
         web_seeds = result["webseed"].as<std::vector<std::string>>();
         for (const auto& webseed : web_seeds) {
-            if (!is_valid_url(webseed)) {
+            if (!utils::is_valid_url(webseed)) {
                 throw std::runtime_error("Invalid web seed URL: " + webseed);
             }
         }
