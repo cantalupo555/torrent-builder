@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.28)
-project(torrent_builder VERSION 1.0 LANGUAGES CXX)
+
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cmake)
+
+project(torrent_builder VERSION ${TORRENT_BUILDER_VERSION} LANGUAGES CXX)
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/version.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/version.hpp
+    @ONLY
+)
 
 # Minimum GCC version check for C++23 Ranges support
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/compiler_checks.cmake)
@@ -79,6 +88,10 @@ add_executable(torrent_builder
     src/torrent_builder.cpp
 )
 
+target_include_directories(torrent_builder PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+
 target_link_libraries(torrent_builder PRIVATE
     torrent_builder_core
     cxxopts::cxxopts
@@ -90,6 +103,14 @@ enable_testing()
 file(GLOB TEST_SOURCES tests/*.cpp)
 if(TEST_SOURCES)
     add_executable(torrent_builder_tests ${TEST_SOURCES})
+
+    target_compile_definitions(torrent_builder_tests PRIVATE
+        BINARY_PATH="${CMAKE_BINARY_DIR}/torrent_builder"
+    )
+
+    target_include_directories(torrent_builder_tests PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}
+    )
 
     target_link_libraries(torrent_builder_tests PRIVATE
         GTest::gtest_main
@@ -124,6 +145,20 @@ add_test(NAME cmake_libtorrent_rejects_2_0_9
         -DLIBTORRENT_VERSION=2.0.9
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_libtorrent_reject.cmake)
 set_tests_properties(cmake_libtorrent_rejects_2_0_9 PROPERTIES WILL_FAIL TRUE)
+
+add_test(NAME cmake_version_override
+    COMMAND ${CMAKE_COMMAND}
+        -DTORRENT_BUILDER_VERSION=1.2.3
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_version_override.cmake)
+
+add_test(NAME cmake_version_prerelease
+    COMMAND ${CMAKE_COMMAND}
+        -DTORRENT_BUILDER_VERSION=2.0.0-rc1
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_version_prerelease.cmake)
+
+add_test(NAME cmake_version_fallback
+    COMMAND ${CMAKE_COMMAND}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_version_fallback.cmake)
 
 # ─── Installation ────────────────────────────────────────────
 install(TARGETS torrent_builder

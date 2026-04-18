@@ -56,6 +56,8 @@ For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --
 
 **Note**: The executable will be generated at `build/torrent_builder`. For debugging, use `-DCMAKE_BUILD_TYPE=Debug`. If pkg-config fails, check your installation in Prerequisites.
 
+**Versioning**: When building from a git tag (e.g., `v0.2.0`), the version is automatically detected. Otherwise, the version defaults to `dev`. You can override with `-DTORRENT_BUILDER_VERSION=x.y.z` during cmake configuration. Use `./torrent_builder --version` to check.
+
 ## Usage
 
 ### Interactive Mode
@@ -74,19 +76,22 @@ For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --
 
 ```
   -h, --help                 Show help
+  -v, --version              Show version
   -i, --interactive          Run in interactive mode
-  --path arg                 Path to file or directory (required)
-  --output arg               Output torrent file path (required)
-  --version arg              Torrent version (1=v1, 2=v2, 3=hybrid) (default: 3)
+  -p, --path arg             Path to file or directory (required)
+  -o, --output arg           Output torrent file path (required)
+  -t, --torrent-version arg  Torrent version (1=v1, 2=v2, 3=hybrid) (default: 3)
   --comment arg              Torrent comment
   --private                  Make torrent private
   --default-trackers         Use default trackers
-  --tracker arg              Add tracker URL (can be used multiple times)
+  -T, --tracker arg          Add tracker URL (can be used multiple times)
   --webseed arg              Add web seed URL (can be used multiple times)
   --piece-size arg           Piece size in KB (must be one of: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)
   --creator                  Set "Torrent Builder" as creator
   --creation-date            Set creation date
 ```
+
+> **Note:** `--version` now shows the software version. For torrent format version, use `--torrent-version` or `-t`.
 
 ## Examples
 
@@ -95,8 +100,9 @@ Basic usage:
 ./torrent_builder -i
 ./torrent_builder --path /data/file --output file.torrent
 ./torrent_builder --path /data/file --output file.torrent --default-trackers
-./torrent_builder --path /data/folder --output folder.torrent --version 2 --private
+./torrent_builder --path /data/folder --output folder.torrent --torrent-version 2 --private
 ./torrent_builder --path /data/file --output file.torrent --piece-size 1024
+./torrent_builder --version
 ```
 
 Add multiple trackers (added in ascending order of priority; the first tracker has the highest priority — tier 0):

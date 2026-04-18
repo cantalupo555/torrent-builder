@@ -1,0 +1,8 @@
+include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/version.cmake)
+if(NOT TORRENT_BUILDER_DISPLAY_VERSION)
+    message(FATAL_ERROR "FAIL: DISPLAY_VERSION should not be empty, got: '${TORRENT_BUILDER_DISPLAY_VERSION}'")
+endif()
+if(NOT TORRENT_BUILDER_VERSION)
+    message(FATAL_ERROR "FAIL: VERSION should not be empty, got: '${TORRENT_BUILDER_VERSION}'")
+endif()
+message(STATUS "PASS: version fallback accepted (display=${TORRENT_BUILDER_DISPLAY_VERSION})")

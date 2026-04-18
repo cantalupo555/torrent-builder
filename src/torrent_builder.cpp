@@ -1,6 +1,7 @@
 #include "torrent_creator.hpp"
 #include "constants.hpp"
 #include "utils.hpp"
+#include "version.hpp"
 #include <iostream>
 #include <vector>
 #include <optional>
@@ -343,7 +344,7 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
     }
 
     // Get torrent version
-    std::string version = result["version"].as<std::string>();
+    std::string version = result["torrent-version"].as<std::string>();
     TorrentVersion tv = TorrentVersion::V1;
     if (version == "2") tv = TorrentVersion::V2;
     else if (version == "3") tv = TorrentVersion::HYBRID;
@@ -441,12 +442,13 @@ int main(int argc, char* argv[]) {
         cxxopts::Options options("torrent_builder", "Create torrent files");
         options.add_options()
             ("h,help", "Show help")
+            ("v,version", "Show version")
             ("i,interactive", "Run in interactive mode")
-            ("v,version", "Torrent version (1=v1, 2=v2, 3=hybrid)", cxxopts::value<std::string>()->default_value("3"), "{1,2,3}")
+            ("t,torrent-version", "Torrent version (1=v1, 2=v2, 3=hybrid)", cxxopts::value<std::string>()->default_value("3"), "{1,2,3}")
             ("c,comment", "Torrent comment", cxxopts::value<std::string>(), "COMMENT")
             ("private", "Make torrent private")
             ("default-trackers", "Use default trackers")
-            ("t,tracker", "Add tracker URL", cxxopts::value<std::vector<std::string>>(), "URL")
+            ("T,tracker", "Add tracker URL", cxxopts::value<std::vector<std::string>>(), "URL")
             ("w,webseed", "Add web seed URL", cxxopts::value<std::vector<std::string>>(), "URL")
             ("s,piece-size", "Piece size in KB (allowed: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)", cxxopts::value<int>(), "SIZE")
             ("creator", "Set \"Torrent Builder\" as creator")
@@ -460,14 +462,18 @@ int main(int argc, char* argv[]) {
         auto result = options.parse(argc, argv);
 
         // Help and version
+        if (result.count("version")) {
+            std::cout << "torrent_builder " << TORRENT_BUILDER_VERSION << std::endl;
+            return 0;
+        }
+
         if (result.count("help") || argc == 1) {
             std::cout << options.help() << "\n";
             std::cout << "Examples:\n";
-            // Reordered examples here:
             std::cout << "  ./torrent_builder -i\n";
             std::cout << "  ./torrent_builder -p /data/file -o file.torrent\n";
             std::cout << "  ./torrent_builder --path /data/file --output file.torrent --default-trackers\n";
-            std::cout << "  ./torrent_builder --path /data/folder --output folder.torrent --version 2 --private\n";
+            std::cout << "  ./torrent_builder --path /data/folder --output folder.torrent --torrent-version 2 --private\n";
             std::cout << "  ./torrent_builder --path /data/file --output file.torrent --piece-size 1024\n";
             std::cout << "\nNote: Allowed piece sizes (in KB): 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768\n";
             return 0;
