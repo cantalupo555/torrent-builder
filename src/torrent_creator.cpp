@@ -1,4 +1,5 @@
 #include "torrent_creator.hpp"
+#include "logger.hpp"
 #include "constants.hpp"
 #include "utils.hpp"
 #include <fstream>
@@ -12,25 +13,6 @@
 #include <conio.h>
 #include <io.h>
 #endif
-
-// Logging function with levels
-void log_message(const std::string& message, LogLevel level = LogLevel::INFO) {
-    auto now = std::chrono::system_clock::now();
-    auto now_time_t = std::chrono::system_clock::to_time_t(now);
-    
-    std::ofstream logfile("torrent_builder.log", std::ios_base::app);
-    
-    // Get level string
-    std::string level_str;
-    switch(level) {
-        case LogLevel::INFO: level_str = "INFO"; break;
-        case LogLevel::WARNING: level_str = "WARNING"; break;
-        case LogLevel::ERR: level_str = "ERROR"; break;
-    }
-    
-    logfile << std::put_time(std::localtime(&now_time_t), "%Y-%m-%d %H:%M:%S") 
-            << " [" << level_str << "] - " << message << "\n";
-}
 #include <libtorrent/version.hpp>
 #include <cmath>
 #include <fstream>
@@ -380,7 +362,7 @@ void TorrentCreator::create_torrent() {
         } catch (const fs::filesystem_error& e) {
             log_message("Could not verify disk space: " + std::string(e.what()), LogLevel::WARNING);
         } catch (const std::exception& e) {
-            log_message("Warning: Could not verify disk space: " + std::string(e.what()));
+            log_message("Could not verify disk space: " + std::string(e.what()), LogLevel::WARNING);
         }
 
         // Add files to the file storage
@@ -461,6 +443,12 @@ void TorrentCreator::create_torrent() {
                     log_message("Process interrupted by user", LogLevel::WARNING);
                     std::cerr << "\nProcess interrupted by user\n";
                     std::cerr.flush();
+#ifndef _WIN32
+                    // Restore terminal from raw mode before exiting
+                    if (terminal_changed) {
+                        tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
+                    }
+#endif
                     std::exit(1);
                 }
             }

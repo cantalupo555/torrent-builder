@@ -1,4 +1,5 @@
 #include "torrent_creator.hpp"
+#include "logger.hpp"
 #include "constants.hpp"
 #include "utils.hpp"
 #include "version.hpp"
@@ -326,8 +327,9 @@ TorrentConfig get_interactive_config() {
     );
 }
 
-// Get torrent configuration from command line arguments
-TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
+// Parse command-line arguments into a TorrentConfig.
+// Returns std::nullopt if the user declines to overwrite an existing output file.
+std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult& result) {
     if (!result.count("path")) {
         throw std::runtime_error("Path is required");
     }
@@ -339,7 +341,7 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
     std::string output_path = result["output"].as<std::string>();
     if (fs::exists(output_path)) {
         if (prompt_overwrite(output_path) == OverwriteDecision::Declined) {
-            throw std::runtime_error("Warning: Output file '" + output_path + "' already exists. User chose not to overwrite. Aborting.");
+            return std::nullopt;
         }
     }
 
@@ -431,7 +433,10 @@ TorrentConfig get_commandline_config(const cxxopts::ParseResult& result) {
             include_creation_date // Pass creation date flag
         );
     } catch (const fs::filesystem_error& e) {
-        throw std::runtime_error("Error: The specified path does not exist. Please check the path and try again.");
+        // Preserve the specific path and system error for better diagnostics
+        throw std::runtime_error(
+            "Error accessing path '" + e.path1().string() + "': " + e.what()
+        );
     }
 }
 
@@ -485,20 +490,30 @@ int main(int argc, char* argv[]) {
             TorrentCreator creator(config);
             creator.create_torrent();
         } else {
-            auto config = get_commandline_config(result);
-            TorrentCreator creator(config);
+            auto config_opt = get_commandline_config(result);
+            if (!config_opt) {
+                std::string output_path = result["output"].as<std::string>();
+                log_message("User declined to overwrite: " + output_path, LogLevel::INFO);
+                std::cout << "Operation cancelled.\n";
+                return 0;
+            }
+            TorrentCreator creator(*config_opt);
             creator.create_torrent();
         }
     } catch (const std::filesystem::filesystem_error& e) {
+        log_message(std::string("Filesystem error: ") + e.what(), LogLevel::ERR);
         std::cerr << e.what() << std::endl;
         return 1;
     } catch (const std::invalid_argument& e) {
+        log_message(std::string("Invalid argument: ") + e.what(), LogLevel::ERR);
         std::cerr << e.what() << std::endl;
         return 1;
     } catch (const std::runtime_error& e) {
+        log_message(std::string("Runtime error: ") + e.what(), LogLevel::ERR);
         std::cerr << e.what() << std::endl;
         return 1;
     } catch (const std::exception& e) {
+        log_message(std::string("Unexpected error: ") + e.what(), LogLevel::ERR);
         std::cerr << "An unexpected error occurred: " << e.what() << std::endl;
         return 1;
     }

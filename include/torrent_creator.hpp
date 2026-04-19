@@ -11,13 +11,7 @@
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/session.hpp>
 
-// Enum for log levels
-enum class LogLevel {
-    INFO,
-    WARNING,
-    ERR
-};
-
+#include "logger.hpp"
 #include <thread>
 #include <mutex>
 #include <string>
@@ -63,10 +57,10 @@ struct TorrentConfig {
           comment(c), is_private(priv), web_seeds(ws), piece_size(ps),
           creator(creator), include_creation_date(include_creation_date) // Initialize new members
     {
-        // Validate that the provided path exists. Throws an exception if not
+        // Validate that the provided path exists
         std::error_code ec;
         if (!fs::exists(path, ec)) {
-            throw std::filesystem::filesystem_error("Error: The specified path does not exist. Please check the path and try again.", ec);
+            throw std::filesystem::filesystem_error("The specified path does not exist", path, ec);
         }
     }
 };
