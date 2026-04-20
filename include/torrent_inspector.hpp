@@ -79,7 +79,7 @@ class TorrentInspector
     std::unique_ptr<libtorrent::torrent_info> torrent_info_;
 
     void parse_torrent_file();
-    std::string compute_info_hash(const libtorrent::info_hash_t &hash) const;
+    std::string compute_info_hash(const libtorrent::info_hash_t &hash, bool v2) const;
     void generate_magnet_link(TorrentMetadata &meta);
     std::vector<std::string> flatten_tracker_list() const;
 };

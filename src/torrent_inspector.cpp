@@ -50,26 +50,25 @@ void TorrentInspector::parse_torrent_file()
     }
 }
 
-std::string TorrentInspector::compute_info_hash(const libtorrent::info_hash_t &hash) const
+std::string TorrentInspector::compute_info_hash(const libtorrent::info_hash_t &hash, bool v2) const
 {
     std::stringstream ss;
     ss << std::hex << std::setfill('0');
 
-    if (hash.has_v1())
+    if (!v2 && hash.has_v1())
     {
         for (unsigned char byte : hash.v1)
         {
             ss << std::setw(2) << static_cast<int>(byte);
         }
     }
-    else if (hash.has_v2())
+    else if (v2 && hash.has_v2())
     {
         for (unsigned char byte : hash.v2)
         {
             ss << std::setw(2) << static_cast<int>(byte);
         }
     }
-
     return ss.str();
 }
 
@@ -127,8 +126,8 @@ TorrentMetadata TorrentInspector::inspect()
     meta.total_size = torrent_info_->total_size();
 
     const auto &info_hash = torrent_info_->info_hashes();
-    meta.info_hash_v1 = compute_info_hash(info_hash);
-    meta.info_hash_v2 = info_hash.has_v2() ? compute_info_hash(info_hash) : "";
+    meta.info_hash_v1 = compute_info_hash(info_hash, false);
+    meta.info_hash_v2 = compute_info_hash(info_hash, true);
     meta.is_hybrid = info_hash.has_v1() && info_hash.has_v2();
 
     const auto &files = torrent_info_->files();
