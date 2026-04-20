@@ -210,12 +210,16 @@ std::string format_timestamp(int64_t timestamp)
     std::time_t time = static_cast<std::time_t>(timestamp);
     std::tm *tm_info = std::gmtime(&time);
 
+    if (tm_info == nullptr)
+    {
+        return "Invalid timestamp";
+    }
+
     std::ostringstream formatted;
     formatted << std::put_time(tm_info, "%Y-%m-%d %H:%M:%S") << " UTC";
 
     return formatted.str();
 }
-
 std::string to_lower(const std::string &str)
 {
     std::string result = str;
