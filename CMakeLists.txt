@@ -66,6 +66,7 @@ FetchContent_MakeAvailable(googletest)
 # ─── Core library ────────────────────────────────────────────
 add_library(torrent_builder_core STATIC
     src/torrent_creator.cpp
+    src/torrent_inspector.cpp    # اضافه شده
     src/logger.cpp
     src/utils.cpp
 )

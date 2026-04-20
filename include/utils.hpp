@@ -4,8 +4,13 @@
 #include <string>
 #include <cstdint>
 
-namespace utils {
+namespace utils
+{
 
+std::string url_encode(const std::string &str);
+std::string escape_json(const std::string &str);
+std::string format_file_size(int64_t bytes);
+std::string format_timestamp(int64_t timestamp);
 /**
  * @brief Calculate the recommended piece size based on total content size.
  * @param total_size Total size of content in bytes.
@@ -18,7 +23,7 @@ int auto_piece_size(int64_t total_size);
  * @param url The URL string to validate.
  * @return true if the URL matches ^(http|https|udp)://.+$ (case-insensitive).
  */
-bool is_valid_url(const std::string& url);
+bool is_valid_url(const std::string &url);
 
 /**
  * @brief Trim whitespace, strip surrounding quotes, and remove escape backslashes.
@@ -48,6 +53,6 @@ std::string format_speed(double speed);
  */
 std::string format_eta(double eta);
 
-}
+} // namespace utils
 
 #endif
