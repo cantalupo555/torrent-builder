@@ -165,6 +165,15 @@ TEST_F(InspectorTest, FormatFileTreeJsonValid)
     EXPECT_NE(json.find("\"size_formatted\": \"1.00 KiB\""), std::string::npos);
 }
 
+TEST_F(InspectorTest, V1TorrentHashLength)
+{
+    TorrentInspector inspector(torrent_path_.string());
+    TorrentMetadata meta = inspector.inspect();
+
+    EXPECT_FALSE(meta.info_hash_v1.empty());
+    EXPECT_EQ(meta.info_hash_v1.size(), 40);
+}
+
 TEST(UtilsTest, UrlEncodeBasic)
 {
     EXPECT_EQ(utils::url_encode("hello world"), "hello%20world");
@@ -191,6 +200,17 @@ TEST(UtilsTest, EscapeJsonNewline)
     EXPECT_EQ(utils::escape_json("Line1\nLine2"), "Line1\\nLine2");
     EXPECT_EQ(utils::escape_json("Tab\there"), "Tab\\there");
     EXPECT_EQ(utils::escape_json("Carriage\rreturn"), "Carriage\\rreturn");
+}
+
+TEST(UtilsTest, EscapeJsonNonAscii)
+{
+    std::string input;
+    input.push_back(static_cast<char>(0x80));
+    input.push_back(static_cast<char>(0xFF));
+    std::string output = utils::escape_json(input);
+
+    EXPECT_NE(output.find("\\u0080"), std::string::npos);
+    EXPECT_NE(output.find("\\u00FF"), std::string::npos);
 }
 
 TEST(UtilsTest, FormatFileSize)
