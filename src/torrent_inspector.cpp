@@ -363,12 +363,13 @@ std::string TorrentInspector::format_file_tree(const TorrentMetadata &meta, bool
             json << "    {\n";
             json << "      \"path\": \"" << utils::escape_json(file.path) << "\",\n";
             json << "      \"size\": " << file.size << ",\n";
-            json << "      \"size_formatted\": \"" << utils::format_file_size(file.size) << "\"\n";
+            json << "      \"size_formatted\": \"" << utils::format_file_size(file.size) << "\"";
             if (file.symlink_path)
             {
-                json << "      \"symlink\": \"" << utils::escape_json(*file.symlink_path) << "\"\n";
+                json << ",\n      \"symlink\": \"" << utils::escape_json(*file.symlink_path)
+                     << "\"";
             }
-            json << "    }";
+            json << "\n    }";
             if (i < meta.files.size() - 1)
                 json << ",";
             json << "\n";
