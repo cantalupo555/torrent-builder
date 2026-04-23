@@ -146,7 +146,7 @@ std::string escape_json(const std::string &str)
 {
     std::ostringstream escaped;
 
-    for (char c : str)
+    for (unsigned char c : str)
     {
         switch (c)
         {
@@ -172,7 +172,12 @@ std::string escape_json(const std::string &str)
             escaped << "\\t";
             break;
         default:
-            if (static_cast<unsigned char>(c) < 0x20)
+            if (c < 0x20)
+            {
+                escaped << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                        << static_cast<int>(c);
+            }
+            else if (c >= 0x80)
             {
                 escaped << "\\u" << std::hex << std::setw(4) << std::setfill('0')
                         << static_cast<int>(c);
@@ -210,12 +215,16 @@ std::string format_timestamp(int64_t timestamp)
     std::time_t time = static_cast<std::time_t>(timestamp);
     std::tm *tm_info = std::gmtime(&time);
 
+    if (tm_info == nullptr)
+    {
+        return "Invalid timestamp";
+    }
+
     std::ostringstream formatted;
     formatted << std::put_time(tm_info, "%Y-%m-%d %H:%M:%S") << " UTC";
 
     return formatted.str();
 }
-
 std::string to_lower(const std::string &str)
 {
     std::string result = str;

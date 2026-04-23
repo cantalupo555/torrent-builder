@@ -543,7 +543,7 @@ int handle_inspect_command(const std::vector<std::string> &args)
 {
     try
     {
-        // ساخت آرایه از رشته‌ها
+        // Create array from strings
         int argc = static_cast<int>(args.size()) + 1;
         std::vector<const char *> argv;
         argv.push_back("torrent-builder");

@@ -50,7 +50,7 @@ void TorrentInspector::parse_torrent_file()
     }
 }
 
-std::string TorrentInspector::compute_info_hash(const libtorrent::info_hash_t &hash) const
+std::string TorrentInspector::compute_info_hash_v1(const libtorrent::info_hash_t &hash) const
 {
     std::stringstream ss;
     ss << std::hex << std::setfill('0');
@@ -62,14 +62,21 @@ std::string TorrentInspector::compute_info_hash(const libtorrent::info_hash_t &h
             ss << std::setw(2) << static_cast<int>(byte);
         }
     }
-    else if (hash.has_v2())
+    return ss.str();
+}
+
+std::string TorrentInspector::compute_info_hash_v2(const libtorrent::info_hash_t &hash) const
+{
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0');
+
+    if (hash.has_v2())
     {
         for (unsigned char byte : hash.v2)
         {
             ss << std::setw(2) << static_cast<int>(byte);
         }
     }
-
     return ss.str();
 }
 
@@ -127,8 +134,8 @@ TorrentMetadata TorrentInspector::inspect()
     meta.total_size = torrent_info_->total_size();
 
     const auto &info_hash = torrent_info_->info_hashes();
-    meta.info_hash_v1 = compute_info_hash(info_hash);
-    meta.info_hash_v2 = info_hash.has_v2() ? compute_info_hash(info_hash) : "";
+    meta.info_hash_v1 = compute_info_hash_v1(info_hash);
+    meta.info_hash_v2 = compute_info_hash_v2(info_hash);
     meta.is_hybrid = info_hash.has_v1() && info_hash.has_v2();
 
     const auto &files = torrent_info_->files();
@@ -188,7 +195,6 @@ TorrentMetadata TorrentInspector::inspect()
 
     return meta;
 }
-
 bool TorrentInspector::verify_files(const fs::path &base_path) const
 {
     if (!torrent_info_)
@@ -364,12 +370,13 @@ std::string TorrentInspector::format_file_tree(const TorrentMetadata &meta, bool
             json << "    {\n";
             json << "      \"path\": \"" << utils::escape_json(file.path) << "\",\n";
             json << "      \"size\": " << file.size << ",\n";
-            json << "      \"size_formatted\": \"" << utils::format_file_size(file.size) << "\"\n";
+            json << "      \"size_formatted\": \"" << utils::format_file_size(file.size) << "\"";
             if (file.symlink_path)
             {
-                json << "      \"symlink\": \"" << utils::escape_json(*file.symlink_path) << "\"\n";
+                json << ",\n      \"symlink\": \"" << utils::escape_json(*file.symlink_path)
+                     << "\"";
             }
-            json << "    }";
+            json << "\n    }";
             if (i < meta.files.size() - 1)
                 json << ",";
             json << "\n";
