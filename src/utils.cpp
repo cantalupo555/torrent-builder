@@ -303,7 +303,7 @@ std::string extract_domain(const std::string &tracker_url)
         auto bracket_end = host_port.find(']');
         if (bracket_end != std::string::npos)
             return host_port.substr(1, bracket_end - 1);
-        return host_port.substr(1);
+        return "";
     }
 
     auto colon_pos = host_port.find(':');

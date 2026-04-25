@@ -295,6 +295,10 @@ TEST(ExtractDomain, IPv6FullAddress) {
     EXPECT_EQ(utils::extract_domain("http://[2001:db8::1]/announce"), "2001:db8::1");
 }
 
+TEST(ExtractDomain, IPv6MalformedMissingClosingBracket) {
+    EXPECT_EQ(utils::extract_domain("http://[::1/announce"), "");
+}
+
 TEST(GenerateOutputFilename, WithTrackerNoSkip) {
     std::vector<std::string> trackers = {"https://tracker.example.com/announce"};
     EXPECT_EQ(utils::generate_output_filename("/path/to/My.Movie", trackers, false),
