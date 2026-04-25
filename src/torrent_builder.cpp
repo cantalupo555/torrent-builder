@@ -410,23 +410,59 @@ get_version: // Label to jump to if overwrite is 'n' or empty
 
 // Parse command-line arguments into a TorrentConfig.
 // Returns std::nullopt if the user declines to overwrite an existing output file.
-std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &result)
+std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &result, std::string &declined_path)
 {
     if (!result.count("path"))
     {
         throw std::runtime_error("Path is required");
     }
-    if (!result.count("output"))
+
+    std::string input_path = result["path"].as<std::string>();
+
+    // Get trackers (before output, needed for auto-naming)
+    std::vector<std::string> trackers;
+    bool use_default = result.count("default-trackers") > 0;
+
+    if (use_default)
     {
-        throw std::runtime_error("Output path is required");
+        trackers.insert(trackers.end(), default_trackers.begin(), default_trackers.end());
+    }
+    if (result.count("tracker"))
+    {
+        std::vector<std::string> custom_trackers = result["tracker"].as<std::vector<std::string>>();
+        for (const auto &tracker : custom_trackers)
+        {
+            if (!utils::is_valid_url(tracker))
+            {
+                throw std::runtime_error("Invalid tracker URL: " + tracker);
+            }
+            if (std::ranges::contains(trackers, tracker))
+            {
+                throw std::runtime_error("Duplicate tracker URL: " + tracker);
+            }
+        }
+        trackers.insert(trackers.end(), custom_trackers.begin(), custom_trackers.end());
     }
 
-    // --- Start of modification: Overwrite check ---
-    std::string output_path = result["output"].as<std::string>();
+    // Resolve output path (optional — auto-generate if not provided)
+    std::string output_path;
+    if (result.count("output"))
+    {
+        output_path = result["output"].as<std::string>();
+    }
+    else
+    {
+        bool skip_prefix = result.count("skip-prefix") > 0;
+        std::string filename = utils::generate_output_filename(input_path, trackers, skip_prefix);
+        output_path = (fs::current_path() / filename).string();
+        log_message("Auto-generated output path: " + output_path, LogLevel::INFO);
+    }
+
     if (fs::exists(output_path))
     {
         if (prompt_overwrite(output_path) == OverwriteDecision::Declined)
         {
+            declined_path = output_path;
             return std::nullopt;
         }
     }
@@ -444,32 +480,6 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
     if (result.count("comment"))
     {
         comment = result["comment"].as<std::string>();
-    }
-
-    // Get trackers
-    std::vector<std::string> trackers;
-    bool use_default = result.count("default-trackers") > 0;
-
-    if (use_default)
-    {
-        trackers.insert(trackers.end(), default_trackers.begin(), default_trackers.end());
-    }
-    if (result.count("tracker"))
-    {
-        std::vector<std::string> custom_trackers = result["tracker"].as<std::vector<std::string>>();
-        for (const auto &tracker : custom_trackers)
-        {
-            if (!utils::is_valid_url(tracker))
-            {
-                throw std::runtime_error("Invalid tracker URL: " + tracker);
-            }
-            // Check for duplicates using std::ranges::contains
-            if (std::ranges::contains(trackers, tracker))
-            {
-                throw std::runtime_error("Duplicate tracker URL: " + tracker);
-            }
-        }
-        trackers.insert(trackers.end(), custom_trackers.begin(), custom_trackers.end());
     }
 
     // Get web seeds
@@ -524,9 +534,9 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
 
     try
     {
-        return TorrentConfig(result["path"].as<std::string>(),
-                             output_path, // Use the validated output path
-                             trackers,    // Use user-provided trackers
+        return TorrentConfig(input_path,
+                             output_path,
+                             trackers,
                              tv, comment, result.count("private"), web_seeds, piece_size,
                              creator_str,          // Pass creator string
                              include_creation_date // Pass creation date flag
@@ -643,9 +653,10 @@ int main(int argc, char *argv[])
                    cxxopts::value<int>(), "SIZE")("creator", "Set \"Torrent Builder\" as creator")(
             "creation-date", "Set creation date")("p,path", "Path to file or directory",
                                                   cxxopts::value<std::string>(), "PATH")(
-            "o,output", "Output torrent file path", cxxopts::value<std::string>(), "OUTPUT");
+            "o,output", "Output torrent file path", cxxopts::value<std::string>(), "OUTPUT")(
+            "skip-prefix", "Omit tracker domain from auto-generated output filename");
 
-        options.positional_help("PATH OUTPUT");
+        options.positional_help("PATH [OUTPUT]");
         options.parse_positional({"path", "output"});
         auto result = options.parse(argc, argv);
 
@@ -668,6 +679,10 @@ int main(int argc, char *argv[])
                          "--torrent-version 2 --private\n";
             std::cout << "  ./torrent_builder --path /data/file --output file.torrent --piece-size "
                          "1024\n";
+            std::cout << "  ./torrent_builder --path /data/file --tracker "
+                         "\"https://tracker.example/announce\"\n";
+            std::cout << "  ./torrent_builder --path /data/file --tracker "
+                         "\"https://tracker.example/announce\" --skip-prefix\n";
             std::cout << "\nNote: Allowed piece sizes (in KB): 16, 32, 64, 128, 256, 512, 1024, "
                          "2048, 4096, 8192, 16384, 32768\n";
             return 0;
@@ -682,11 +697,11 @@ int main(int argc, char *argv[])
         }
         else
         {
-            auto config_opt = get_commandline_config(result);
+            std::string declined_path;
+            auto config_opt = get_commandline_config(result, declined_path);
             if (!config_opt)
             {
-                std::string output_path = result["output"].as<std::string>();
-                log_message("User declined to overwrite: " + output_path, LogLevel::INFO);
+                log_message("User declined to overwrite: " + declined_path, LogLevel::INFO);
                 std::cout << "Operation cancelled.\n";
                 return 0;
             }
