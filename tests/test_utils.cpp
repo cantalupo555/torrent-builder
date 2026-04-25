@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "utils.hpp"
 #include "constants.hpp"
+#include <fstream>
 
 TEST(AutoPieceSize, ZeroBytes) {
     EXPECT_EQ(utils::auto_piece_size(0), PieceSizes::k16KB);
@@ -244,4 +245,191 @@ TEST(FormatEta, TwoMinFiveSec) {
 
 TEST(FormatEta, OneHour) {
     EXPECT_EQ(utils::format_eta(3600.0), "60m 0s");
+}
+
+TEST(ExtractDomain, HTTPSWithPortAndPath) {
+    EXPECT_EQ(utils::extract_domain("https://tracker.example.com:8080/announce"), "tracker.example.com");
+}
+
+TEST(ExtractDomain, UDPWithPort) {
+    EXPECT_EQ(utils::extract_domain("udp://tracker.opentrackr.org:1337/announce"), "tracker.opentrackr.org");
+}
+
+TEST(ExtractDomain, HTTPNoPort) {
+    EXPECT_EQ(utils::extract_domain("http://bt.example.com/announce"), "bt.example.com");
+}
+
+TEST(ExtractDomain, HTTPSNoPath) {
+    EXPECT_EQ(utils::extract_domain("https://tracker.example.com"), "tracker.example.com");
+}
+
+TEST(ExtractDomain, HTTPPortNoPath) {
+    EXPECT_EQ(utils::extract_domain("http://tracker.example.com:6969"), "tracker.example.com");
+}
+
+TEST(ExtractDomain, EmptyString) {
+    EXPECT_EQ(utils::extract_domain(""), "");
+}
+
+TEST(ExtractDomain, NoScheme) {
+    EXPECT_EQ(utils::extract_domain("not-a-url"), "");
+}
+
+TEST(ExtractDomain, OnlyScheme) {
+    EXPECT_EQ(utils::extract_domain("https://"), "");
+}
+
+TEST(ExtractDomain, UserInfoStripped) {
+    EXPECT_EQ(utils::extract_domain("https://user@tracker.example.com/announce"), "tracker.example.com");
+}
+
+TEST(ExtractDomain, UserInfoWithPort) {
+    EXPECT_EQ(utils::extract_domain("https://user:pass@tracker.example.com:8080/announce"), "tracker.example.com");
+}
+
+TEST(ExtractDomain, IPv6Address) {
+    EXPECT_EQ(utils::extract_domain("http://[::1]:80/announce"), "::1");
+}
+
+TEST(ExtractDomain, IPv6FullAddress) {
+    EXPECT_EQ(utils::extract_domain("http://[2001:db8::1]/announce"), "2001:db8::1");
+}
+
+TEST(ExtractDomain, IPv6MalformedMissingClosingBracket) {
+    EXPECT_EQ(utils::extract_domain("http://[::1/announce"), "");
+}
+
+TEST(GenerateOutputFilename, WithTrackerNoSkip) {
+    std::vector<std::string> trackers = {"https://tracker.example.com/announce"};
+    EXPECT_EQ(utils::generate_output_filename("/path/to/My.Movie", trackers, false),
+              "tracker.example.com_My.Movie.torrent");
+}
+
+TEST(GenerateOutputFilename, WithTrackerSkipPrefix) {
+    std::vector<std::string> trackers = {"https://tracker.example.com/announce"};
+    EXPECT_EQ(utils::generate_output_filename("/path/to/My.Movie", trackers, true),
+              "My.Movie.torrent");
+}
+
+TEST(GenerateOutputFilename, NoTrackers) {
+    std::vector<std::string> trackers;
+    EXPECT_EQ(utils::generate_output_filename("/path/to/My.Movie", trackers, false),
+              "My.Movie.torrent");
+}
+
+TEST(GenerateOutputFilename, NoTrackersWithSkip) {
+    std::vector<std::string> trackers;
+    EXPECT_EQ(utils::generate_output_filename("/path/to/My.Movie", trackers, true),
+              "My.Movie.torrent");
+}
+
+TEST(GenerateOutputFilename, InvalidTrackerFallsBack) {
+    std::vector<std::string> trackers = {"not-a-url"};
+    EXPECT_EQ(utils::generate_output_filename("/path/to/My.Movie", trackers, false),
+              "My.Movie.torrent");
+}
+
+TEST(GenerateOutputFilename, MultipleTrackersUsesFirst) {
+    std::vector<std::string> trackers = {
+        "udp://t2.com:1337/announce",
+        "https://other.com/announce"
+    };
+    EXPECT_EQ(utils::generate_output_filename("/path/to/My.Movie", trackers, false),
+              "t2.com_My.Movie.torrent");
+}
+
+TEST(GenerateOutputFilename, FileWithExtensionNonExistent) {
+    std::vector<std::string> trackers = {"https://tracker.example.com/announce"};
+    EXPECT_EQ(utils::generate_output_filename("/path/to/file.mkv", trackers, false),
+              "tracker.example.com_file.mkv.torrent");
+}
+
+TEST(GenerateOutputFilename, ExistingFileStripsExtension) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_gen_fname_test";
+    fs::create_directories(temp_dir);
+    auto real_file = temp_dir / "MyMovie.mkv";
+    { std::ofstream(real_file) << "fake content"; }
+
+    std::vector<std::string> trackers = {"https://tracker.example.com/announce"};
+    EXPECT_EQ(utils::generate_output_filename(real_file, trackers, false),
+              "tracker.example.com_MyMovie.torrent");
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(GenerateOutputFilename, TrailingSeparatorUsesParentDirName) {
+    std::vector<std::string> trackers;
+    EXPECT_EQ(utils::generate_output_filename("/path/to/MyDir/", trackers, false),
+              "MyDir.torrent");
+}
+
+TEST(GenerateOutputFilename, DotPathResolvedToAbsolute) {
+    std::vector<std::string> trackers;
+    std::string result = utils::generate_output_filename(".", trackers, false);
+    EXPECT_NE(result, ".torrent");
+    EXPECT_NE(result, "..torrent");
+    EXPECT_TRUE(result.ends_with(".torrent"));
+}
+
+TEST(GenerateOutputFilename, DotDotPathResolvedToAbsolute) {
+    std::vector<std::string> trackers;
+    std::string result = utils::generate_output_filename("..", trackers, false);
+    EXPECT_NE(result, ".torrent");
+    EXPECT_NE(result, "..torrent");
+    EXPECT_TRUE(result.ends_with(".torrent"));
+}
+
+TEST(SanitizeFilenamePart, ReplacesWindowsInvalidChars) {
+    EXPECT_EQ(utils::sanitize_filename_part("hello:world"), "hello_world");
+    EXPECT_EQ(utils::sanitize_filename_part("a<b>c"), "a_b_c");
+    EXPECT_EQ(utils::sanitize_filename_part("test\"file"), "test_file");
+    EXPECT_EQ(utils::sanitize_filename_part("a|b?c*d"), "a_b_c_d");
+}
+
+TEST(SanitizeFilenamePart, ReplacesSlashes) {
+    EXPECT_EQ(utils::sanitize_filename_part("path\\to\\file"), "path_to_file");
+    EXPECT_EQ(utils::sanitize_filename_part("path/to/file"), "path_to_file");
+}
+
+TEST(SanitizeFilenamePart, NoChangeOnCleanString) {
+    EXPECT_EQ(utils::sanitize_filename_part("clean_name-123"), "clean_name-123");
+}
+
+TEST(GenerateOutputFilename, DomainWithInvalidCharsSanitized) {
+    std::vector<std::string> trackers = {"https://track|er:8080/announce"};
+    EXPECT_EQ(utils::generate_output_filename("/path/to/Content", trackers, false),
+              "track_er_Content.torrent");
+}
+
+TEST(GenerateOutputFilename, IPv6DomainSanitized) {
+    std::vector<std::string> trackers = {"http://[::1]:80/announce"};
+    EXPECT_EQ(utils::generate_output_filename("/path/to/Content", trackers, false),
+              "__1_Content.torrent");
+}
+
+TEST(GenerateOutputFilename, DotDotNonExistentFallback) {
+    std::vector<std::string> trackers;
+    std::string result = utils::generate_output_filename("/nonexistent/path/that/does/not/exist/..", trackers, false);
+    EXPECT_NE(result, "..torrent");
+    EXPECT_NE(result, ".torrent");
+    EXPECT_TRUE(result.ends_with(".torrent"));
+    EXPECT_FALSE(result.empty());
+}
+
+TEST(GenerateOutputFilename, ContentNameWithInvalidCharsSanitized) {
+    std::vector<std::string> trackers = {"https://tracker.example.com/announce"};
+    EXPECT_EQ(utils::generate_output_filename("/path/to/file:name", trackers, false),
+              "tracker.example.com_file_name.torrent");
+}
+
+TEST(GenerateOutputFilename, ContentNameWithPipeSanitized) {
+    std::vector<std::string> trackers;
+    EXPECT_EQ(utils::generate_output_filename("/path/to/bad|file", trackers, false),
+              "bad_file.torrent");
+}
+
+TEST(SanitizeFilenamePart, EmptyInput) {
+    EXPECT_EQ(utils::sanitize_filename_part(""), "");
 }

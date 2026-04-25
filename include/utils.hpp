@@ -3,6 +3,8 @@
 
 #include <string>
 #include <cstdint>
+#include <filesystem>
+#include <vector>
 
 namespace utils
 {
@@ -52,6 +54,65 @@ std::string format_speed(double speed);
  * @return Formatted string, e.g. "5m 30s".
  */
 std::string format_eta(double eta);
+
+/**
+ * @brief Convert a string to lowercase.
+ * @param str The input string.
+ * @return Lowercase copy of the input string.
+ */
+std::string to_lower(const std::string &str);
+
+/**
+ * @brief Check if a string starts with a given prefix.
+ * @param str The string to check.
+ * @param prefix The prefix to look for.
+ * @return true if str begins with prefix.
+ */
+bool starts_with(const std::string &str, const std::string &prefix);
+
+/**
+ * @brief Join a vector of strings with a delimiter.
+ * @param parts The string parts to join.
+ * @param delimiter The separator between parts.
+ * @return Joined string, or empty string if parts is empty.
+ */
+std::string join(const std::vector<std::string> &parts, const std::string &delimiter);
+
+/**
+ * @brief Split a string by a delimiter into a vector.
+ * @param str The string to split.
+ * @param delimiter The character to split on.
+ * @return Vector of non-empty tokens.
+ */
+std::vector<std::string> split(const std::string &str, char delimiter);
+
+/**
+ * @brief Extract the domain (host) from a tracker URL.
+ * @param tracker_url Full tracker URL (e.g., "https://tracker.example.com:8080/announce").
+ * @return Domain string (e.g., "tracker.example.com"), or empty string if URL is invalid.
+ */
+std::string extract_domain(const std::string &tracker_url);
+
+/**
+ * @brief Sanitize a string for safe use as a filename component.
+ *
+ * Replaces Windows-invalid characters (: < > " | ? * \\ /) with underscores.
+ *
+ * @param part The raw string to sanitize.
+ * @return Sanitized string safe for use in filenames.
+ */
+std::string sanitize_filename_part(const std::string &part);
+
+/**
+ * @brief Generate the output .torrent filename based on content and trackers.
+ * @param content_path Path to the file or directory being torrented.
+ * @param trackers List of tracker URLs (uses first tracker for domain prefix).
+ * @param skip_prefix If true, omit tracker domain prefix from filename.
+ * @return Generated filename (e.g., "tracker.example.com_ContentName.torrent").
+ */
+std::string generate_output_filename(const std::filesystem::path &content_path,
+                                      const std::vector<std::string> &trackers,
+                                      bool skip_prefix);
 
 } // namespace utils
 

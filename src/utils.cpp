@@ -273,4 +273,102 @@ std::vector<std::string> split(const std::string &str, char delimiter)
     return tokens;
 }
 
+std::string extract_domain(const std::string &tracker_url)
+{
+    auto scheme_end = tracker_url.find("://");
+    if (scheme_end == std::string::npos)
+        return "";
+
+    std::size_t authority_start = scheme_end + 3;
+    if (authority_start >= tracker_url.size())
+        return "";
+
+    std::size_t authority_end = tracker_url.size();
+    for (std::size_t i = authority_start; i < tracker_url.size(); ++i)
+    {
+        if (tracker_url[i] == '/')
+        {
+            authority_end = i;
+            break;
+        }
+    }
+
+    std::string authority = tracker_url.substr(authority_start, authority_end - authority_start);
+
+    auto at_pos = authority.rfind('@');
+    std::string host_port = (at_pos != std::string::npos) ? authority.substr(at_pos + 1) : authority;
+
+    if (!host_port.empty() && host_port[0] == '[')
+    {
+        auto bracket_end = host_port.find(']');
+        if (bracket_end != std::string::npos)
+            return host_port.substr(1, bracket_end - 1);
+        return "";
+    }
+
+    auto colon_pos = host_port.find(':');
+    if (colon_pos != std::string::npos)
+        return host_port.substr(0, colon_pos);
+
+    return host_port;
+}
+
+std::string sanitize_filename_part(const std::string &part)
+{
+    std::string result;
+    result.reserve(part.size());
+    for (char c : part)
+    {
+        if (c == ':' || c == '<' || c == '>' || c == '"' || c == '|'
+            || c == '?' || c == '*' || c == '\\' || c == '/')
+            result += '_';
+        else
+            result += c;
+    }
+    return result;
+}
+
+std::string generate_output_filename(const std::filesystem::path &content_path,
+                                       const std::vector<std::string> &trackers,
+                                       bool skip_prefix)
+{
+    auto resolved = content_path;
+    if (content_path.filename().empty())
+        resolved = content_path.parent_path();
+
+    std::string content_name = resolved.filename().string();
+    if (content_name == "." || content_name == "..")
+    {
+        std::error_code canon_ec;
+        auto canon = std::filesystem::canonical(resolved, canon_ec);
+        if (!canon_ec)
+            content_name = canon.filename().string();
+        else
+            content_name = std::filesystem::absolute(resolved).filename().string();
+        if (content_name == "." || content_name == "..")
+            content_name = std::filesystem::current_path().filename().string();
+    }
+    if (content_name.empty())
+        content_name = "torrent";
+
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(resolved, ec) && !ec)
+    {
+        auto stem = resolved.stem().string();
+        if (!stem.empty())
+            content_name = stem;
+    }
+
+    content_name = sanitize_filename_part(content_name);
+
+    if (skip_prefix || trackers.empty())
+        return content_name + ".torrent";
+
+    std::string domain = extract_domain(trackers[0]);
+    if (domain.empty())
+        return content_name + ".torrent";
+
+    return sanitize_filename_part(domain) + "_" + content_name + ".torrent";
+}
+
 } // namespace utils
