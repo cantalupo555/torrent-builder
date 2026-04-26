@@ -14,6 +14,10 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 - Add multiple trackers and web seeds
 - Include comments in torrent metadata
 - Detailed summary output after creation
+- Auto-naming: output filename generated from tracker domain and content name
+- Collision-safe naming: automatically resolves filename conflicts with `(1)`, `(2)`, etc.
+- Filename truncation with UTF-8 boundary safety (255-byte filesystem limit)
+- Configurable output directory and tracker index for filename prefix
 
 ## Prerequisites
 
@@ -69,8 +73,10 @@ For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --
 ### Command-line Mode
 
 ```bash
-./torrent_builder --path /path/to/file_or_directory --output output.torrent [options]
+./torrent_builder --path /path/to/file_or_directory [options]
 ```
+
+> **Note:** `--output` is optional. When omitted, the output filename is auto-generated from the tracker domain and content name (e.g., `tracker.example.com_myfile.torrent`).
 
 ## Options
 
@@ -79,16 +85,19 @@ For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --
   -v, --version              Show version
   -i, --interactive          Run in interactive mode
   -p, --path arg             Path to file or directory (required)
-  -o, --output arg           Output torrent file path (required)
+  -o, --output arg           Output torrent file path (optional; auto-generated if omitted)
   -t, --torrent-version arg  Torrent version (1=v1, 2=v2, 3=hybrid) (default: 3)
   --comment arg              Torrent comment
   --private                  Make torrent private
   --default-trackers         Use default trackers
   -T, --tracker arg          Add tracker URL (can be used multiple times)
-  --webseed arg              Add web seed URL (can be used multiple times)
-  --piece-size arg           Piece size in KB (must be one of: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)
+  -w, --webseed arg          Add web seed URL (can be used multiple times)
+  -s, --piece-size arg       Piece size in KB (must be one of: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)
   --creator                  Set "Torrent Builder" as creator
   --creation-date            Set creation date
+      --skip-prefix          Omit tracker domain from auto-generated output filename
+      --output-dir DIR       Directory for auto-generated output filename (must already exist)
+      --tracker-index N      Index of tracker to use for filename prefix (0-based, default: 0)
 ```
 
 > **Note:** `--version` now shows the software version. For torrent format version, use `--torrent-version` or `-t`.
@@ -103,6 +112,34 @@ Basic usage:
 ./torrent_builder --path /data/folder --output folder.torrent --torrent-version 2 --private
 ./torrent_builder --path /data/file --output file.torrent --piece-size 1024
 ./torrent_builder --version
+```
+
+Auto-naming (output filename generated automatically):
+```bash
+./torrent_builder --path /data/file --tracker "https://tracker.example.com/announce"
+# Creates: tracker.example.com_file.torrent
+
+./torrent_builder --path /data/file --tracker "https://tracker.example.com/announce" --skip-prefix
+# Creates: file.torrent (no tracker domain prefix)
+
+./torrent_builder --path /data/file --tracker "https://tracker.example.com/announce" --output-dir /torrents
+# Creates: /torrents/tracker.example.com_file.torrent
+```
+
+Auto-naming with multiple trackers:
+```bash
+./torrent_builder --path /data/file \
+  --tracker "https://alpha.tracker.io/announce" \
+  --tracker "https://beta.tracker.net/announce" \
+  --tracker-index 1
+# Uses the second tracker for filename: beta.tracker.net_file.torrent
+```
+
+Collision resolution (automatic when auto-naming):
+```bash
+# If tracker.example.com_file.torrent already exists:
+./torrent_builder --path /data/file --tracker "https://tracker.example.com/announce"
+# Creates: tracker.example.com_file(1).torrent
 ```
 
 Add multiple trackers (added in ascending order of priority; the first tracker has the highest priority — tier 0):
