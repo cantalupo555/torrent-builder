@@ -96,7 +96,8 @@ std::string extract_domain(const std::string &tracker_url);
 /**
  * @brief Sanitize a string for safe use as a filename component.
  *
- * Replaces Windows-invalid characters (: < > " | ? * \\ /) with underscores.
+ * Replaces Windows-invalid characters (: < > " | ? * \\ /) with underscores,
+ * then collapses consecutive underscores into a single underscore.
  *
  * @param part The raw string to sanitize.
  * @return Sanitized string safe for use in filenames.
@@ -104,15 +105,67 @@ std::string extract_domain(const std::string &tracker_url);
 std::string sanitize_filename_part(const std::string &part);
 
 /**
+ * @brief Truncate a filename to fit within a maximum byte limit.
+ *
+ * Preserves the .torrent extension. Truncates the stem portion,
+ * respecting UTF-8 multi-byte boundaries. Returns the input unchanged
+ * if it already fits or if max_bytes is too small to hold the extension.
+ *
+ * @param filename The filename to potentially truncate.
+ * @param max_bytes Maximum allowed filename size in bytes (default 255).
+ * @return Filename truncated to at most max_bytes bytes, unless max_bytes is
+ *         too small to hold the .torrent extension, in which case the input
+ *         is returned unchanged (may exceed max_bytes).
+ */
+std::string truncate_filename(const std::string &filename, std::size_t max_bytes = 255);
+
+/**
+ * @brief Resolve filename collisions by appending (1), (2), etc.
+ *
+ * @param directory The directory where the file would be created.
+ * @param base_filename The desired filename.
+ * @return A filename that does not exist in the directory.
+ * @throws std::runtime_error if no unique name found after 1000 attempts.
+ * @throws std::filesystem::filesystem_error if the directory cannot be accessed.
+ */
+std::string resolve_collision(const std::filesystem::path &directory,
+                              const std::string &base_filename);
+
+/**
  * @brief Generate the output .torrent filename based on content and trackers.
  * @param content_path Path to the file or directory being torrented.
- * @param trackers List of tracker URLs (uses first tracker for domain prefix).
+ * @param trackers List of tracker URLs.
  * @param skip_prefix If true, omit tracker domain prefix from filename.
+ * @param tracker_index Index of tracker to use for domain prefix (0-based).
+ *                      Negative or out-of-range values default to 0.
  * @return Generated filename (e.g., "tracker.example.com_ContentName.torrent").
  */
 std::string generate_output_filename(const std::filesystem::path &content_path,
                                       const std::vector<std::string> &trackers,
-                                      bool skip_prefix);
+                                      bool skip_prefix,
+                                      int tracker_index = 0);
+
+/**
+ * @brief Generate the full auto-named output path with collision resolution.
+ *
+ * Orchestrates filename generation, truncation, and collision resolution.
+ * The final filename is guaranteed to fit within 255 bytes.
+ *
+ * @param content_path Path to the file or directory being torrented.
+ * @param trackers List of tracker URLs.
+ * @param skip_prefix If true, omit tracker domain prefix from filename.
+ * @param tracker_index Index of tracker to use for domain prefix.
+ * @param output_dir Directory for the output file (uses current path if empty).
+ * @return Full output path with collision-resolved filename.
+ * @throws std::runtime_error if a unique filename cannot be resolved after 1000 attempts.
+ * @throws std::filesystem::filesystem_error if the working directory cannot be determined
+ *         or the target directory is inaccessible.
+ */
+std::string generate_auto_output_path(const std::filesystem::path &content_path,
+                                       const std::vector<std::string> &trackers,
+                                       bool skip_prefix,
+                                       int tracker_index,
+                                       const std::filesystem::path &output_dir);
 
 } // namespace utils
 

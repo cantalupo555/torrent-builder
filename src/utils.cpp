@@ -1,5 +1,6 @@
 #include "utils.hpp"
 #include "constants.hpp"
+#include "logger.hpp"
 #include <regex>
 #include <cctype>
 #include <algorithm>
@@ -317,20 +318,81 @@ std::string sanitize_filename_part(const std::string &part)
 {
     std::string result;
     result.reserve(part.size());
+    bool prev_underscore = false;
     for (char c : part)
     {
         if (c == ':' || c == '<' || c == '>' || c == '"' || c == '|'
-            || c == '?' || c == '*' || c == '\\' || c == '/')
-            result += '_';
+            || c == '?' || c == '*' || c == '\\' || c == '/' || c == '_')
+        {
+            if (!prev_underscore)
+                result += '_';
+            prev_underscore = true;
+        }
         else
+        {
             result += c;
+            prev_underscore = false;
+        }
     }
     return result;
 }
 
+std::string truncate_filename(const std::string &filename, std::size_t max_bytes)
+{
+    if (filename.size() <= max_bytes)
+        return filename;
+
+    const std::string ext = ".torrent";
+    if (filename.size() <= ext.size() || max_bytes <= ext.size())
+        return filename;
+
+    std::size_t available = max_bytes - ext.size();
+
+    while (available > 0 && (static_cast<unsigned char>(filename[available - 1]) & 0xC0) == 0x80)
+        --available;
+
+    if (available == 0)
+        available = 1;
+
+    return filename.substr(0, available) + ext;
+}
+
+std::string resolve_collision(const std::filesystem::path &directory,
+                              const std::string &base_filename)
+{
+    if (!std::filesystem::exists(directory / base_filename))
+        return base_filename;
+
+    std::string stem;
+    std::string ext;
+    auto dot_pos = base_filename.rfind('.');
+    if (dot_pos != std::string::npos)
+    {
+        stem = base_filename.substr(0, dot_pos);
+        ext = base_filename.substr(dot_pos);
+    }
+    else
+    {
+        stem = base_filename;
+        ext = "";
+    }
+
+    for (int i = 1; i <= 1000; ++i)
+    {
+        std::string candidate = stem + "(" + std::to_string(i) + ")" + ext;
+        if (!std::filesystem::exists(directory / candidate))
+            return candidate;
+    }
+
+    throw std::runtime_error("Could not resolve filename collision for '" + base_filename +
+                             "' in directory '" + directory.string() +
+                             "' after 1000 attempts");
+}
+
 std::string generate_output_filename(const std::filesystem::path &content_path,
                                        const std::vector<std::string> &trackers,
-                                       bool skip_prefix)
+                                       bool skip_prefix,
+                                       int tracker_index)
 {
     auto resolved = content_path;
     if (content_path.filename().empty())
@@ -364,11 +426,31 @@ std::string generate_output_filename(const std::filesystem::path &content_path,
     if (skip_prefix || trackers.empty())
         return content_name + ".torrent";
 
-    std::string domain = extract_domain(trackers[0]);
+    if (tracker_index < 0 || tracker_index >= static_cast<int>(trackers.size()))
+        tracker_index = 0;
+
+    std::string domain = extract_domain(trackers[tracker_index]);
     if (domain.empty())
         return content_name + ".torrent";
 
     return sanitize_filename_part(domain) + "_" + content_name + ".torrent";
+}
+
+std::string generate_auto_output_path(const std::filesystem::path &content_path,
+                                       const std::vector<std::string> &trackers,
+                                       bool skip_prefix,
+                                       int tracker_index,
+                                       const std::filesystem::path &output_dir)
+{
+    std::string filename = generate_output_filename(content_path, trackers, skip_prefix, tracker_index);
+    filename = truncate_filename(filename, 255 - 6);
+
+    std::filesystem::path dir = output_dir.empty() ? std::filesystem::current_path() : output_dir;
+    std::string resolved = resolve_collision(dir, filename);
+    if (resolved != filename)
+        log_message("Filename collision detected, resolved to: " + resolved, LogLevel::INFO);
+
+    return (dir / resolved).string();
 }
 
 } // namespace utils
