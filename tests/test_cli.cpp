@@ -21,7 +21,11 @@ std::string exec_command(const std::string& cmd, int& exit_code) {
         result += buffer.data();
     }
     int status = pclose(pipe);
+#ifdef _WIN32
+    exit_code = status;
+#else
     exit_code = WEXITSTATUS(status);
+#endif
     return result;
 }
 
