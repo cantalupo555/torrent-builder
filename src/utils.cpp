@@ -1,5 +1,6 @@
 #include "utils.hpp"
 #include "constants.hpp"
+#include "logger.hpp"
 #include <regex>
 #include <cctype>
 #include <algorithm>
@@ -317,20 +318,121 @@ std::string sanitize_filename_part(const std::string &part)
 {
     std::string result;
     result.reserve(part.size());
+    bool prev_underscore = false;
     for (char c : part)
     {
         if (c == ':' || c == '<' || c == '>' || c == '"' || c == '|'
-            || c == '?' || c == '*' || c == '\\' || c == '/')
-            result += '_';
+            || c == '?' || c == '*' || c == '\\' || c == '/' || c == '_')
+        {
+            if (!prev_underscore)
+                result += '_';
+            prev_underscore = true;
+        }
         else
+        {
             result += c;
+            prev_underscore = false;
+        }
     }
     return result;
 }
 
+std::string truncate_filename(const std::string &filename, std::size_t max_bytes)
+{
+    if (filename.size() <= max_bytes)
+        return filename;
+
+    std::string ext;
+    auto dot_pos = filename.rfind('.');
+    if (dot_pos != std::string::npos && dot_pos > 0)
+        ext = filename.substr(dot_pos);
+
+    if (max_bytes <= ext.size())
+        return filename;
+
+    std::size_t available = max_bytes - ext.size();
+    std::size_t orig_available = available;
+
+    while (available > 0 && (static_cast<unsigned char>(filename[available - 1]) & 0xC0) == 0x80)
+        --available;
+
+    if (available > 0 && (static_cast<unsigned char>(filename[available - 1]) & 0xC0) == 0xC0)
+    {
+        unsigned char leader = static_cast<unsigned char>(filename[available - 1]);
+        int expected = 1;
+        if ((leader & 0xF0) == 0xE0)
+            expected = 2;
+        else if ((leader & 0xF8) == 0xF0)
+            expected = 3;
+
+        if (available + expected <= orig_available)
+            available += expected;
+        else
+            --available;
+    }
+
+    if (available == 0)
+        available = 1;
+
+    return filename.substr(0, available) + ext;
+}
+
+std::string resolve_collision(const std::filesystem::path &directory,
+                               const std::string &base_filename,
+                               std::size_t max_bytes)
+{
+    if (!std::filesystem::exists(directory / base_filename))
+        return base_filename;
+
+    std::string stem;
+    std::string ext;
+    auto dot_pos = base_filename.rfind('.');
+    if (dot_pos != std::string::npos && dot_pos > 0)
+    {
+        stem = base_filename.substr(0, dot_pos);
+        ext = base_filename.substr(dot_pos);
+    }
+    else
+    {
+        stem = base_filename;
+        ext = "";
+    }
+
+    // Note: TOCTOU race between exists() check and actual file creation is
+    // acceptable for a single-user CLI tool.
+    for (int i = 1; i <= 1000; ++i)
+    {
+        std::string suffix = "(" + std::to_string(i) + ")";
+        std::string candidate_stem = stem;
+        if (max_bytes > 0 && candidate_stem.size() + suffix.size() + ext.size() > max_bytes)
+        {
+            std::size_t max_stem = max_bytes > suffix.size() + ext.size()
+                ? max_bytes - suffix.size() - ext.size()
+                : 0;
+            if (max_stem == 0)
+                continue;
+            candidate_stem.resize(max_stem);
+            while (candidate_stem.size() > 1
+                   && (static_cast<unsigned char>(candidate_stem.back()) & 0xC0) == 0x80)
+                candidate_stem.pop_back();
+            if (candidate_stem.size() > 1
+                && (static_cast<unsigned char>(candidate_stem.back()) & 0xC0) == 0xC0)
+                candidate_stem.pop_back();
+        }
+        std::string candidate = candidate_stem + suffix + ext;
+        if (!std::filesystem::exists(directory / candidate))
+            return candidate;
+    }
+
+    throw std::runtime_error("Could not resolve filename collision for '" + base_filename +
+                             "' in directory '" + directory.string() +
+                             "' after 1000 attempts");
+}
+
 std::string generate_output_filename(const std::filesystem::path &content_path,
                                        const std::vector<std::string> &trackers,
-                                       bool skip_prefix)
+                                       bool skip_prefix,
+                                       int tracker_index)
 {
     auto resolved = content_path;
     if (content_path.filename().empty())
@@ -364,11 +466,33 @@ std::string generate_output_filename(const std::filesystem::path &content_path,
     if (skip_prefix || trackers.empty())
         return content_name + ".torrent";
 
-    std::string domain = extract_domain(trackers[0]);
+    // Defensive guard for direct callers; torrent_builder.cpp validates with
+    // a warning log before reaching this point.
+    if (tracker_index < 0 || tracker_index >= static_cast<int>(trackers.size()))
+        tracker_index = 0;
+
+    std::string domain = extract_domain(trackers[tracker_index]);
     if (domain.empty())
         return content_name + ".torrent";
 
     return sanitize_filename_part(domain) + "_" + content_name + ".torrent";
+}
+
+std::string generate_auto_output_path(const std::filesystem::path &content_path,
+                                       const std::vector<std::string> &trackers,
+                                       bool skip_prefix,
+                                       int tracker_index,
+                                       const std::filesystem::path &output_dir)
+{
+    std::string filename = generate_output_filename(content_path, trackers, skip_prefix, tracker_index);
+    filename = truncate_filename(filename, 255 - 6);
+
+    std::filesystem::path dir = output_dir.empty() ? std::filesystem::current_path() : output_dir;
+    std::string resolved = resolve_collision(dir, filename, 255);
+    if (resolved != filename)
+        log_message("Filename collision detected, resolved to: " + resolved, LogLevel::INFO);
+
+    return (dir / resolved).string();
 }
 
 } // namespace utils

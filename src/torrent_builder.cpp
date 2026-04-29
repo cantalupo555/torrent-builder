@@ -446,19 +446,43 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
 
     // Resolve output path (optional — auto-generate if not provided)
     std::string output_path;
+    bool auto_named = false;
     if (result.count("output"))
     {
         output_path = result["output"].as<std::string>();
     }
     else
     {
+        auto_named = true;
         bool skip_prefix = result.count("skip-prefix") > 0;
-        std::string filename = utils::generate_output_filename(input_path, trackers, skip_prefix);
-        output_path = (fs::current_path() / filename).string();
+        int tracker_index = result["tracker-index"].as<int>();
+        fs::path output_dir;
+        if (result.count("output-dir"))
+        {
+            output_dir = result["output-dir"].as<std::string>();
+            if (!output_dir.empty())
+            {
+                if (!fs::exists(output_dir))
+                    throw std::runtime_error("Output directory does not exist: " + output_dir.string());
+                if (!fs::is_directory(output_dir))
+                    throw std::runtime_error("Output directory is not a directory: " + output_dir.string());
+            }
+        }
+
+        if (!trackers.empty() && (tracker_index < 0 || tracker_index >= static_cast<int>(trackers.size())))
+        {
+            log_message("Tracker index " + std::to_string(tracker_index)
+                        + " out of range (0-" + std::to_string(static_cast<int>(trackers.size()) - 1)
+                        + "), using first tracker", LogLevel::WARNING);
+            tracker_index = 0;
+        }
+
+        output_path = utils::generate_auto_output_path(input_path, trackers, skip_prefix,
+                                                        tracker_index, output_dir);
         log_message("Auto-generated output path: " + output_path, LogLevel::INFO);
     }
 
-    if (fs::exists(output_path))
+    if (!auto_named && fs::exists(output_path))
     {
         if (prompt_overwrite(output_path) == OverwriteDecision::Declined)
         {
@@ -653,8 +677,12 @@ int main(int argc, char *argv[])
                    cxxopts::value<int>(), "SIZE")("creator", "Set \"Torrent Builder\" as creator")(
             "creation-date", "Set creation date")("p,path", "Path to file or directory",
                                                   cxxopts::value<std::string>(), "PATH")(
-            "o,output", "Output torrent file path", cxxopts::value<std::string>(), "OUTPUT")(
-            "skip-prefix", "Omit tracker domain from auto-generated output filename");
+            "o,output", "Output torrent file path (optional, auto-generated if omitted)", cxxopts::value<std::string>(), "OUTPUT")(
+            "skip-prefix", "Omit tracker domain from auto-generated output filename")(
+            "output-dir", "Directory for auto-generated output filename (must already exist)",
+            cxxopts::value<std::string>(), "DIR")(
+            "tracker-index", "Index of tracker to use for filename prefix (0-based, defaults to 0 on out-of-range)",
+            cxxopts::value<int>()->default_value("0"), "N");
 
         options.positional_help("PATH [OUTPUT]");
         options.parse_positional({"path", "output"});
@@ -683,6 +711,10 @@ int main(int argc, char *argv[])
                          "\"https://tracker.example/announce\"\n";
             std::cout << "  ./torrent_builder --path /data/file --tracker "
                          "\"https://tracker.example/announce\" --skip-prefix\n";
+            std::cout << "  ./torrent_builder --path /data/file --tracker "
+                         "\"https://tracker.example/announce\" --output-dir /torrents\n";
+            std::cout << "  ./torrent_builder --path /data/file --default-trackers "
+                         "--tracker-index 2\n";
             std::cout << "\nNote: Allowed piece sizes (in KB): 16, 32, 64, 128, 256, 512, 1024, "
                          "2048, 4096, 8192, 16384, 32768\n";
             return 0;
