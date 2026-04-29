@@ -342,14 +342,34 @@ std::string truncate_filename(const std::string &filename, std::size_t max_bytes
     if (filename.size() <= max_bytes)
         return filename;
 
-    const std::string ext = ".torrent";
-    if (filename.size() <= ext.size() || max_bytes <= ext.size())
+    std::string ext;
+    auto dot_pos = filename.rfind('.');
+    if (dot_pos != std::string::npos && dot_pos > 0)
+        ext = filename.substr(dot_pos);
+
+    if (max_bytes <= ext.size())
         return filename;
 
     std::size_t available = max_bytes - ext.size();
+    std::size_t orig_available = available;
 
     while (available > 0 && (static_cast<unsigned char>(filename[available - 1]) & 0xC0) == 0x80)
         --available;
+
+    if (available > 0 && (static_cast<unsigned char>(filename[available - 1]) & 0xC0) == 0xC0)
+    {
+        unsigned char leader = static_cast<unsigned char>(filename[available - 1]);
+        int expected = 1;
+        if ((leader & 0xF0) == 0xE0)
+            expected = 2;
+        else if ((leader & 0xF8) == 0xF0)
+            expected = 3;
+
+        if (available + expected <= orig_available)
+            available += expected;
+        else
+            --available;
+    }
 
     if (available == 0)
         available = 1;
@@ -358,7 +378,8 @@ std::string truncate_filename(const std::string &filename, std::size_t max_bytes
 }
 
 std::string resolve_collision(const std::filesystem::path &directory,
-                              const std::string &base_filename)
+                               const std::string &base_filename,
+                               std::size_t max_bytes)
 {
     if (!std::filesystem::exists(directory / base_filename))
         return base_filename;
@@ -366,7 +387,7 @@ std::string resolve_collision(const std::filesystem::path &directory,
     std::string stem;
     std::string ext;
     auto dot_pos = base_filename.rfind('.');
-    if (dot_pos != std::string::npos)
+    if (dot_pos != std::string::npos && dot_pos > 0)
     {
         stem = base_filename.substr(0, dot_pos);
         ext = base_filename.substr(dot_pos);
@@ -377,9 +398,28 @@ std::string resolve_collision(const std::filesystem::path &directory,
         ext = "";
     }
 
+    // Note: TOCTOU race between exists() check and actual file creation is
+    // acceptable for a single-user CLI tool.
     for (int i = 1; i <= 1000; ++i)
     {
-        std::string candidate = stem + "(" + std::to_string(i) + ")" + ext;
+        std::string suffix = "(" + std::to_string(i) + ")";
+        std::string candidate_stem = stem;
+        if (max_bytes > 0 && candidate_stem.size() + suffix.size() + ext.size() > max_bytes)
+        {
+            std::size_t max_stem = max_bytes > suffix.size() + ext.size()
+                ? max_bytes - suffix.size() - ext.size()
+                : 0;
+            if (max_stem == 0)
+                continue;
+            candidate_stem.resize(max_stem);
+            while (candidate_stem.size() > 1
+                   && (static_cast<unsigned char>(candidate_stem.back()) & 0xC0) == 0x80)
+                candidate_stem.pop_back();
+            if (candidate_stem.size() > 1
+                && (static_cast<unsigned char>(candidate_stem.back()) & 0xC0) == 0xC0)
+                candidate_stem.pop_back();
+        }
+        std::string candidate = candidate_stem + suffix + ext;
         if (!std::filesystem::exists(directory / candidate))
             return candidate;
     }
@@ -426,6 +466,8 @@ std::string generate_output_filename(const std::filesystem::path &content_path,
     if (skip_prefix || trackers.empty())
         return content_name + ".torrent";
 
+    // Defensive guard for direct callers; torrent_builder.cpp validates with
+    // a warning log before reaching this point.
     if (tracker_index < 0 || tracker_index >= static_cast<int>(trackers.size()))
         tracker_index = 0;
 
@@ -446,7 +488,7 @@ std::string generate_auto_output_path(const std::filesystem::path &content_path,
     filename = truncate_filename(filename, 255 - 6);
 
     std::filesystem::path dir = output_dir.empty() ? std::filesystem::current_path() : output_dir;
-    std::string resolved = resolve_collision(dir, filename);
+    std::string resolved = resolve_collision(dir, filename, 255);
     if (resolved != filename)
         log_message("Filename collision detected, resolved to: " + resolved, LogLevel::INFO);
 

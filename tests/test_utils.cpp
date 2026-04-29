@@ -605,6 +605,120 @@ TEST(TruncateFilename, MaxBytesExactlyExtensionSize) {
     EXPECT_EQ(utils::truncate_filename("file.torrent", 8), "file.torrent");
 }
 
+TEST(TruncateFilename, NonTorrentExtensionPreserved) {
+    std::string name(297, 'a');
+    std::string filename = name + ".txt";
+    std::string result = utils::truncate_filename(filename, 255);
+    EXPECT_EQ(result.size(), 255u);
+    EXPECT_TRUE(result.ends_with(".txt"));
+}
+
+TEST(TruncateFilename, NonTorrentExtensionShortUnchanged) {
+    EXPECT_EQ(utils::truncate_filename("file.txt", 100), "file.txt");
+}
+
+TEST(TruncateFilename, NoExtensionTruncates) {
+    std::string name(300, 'a');
+    std::string result = utils::truncate_filename(name, 255);
+    EXPECT_EQ(result.size(), 255u);
+}
+
+TEST(TruncateFilename, NoExtensionShortUnchanged) {
+    EXPECT_EQ(utils::truncate_filename("nofile", 100), "nofile");
+}
+
+TEST(TruncateFilename, DotfileTooLongTruncated) {
+    std::string name(300, 'a');
+    std::string filename = "." + name;
+    std::string result = utils::truncate_filename(filename, 255);
+    EXPECT_EQ(result.size(), 255u);
+    EXPECT_TRUE(result.starts_with("."));
+}
+
+TEST(TruncateFilename, UTF8OrphanedLeaderRemoved) {
+    std::string name = std::string(246, 'a') + "\xc3\xa9" + std::string(100, 'b');
+    std::string filename = name + ".torrent";
+    std::string result = utils::truncate_filename(filename, 255);
+    EXPECT_TRUE(result.ends_with(".torrent"));
+    EXPECT_LE(result.size(), 255u);
+    for (size_t i = 0; i < result.size() - 8; ++i)
+    {
+        unsigned char c = static_cast<unsigned char>(result[i]);
+        if ((c & 0xC0) == 0x80)
+        {
+            ASSERT_GT(i, 0u);
+            unsigned char prev = static_cast<unsigned char>(result[i - 1]);
+            EXPECT_TRUE((prev & 0x80) != 0)
+                << "Dangling continuation byte at position " << i;
+        }
+    }
+}
+
+TEST(TruncateFilename, UTF8CompleteCharPreservedAtBoundary) {
+    std::string name = std::string(245, 'a') + "\xc3\xa9" + std::string(100, 'b');
+    std::string filename = name + ".torrent";
+    std::string result = utils::truncate_filename(filename, 255);
+    EXPECT_TRUE(result.ends_with(".torrent"));
+    EXPECT_LE(result.size(), 255u);
+    std::string stem = result.substr(0, result.size() - 8);
+    EXPECT_EQ(static_cast<unsigned char>(stem[245]), 0xC3);
+    EXPECT_EQ(static_cast<unsigned char>(stem[246]), 0xA9);
+}
+
+TEST(TruncateFilename, UTF8ThreeByteOrphanedLeaderRemoved) {
+    std::string name = std::string(246, 'a') + "\xe3\x81\x82" + std::string(100, 'b');
+    std::string filename = name + ".torrent";
+    std::string result = utils::truncate_filename(filename, 255);
+    EXPECT_TRUE(result.ends_with(".torrent"));
+    EXPECT_LE(result.size(), 255u);
+    std::string stem = result.substr(0, result.size() - 8);
+    EXPECT_EQ(stem.size(), 246u);
+}
+
+TEST(TruncateFilename, UTF8ThreeByteCompleteCharPreservedAtBoundary) {
+    std::string name = std::string(244, 'a') + "\xe3\x81\x82" + std::string(100, 'b');
+    std::string filename = name + ".torrent";
+    std::string result = utils::truncate_filename(filename, 255);
+    EXPECT_TRUE(result.ends_with(".torrent"));
+    EXPECT_LE(result.size(), 255u);
+    std::string stem = result.substr(0, result.size() - 8);
+    EXPECT_EQ(static_cast<unsigned char>(stem[244]), 0xE3);
+    EXPECT_EQ(static_cast<unsigned char>(stem[245]), 0x81);
+    EXPECT_EQ(static_cast<unsigned char>(stem[246]), 0x82);
+}
+
+TEST(TruncateFilename, UTF8FourByteOrphanedLeaderRemoved) {
+    std::string name = std::string(246, 'a') + "\xf0\x9f\x98\x80" + std::string(100, 'b');
+    std::string filename = name + ".torrent";
+    std::string result = utils::truncate_filename(filename, 255);
+    EXPECT_TRUE(result.ends_with(".torrent"));
+    EXPECT_LE(result.size(), 255u);
+    std::string stem = result.substr(0, result.size() - 8);
+    EXPECT_EQ(stem.size(), 246u);
+}
+
+TEST(TruncateFilename, UTF8FourByteCompleteCharPreservedAtBoundary) {
+    std::string name = std::string(243, 'a') + "\xf0\x9f\x98\x80" + std::string(100, 'b');
+    std::string filename = name + ".torrent";
+    std::string result = utils::truncate_filename(filename, 255);
+    EXPECT_TRUE(result.ends_with(".torrent"));
+    EXPECT_LE(result.size(), 255u);
+    std::string stem = result.substr(0, result.size() - 8);
+    EXPECT_EQ(static_cast<unsigned char>(stem[243]), 0xF0);
+    EXPECT_EQ(static_cast<unsigned char>(stem[244]), 0x9F);
+    EXPECT_EQ(static_cast<unsigned char>(stem[245]), 0x98);
+    EXPECT_EQ(static_cast<unsigned char>(stem[246]), 0x80);
+}
+
+TEST(TruncateFilename, UTF8LeaderDropsToZeroFallback) {
+    std::string name = "\xe3\x81\x82" + std::string(100, 'b');
+    std::string filename = name + ".torrent";
+    std::string result = utils::truncate_filename(filename, 10);
+    EXPECT_TRUE(result.ends_with(".torrent"));
+    EXPECT_LE(result.size(), 10u);
+    EXPECT_GT(result.size(), 8u);
+}
+
 TEST(TruncateFilename, AvailableBecomesZero) {
     std::string stem(300, '\x80');
     std::string input = stem + ".torrent";
@@ -642,6 +756,76 @@ TEST(GenerateAutoOutputPath, TruncationWithCollisionStillFitsLimit) {
     EXPECT_TRUE(filename.ends_with(".torrent"));
     EXPECT_NE(filename, base_filename)
         << "Should resolve collision, not overwrite existing file";
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(GenerateAutoOutputPath, CollisionWorstCaseSuffixFitsLimit) {
+    auto temp_dir = std::filesystem::temp_directory_path() / "torrent_builder_test_worst_case";
+    std::filesystem::create_directories(temp_dir);
+
+    std::string long_name(300, 'a');
+    auto input_file = temp_dir / (long_name + ".mkv");
+    { std::ofstream(input_file) << "data"; }
+
+    std::string truncated_stem(249, 'a');
+    std::string base_filename = truncated_stem + ".torrent";
+    { std::ofstream(temp_dir / base_filename) << "existing"; }
+
+    for (int i = 1; i <= 999; ++i)
+    {
+        std::ofstream(temp_dir / (truncated_stem + "(" + std::to_string(i) + ").torrent")) << "x";
+    }
+
+    std::vector<std::string> trackers;
+    std::string result = utils::generate_auto_output_path(input_file, trackers, false, 0, temp_dir);
+    std::string filename = std::filesystem::path(result).filename().string();
+    EXPECT_LE(filename.size(), 255u);
+    EXPECT_TRUE(filename.ends_with(".torrent"));
+    EXPECT_NE(filename, base_filename);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(ResolveCollision, MaxBytesTruncatesStem) {
+    auto temp_dir = std::filesystem::temp_directory_path() / "torrent_builder_test_max_bytes";
+    std::filesystem::create_directories(temp_dir);
+
+    std::string stem(247, 'a');
+    std::string base_filename = stem + ".torrent";
+    { std::ofstream(temp_dir / base_filename) << "existing"; }
+
+    std::string result = utils::resolve_collision(temp_dir, base_filename, 255);
+    EXPECT_LE(result.size(), 255u);
+    EXPECT_TRUE(result.ends_with(".torrent"));
+    EXPECT_NE(result, base_filename);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(ResolveCollision, MaxBytesTruncatesUTF8StemSafely) {
+    auto temp_dir = std::filesystem::temp_directory_path() / "torrent_builder_test_utf8_max";
+    std::filesystem::create_directories(temp_dir);
+
+    std::string stem = std::string(243, 'a') + "\xc3\xa9\xc3\xa9";
+    std::string base_filename = stem + ".torrent";
+    { std::ofstream(temp_dir / base_filename) << "existing"; }
+
+    std::string result = utils::resolve_collision(temp_dir, base_filename, 255);
+    EXPECT_LE(result.size(), 255u);
+    EXPECT_TRUE(result.ends_with(".torrent"));
+    std::string result_stem = result.substr(0, result.rfind('.'));
+    for (size_t i = 0; i < result_stem.size(); ++i)
+    {
+        unsigned char c = static_cast<unsigned char>(result_stem[i]);
+        if ((c & 0xC0) == 0x80)
+        {
+            ASSERT_GT(i, 0u);
+            unsigned char prev = static_cast<unsigned char>(result_stem[i - 1]);
+            EXPECT_TRUE((prev & 0x80) != 0)
+                << "Dangling continuation byte at position " << i;
+        }
+    }
 
     std::filesystem::remove_all(temp_dir);
 }

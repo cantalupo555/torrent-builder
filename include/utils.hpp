@@ -107,14 +107,19 @@ std::string sanitize_filename_part(const std::string &part);
 /**
  * @brief Truncate a filename to fit within a maximum byte limit.
  *
- * Preserves the .torrent extension. Truncates the stem portion,
- * respecting UTF-8 multi-byte boundaries. Returns the input unchanged
- * if it already fits or if max_bytes is too small to hold the extension.
+ * Detects and preserves the file extension (everything after the last dot).
+ * A leading dot (dotfile) is treated as part of the stem, not an extension
+ * separator, so dotfiles are truncated normally.
+ * Truncates the stem portion, respecting UTF-8 multi-byte boundaries.
+ * If truncation would leave an incomplete multi-byte character, the entire
+ * character is either preserved (if it fits) or removed completely. Returns
+ * the input unchanged if it already fits or if max_bytes is too small to hold
+ * the extension.
  *
  * @param filename The filename to potentially truncate.
  * @param max_bytes Maximum allowed filename size in bytes (default 255).
  * @return Filename truncated to at most max_bytes bytes, unless max_bytes is
- *         too small to hold the .torrent extension, in which case the input
+ *         too small to hold the file extension, in which case the input
  *         is returned unchanged (may exceed max_bytes).
  */
 std::string truncate_filename(const std::string &filename, std::size_t max_bytes = 255);
@@ -122,14 +127,21 @@ std::string truncate_filename(const std::string &filename, std::size_t max_bytes
 /**
  * @brief Resolve filename collisions by appending (1), (2), etc.
  *
+ * Note: TOCTOU race between exists() and actual file creation is acceptable
+ * for a single-user CLI tool.
+ *
  * @param directory The directory where the file would be created.
  * @param base_filename The desired filename.
+ * @param max_bytes Maximum allowed filename size in bytes (0 = no limit).
+ *                  When set, the stem is truncated to fit the collision suffix
+ *                  within this limit.
  * @return A filename that does not exist in the directory.
  * @throws std::runtime_error if no unique name found after 1000 attempts.
  * @throws std::filesystem::filesystem_error if the directory cannot be accessed.
  */
 std::string resolve_collision(const std::filesystem::path &directory,
-                              const std::string &base_filename);
+                               const std::string &base_filename,
+                               std::size_t max_bytes = 0);
 
 /**
  * @brief Generate the output .torrent filename based on content and trackers.
@@ -149,7 +161,7 @@ std::string generate_output_filename(const std::filesystem::path &content_path,
  * @brief Generate the full auto-named output path with collision resolution.
  *
  * Orchestrates filename generation, truncation, and collision resolution.
- * The final filename is guaranteed to fit within 255 bytes.
+ * The final filename fits within 255 bytes.
  *
  * @param content_path Path to the file or directory being torrented.
  * @param trackers List of tracker URLs.
