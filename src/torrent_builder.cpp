@@ -677,7 +677,7 @@ int main(int argc, char *argv[])
                    cxxopts::value<int>(), "SIZE")("creator", "Set \"Torrent Builder\" as creator")(
             "creation-date", "Set creation date")("p,path", "Path to file or directory",
                                                   cxxopts::value<std::string>(), "PATH")(
-            "o,output", "Output torrent file path", cxxopts::value<std::string>(), "OUTPUT")(
+            "o,output", "Output torrent file path (optional, auto-generated if omitted)", cxxopts::value<std::string>(), "OUTPUT")(
             "skip-prefix", "Omit tracker domain from auto-generated output filename")(
             "output-dir", "Directory for auto-generated output filename (must already exist)",
             cxxopts::value<std::string>(), "DIR")(
