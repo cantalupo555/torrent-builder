@@ -222,7 +222,7 @@ jobs:
         run: |
           mkdir build && cd build
           cmake .. -DCMAKE_BUILD_TYPE=Release -DTORRENT_BUILDER_VERSION=${{ steps.version.outputs.VERSION }}
-          cmake --build .
+          cmake --build . --parallel
 
       - name: Rename binary
         run: mv build/torrent_builder torrent_builder_${{ steps.version.outputs.VERSION }}_linux_${{ matrix.arch }}
@@ -317,7 +317,7 @@ jobs:
         run: |
           mkdir build && cd build
           cmake .. -DCMAKE_BUILD_TYPE=Release -G "MSYS Makefiles" -DTORRENT_BUILDER_VERSION=${{ steps.version.outputs.VERSION }}
-          cmake --build .
+          cmake --build . --parallel
 
       - name: Rename binary
         shell: bash
@@ -336,7 +336,7 @@ jobs:
         include:
           - os: macos-latest
             arch: arm64
-          - os: macos-15
+          - os: macos-15-intel
             arch: amd64
     runs-on: ${{ matrix.os }}
     steps:
@@ -354,7 +354,7 @@ jobs:
         run: |
           mkdir build && cd build
           cmake .. -DCMAKE_BUILD_TYPE=Release -DTORRENT_BUILDER_VERSION=${{ steps.version.outputs.VERSION }}
-          cmake --build .
+          cmake --build . --parallel
 
       - name: Rename and package
         run: |
