@@ -175,12 +175,12 @@ std::string escape_json(const std::string &str)
         default:
             if (c < 0x20)
             {
-                escaped << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                escaped << "\\u" << std::uppercase << std::hex << std::setw(4) << std::setfill('0')
                         << static_cast<int>(c);
             }
             else if (c >= 0x80)
             {
-                escaped << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                escaped << "\\u" << std::uppercase << std::hex << std::setw(4) << std::setfill('0')
                         << static_cast<int>(c);
             }
             else
@@ -213,6 +213,11 @@ std::string format_file_size(int64_t bytes)
 
 std::string format_timestamp(int64_t timestamp)
 {
+    if (timestamp <= 0)
+    {
+        return "Invalid timestamp";
+    }
+
     std::time_t time = static_cast<std::time_t>(timestamp);
     std::tm *tm_info = std::gmtime(&time);
 
@@ -398,8 +403,6 @@ std::string resolve_collision(const std::filesystem::path &directory,
         ext = "";
     }
 
-    // Note: TOCTOU race between exists() check and actual file creation is
-    // acceptable for a single-user CLI tool.
     for (int i = 1; i <= 1000; ++i)
     {
         std::string suffix = "(" + std::to_string(i) + ")";
