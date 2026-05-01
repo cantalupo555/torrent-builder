@@ -3,6 +3,9 @@
 #include <filesystem>
 #include <string>
 #include <regex>
+#include <libtorrent/create_torrent.hpp>
+#include <libtorrent/torrent_info.hpp>
+#include <libtorrent/file_storage.hpp>
 #include "torrent_inspector.hpp"
 #include "utils.hpp"
 
@@ -41,10 +44,23 @@ class InspectorTest : public ::testing::Test
 
     void create_simple_torrent()
     {
+        create_test_file();
+
+        lt::file_storage fs;
+        fs.add_file("test_file.txt", 11);
+        lt::create_torrent ct(fs, 16384);
+
+        const char data[] = "Hello World";
+        auto piece_hash = lt::hasher(lt::span<char const>(data, 11)).final();
+        ct.set_hash(0, piece_hash);
+        ct.add_tracker("udp://tracker.example.com:80/announce");
+
+        lt::entry e = ct.generate();
+        std::vector<char> buffer;
+        lt::bencode(std::back_inserter(buffer), e);
+
         std::ofstream torrent(torrent_path_, std::ios::binary);
-        torrent
-            << "d8:announce36:udp://tracker.example.com:80/"
-               "announce4:infod6:lengthi11e4:name12:test_file.txt12:piece lengthi16384e6:pieces20:";
+        torrent.write(buffer.data(), buffer.size());
         torrent.close();
     }
 };
