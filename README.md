@@ -5,6 +5,7 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 ## Features
 
 - Create torrent files from single files or directories
+- Inspect existing torrent files (metadata, file tree, verification, magnet link)
 - Support for torrent versions: V1, V2, and Hybrid
 - Interactive mode with step-by-step configuration
 - Command-line interface with options for all features
@@ -17,7 +18,7 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 - Auto-naming: output filename generated from tracker domain and content name
 - Collision-safe naming: automatically resolves filename conflicts with `(1)`, `(2)`, etc.
 - Filename truncation with UTF-8 boundary safety (255-byte filesystem limit)
-- Configurable output directory and tracker index for filename prefix
+- Configurable output directory (auto-created if needed) and tracker index for filename prefix
 
 ## Prerequisites
 
@@ -76,6 +77,12 @@ For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --
 ./torrent_builder --path /path/to/file_or_directory [options]
 ```
 
+### Inspect Torrent Files
+
+```bash
+./torrent_builder inspect file.torrent [options]
+```
+
 > **Note:** `--output` is optional. When omitted, the output filename is auto-generated from the tracker domain and content name (e.g., `tracker.example.com_myfile.torrent`).
 
 ## Options
@@ -96,11 +103,22 @@ For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --
   --creator                  Set "Torrent Builder" as creator
   --creation-date            Set creation date
       --skip-prefix          Omit tracker domain from auto-generated output filename
-      --output-dir DIR       Directory for auto-generated output filename (must already exist)
+      --output-dir DIR       Directory for auto-generated output filename (created if needed)
       --tracker-index N      Index of tracker to use for filename prefix (0-based, default: 0)
 ```
 
 > **Note:** `--version` now shows the software version. For torrent format version, use `--torrent-version` or `-t`.
+
+### Inspect Options
+
+```
+  ./torrent_builder inspect <torrent_file> [options]
+
+  --json           Output in JSON format
+  --files          Show detailed file tree only
+  --verify         Verify files exist on disk
+  --base-path DIR  Base path for file verification (default: current directory)
+```
 
 ## Examples
 
@@ -124,6 +142,9 @@ Auto-naming (output filename generated automatically):
 
 ./torrent_builder --path /data/file --tracker "https://tracker.example.com/announce" --output-dir /torrents
 # Creates: /torrents/tracker.example.com_file.torrent
+
+./torrent_builder --path /data/file --tracker "https://tracker.example.com/announce" --output-dir /torrents/output
+# Auto-creates /torrents/output if it doesn't exist
 ```
 
 Auto-naming with multiple trackers:
@@ -165,6 +186,21 @@ Create torrent with comment:
 Create a torrent with default trackers and custom trackers:
 ```bash
 ./torrent_builder --path /data/file --output file.torrent --default-trackers --tracker udp://mytracker.com:8080
+```
+
+Inspect torrent metadata:
+```bash
+./torrent_builder inspect file.torrent
+# Shows: name, info hash (v1/v2), size, piece size, trackers, web seeds, comment, magnet link
+
+./torrent_builder inspect file.torrent --json
+# Same info in JSON format (useful for scripting)
+
+./torrent_builder inspect file.torrent --files
+# Shows detailed file tree with sizes
+
+./torrent_builder inspect file.torrent --verify --base-path /data
+# Verifies all files exist on disk under /data
 ```
 
 ## Troubleshooting
