@@ -69,6 +69,7 @@ add_library(torrent_builder_core STATIC
     src/torrent_inspector.cpp
     src/logger.cpp
     src/utils.cpp
+    src/terminal.cpp
 )
 
 target_include_directories(torrent_builder_core PUBLIC
