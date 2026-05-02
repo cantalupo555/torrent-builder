@@ -666,27 +666,29 @@ TEST(CLI, ExplicitOutputStillPromptsOverwrite) {
     fs::remove_all(temp_dir, ec);
 }
 
-TEST(CLI, OutputDirNonExistentFails) {
+TEST(CLI, OutputDirAutoCreate) {
     namespace fs = std::filesystem;
-    auto temp_dir = fs::temp_directory_path() / "torrent_builder_bad_output_dir_test";
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_output_dir_autocreate_test";
     fs::create_directories(temp_dir);
+    auto output_dir = temp_dir / "nested" / "output";
     auto input_file = temp_dir / "input.txt";
     { std::ofstream(input_file) << "test content"; }
 
     std::string cmd = get_binary_path() + " --path " + input_file.string()
-        + " --output-dir /nonexistent/dir/that/does/not/exist"
+        + " --output-dir " + output_dir.string()
         + " --torrent-version 1 2>&1";
 
     int exit_code;
     std::string output = exec_command(cmd, exit_code);
 
-    EXPECT_NE(exit_code, 0)
-        << "Should fail when --output-dir does not exist. Output: " << output;
-    EXPECT_NE(output.find("Output directory does not exist"), std::string::npos)
-        << "Should report missing directory. Output: " << output;
+    EXPECT_EQ(exit_code, 0) << "Should succeed by auto-creating output-dir. Output: " << output;
+    EXPECT_TRUE(fs::is_directory(output_dir))
+        << "Output directory should have been created";
+    EXPECT_TRUE(fs::exists(output_dir / "input.torrent"))
+        << "Torrent file should exist in auto-created directory";
 
-    std::error_code ec2;
-    fs::remove_all(temp_dir, ec2);
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
 }
 
 TEST(CLI, InvalidTrackerIndexFallsBack) {
@@ -794,3 +796,33 @@ TEST(CLI, OutputDirIsFileFails) {
     std::error_code ec;
     fs::remove_all(temp_dir, ec);
 }
+
+#ifndef _WIN32
+TEST(CLI, OutputDirCreatePermissionDeniedFails) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_output_dir_perm_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    { std::ofstream(input_file) << "test content"; }
+
+    auto readonly_dir = temp_dir / "readonly";
+    fs::create_directories(readonly_dir);
+    fs::permissions(readonly_dir, fs::perms::none);
+
+    auto target_dir = readonly_dir / "sub" / "output";
+
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output-dir " + target_dir.string()
+        + " --torrent-version 1 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_NE(exit_code, 0)
+        << "Should fail when output-dir cannot be created. Output: " << output;
+
+    fs::permissions(readonly_dir, fs::perms::all);
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+#endif

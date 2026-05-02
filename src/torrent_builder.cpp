@@ -462,10 +462,21 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
             output_dir = result["output-dir"].as<std::string>();
             if (!output_dir.empty())
             {
-                if (!fs::exists(output_dir))
-                    throw std::runtime_error("Output directory does not exist: " + output_dir.string());
-                if (!fs::is_directory(output_dir))
-                    throw std::runtime_error("Output directory is not a directory: " + output_dir.string());
+                std::error_code ec;
+                if (fs::exists(output_dir, ec))
+                {
+                    if (!fs::is_directory(output_dir))
+                        throw std::runtime_error("Output directory is not a directory: " + output_dir.string());
+                }
+                else
+                {
+                    fs::create_directories(output_dir, ec);
+                    if (!ec)
+                        log_message("Created output directory: " + output_dir.string(), LogLevel::INFO);
+                    if (ec)
+                        throw std::runtime_error("Failed to create output directory: " + output_dir.string()
+                                                 + " (" + ec.message() + ")");
+                }
             }
         }
 
@@ -679,7 +690,7 @@ int main(int argc, char *argv[])
                                                   cxxopts::value<std::string>(), "PATH")(
             "o,output", "Output torrent file path (optional, auto-generated if omitted)", cxxopts::value<std::string>(), "OUTPUT")(
             "skip-prefix", "Omit tracker domain from auto-generated output filename")(
-            "output-dir", "Directory for auto-generated output filename (must already exist)",
+            "output-dir", "Directory for auto-generated output filename (created if needed)",
             cxxopts::value<std::string>(), "DIR")(
             "tracker-index", "Index of tracker to use for filename prefix (0-based, defaults to 0 on out-of-range)",
             cxxopts::value<int>()->default_value("0"), "N");
