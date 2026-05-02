@@ -797,6 +797,7 @@ TEST(CLI, OutputDirIsFileFails) {
     fs::remove_all(temp_dir, ec);
 }
 
+#ifndef _WIN32
 TEST(CLI, OutputDirCreatePermissionDeniedFails) {
     namespace fs = std::filesystem;
     auto temp_dir = fs::temp_directory_path() / "torrent_builder_output_dir_perm_test";
@@ -824,3 +825,4 @@ TEST(CLI, OutputDirCreatePermissionDeniedFails) {
     std::error_code ec;
     fs::remove_all(temp_dir, ec);
 }
+#endif
