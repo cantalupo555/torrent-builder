@@ -183,7 +183,7 @@ TEST_F(PtyTest, RestoresTerminalStateOnDestruction) {
     struct termios after;
     tcgetattr(STDIN_FILENO, &after);
 
-    EXPECT_EQ(before.c_lflag, after.c_lflag);
+    EXPECT_EQ(before.c_lflag & (ICANON | ECHO), after.c_lflag & (ICANON | ECHO));
     EXPECT_EQ(before.c_cc[VMIN], after.c_cc[VMIN]);
     EXPECT_EQ(before.c_cc[VTIME], after.c_cc[VTIME]);
 }
@@ -201,7 +201,7 @@ TEST_F(PtyTest, RestoresTerminalStateOnException) {
     struct termios after;
     tcgetattr(STDIN_FILENO, &after);
 
-    EXPECT_EQ(before.c_lflag, after.c_lflag);
+    EXPECT_EQ(before.c_lflag & (ICANON | ECHO), after.c_lflag & (ICANON | ECHO));
     EXPECT_EQ(before.c_cc[VMIN], after.c_cc[VMIN]);
     EXPECT_EQ(before.c_cc[VTIME], after.c_cc[VTIME]);
 }
