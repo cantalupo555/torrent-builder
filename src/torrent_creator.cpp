@@ -2,49 +2,17 @@
 #include "logger.hpp"
 #include "constants.hpp"
 #include "utils.hpp"
+#include "terminal.hpp"
 #include <fstream>
 #include <iomanip>
 #include <chrono>
 #include <format>
-#ifndef _WIN32
-#include <unistd.h>
-#include <termios.h>
-#else
-#include <conio.h>
-#include <io.h>
-#endif
 #include <libtorrent/version.hpp>
 #include <cmath>
-#include <fstream>
 #include <ctime>
 #include <thread>
-#include <format>
 #include <stdexcept>
 #include <system_error>
-
-namespace {
-
-bool is_terminal() {
-#ifndef _WIN32
-    return isatty(STDIN_FILENO);
-#else
-    return _isatty(_fileno(stdin)) != 0;
-#endif
-}
-
-bool check_key_press(char& c) {
-#ifndef _WIN32
-    return read(STDIN_FILENO, &c, 1) > 0;
-#else
-    if (_kbhit()) {
-        c = static_cast<char>(_getch());
-        return true;
-    }
-    return false;
-#endif
-}
-
-}
 
 // Constructor for TorrentCreator
 TorrentCreator::TorrentCreator(const TorrentConfig& config)
@@ -81,28 +49,49 @@ void TorrentCreator::add_files_to_storage() {
 }
 
 // Hashing with streaming for large files
-void TorrentCreator::hash_large_file_parallel(const fs::path& path, lt::create_torrent& t, int piece_size) {
+void TorrentCreator::hash_large_file_parallel(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard) {
     const int64_t file_size = fs::file_size(path);
-    const int num_threads = std::thread::hardware_concurrency(); // Number of available threads
-    const int64_t block_size = (file_size / num_threads) + 1; // Size of each block
+    const int num_threads = std::thread::hardware_concurrency();
+    const int64_t block_size = (file_size / num_threads) + 1;
 
     std::vector<std::thread> threads;
-    std::mutex mutex; // To synchronize access to object `t`
+    std::mutex mutex;
+    std::atomic<bool> cancel{false};
 
     for (int i = 0; i < num_threads; ++i) {
         int64_t start_offset = i * block_size;
         int64_t end_offset = std::min(start_offset + block_size, file_size);
 
-        threads.emplace_back(&TorrentCreator::hash_block, this, path, std::ref(t), piece_size, start_offset, end_offset, std::ref(mutex));
+        threads.emplace_back(&TorrentCreator::hash_block, this, path, std::ref(t), piece_size, start_offset, end_offset, std::ref(mutex), std::ref(cancel));
     }
 
-    // Wait for all threads to finish
+    std::thread monitor([&guard, &cancel]() {
+        while (!cancel.load()) {
+            char c = 0;
+            if (guard.check_key_press(c)) {
+                if (c == 'q' || c == 'Q' || c == '\x03') {
+                    cancel.store(true);
+                    return;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    });
+
     for (auto& thread : threads) {
         thread.join();
     }
+
+    bool interrupted = cancel.exchange(true);
+    monitor.join();
+
+    if (interrupted) {
+        log_message("Process interrupted by user", LogLevel::WARNING);
+        throw UserInterrupt("Process interrupted by user");
+    }
 }
 
-void TorrentCreator::hash_block(const fs::path& path, lt::create_torrent& t, int piece_size, int64_t start_offset, int64_t end_offset, std::mutex& mutex) {
+void TorrentCreator::hash_block(const fs::path& path, lt::create_torrent& t, int piece_size, int64_t start_offset, int64_t end_offset, std::mutex& mutex, std::atomic<bool>& cancel) {
     const size_t buffer_size = PieceSizes::k16384KB; // 16MB buffer
     std::vector<char> buffer(buffer_size);
     std::ifstream file(path, std::ios::binary);
@@ -162,17 +151,10 @@ void TorrentCreator::hash_block(const fs::path& path, lt::create_torrent& t, int
                              eta,
                              total_processed_, 
                              file_size);
-            
-            // Check for user interruption
-            char c = 0;
-            if (check_key_press(c)) {
-                if (c == 'q' || c == 'Q' || c == '\x03') {
-                    log_message("Process interrupted by user", LogLevel::WARNING);
-                    std::cerr << "\nProcess interrupted by user\n";
-                    std::cerr.flush();
-                    std::exit(1);
-                }
-            }
+        }
+
+        if (cancel.load()) {
+            return;
         }
     }
 
@@ -183,7 +165,7 @@ void TorrentCreator::hash_block(const fs::path& path, lt::create_torrent& t, int
     }
 }
 
-void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size) {
+void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard) {
     const size_t buffer_size = PieceSizes::k16384KB; // 16MB buffer
     std::vector<char> buffer(buffer_size);
     std::ifstream file(path, std::ios::binary);
@@ -245,20 +227,15 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
 
         if (elapsed.count() > 30) {
-            log_message("Hanging piece detection triggered - No progress for 30 seconds", LogLevel::WARNING);
-            std::cerr << "\nRuntime error: Hanging piece detection activated. Check disk performance and file integrity\n";
-            std::cerr.flush();
-            throw std::runtime_error("Hashing timeout");
+            log_message("Hashing timeout after 30 seconds", LogLevel::ERR);
+            throw UserInterrupt("Hashing timeout");
         }
 
-        // Non-blocking check for user input
         char c = 0;
-        if (check_key_press(c)) {
+        if (guard.check_key_press(c)) {
             if (c == 'q' || c == 'Q' || c == '\x03') {
                 log_message("Process interrupted by user", LogLevel::WARNING);
-                std::cerr << "\nProcess interrupted by user\n";
-                std::cerr.flush();
-                std::exit(1);
+                throw UserInterrupt("Process interrupted by user");
             }
         }
         // --- End of timeout and user interruption check ---
@@ -307,30 +284,8 @@ void TorrentCreator::print_progress_bar(int progress, int total, double speed, d
 
 
 // Creates the torrent file
-// Function to restore terminal settings on program exit
-#ifndef _WIN32
-void cleanup_terminal(struct termios* old_settings) {
-    if (old_settings && isatty(STDIN_FILENO)) {
-        tcsetattr(STDIN_FILENO, TCSANOW, old_settings);
-    }
-}
-#endif
-
 void TorrentCreator::create_torrent() {
-    bool terminal_changed = false;
-#ifndef _WIN32
-    struct termios old_tio, new_tio;
-    
-    if (is_terminal()) {
-        tcgetattr(STDIN_FILENO, &old_tio);
-        new_tio = old_tio;
-        new_tio.c_lflag &= (~ICANON & ~ECHO);
-        new_tio.c_cc[VMIN] = 0;
-        new_tio.c_cc[VTIME] = 1;
-        tcsetattr(STDIN_FILENO, TCSANOW, &new_tio);
-        terminal_changed = true;
-    }
-#endif
+    TerminalGuard guard;
     
     try {
         log_message("Starting torrent creation for: " + config_.path.string(), LogLevel::INFO);
@@ -438,18 +393,10 @@ void TorrentCreator::create_torrent() {
             
             // Check for user interruption
             char c = 0;
-            if (check_key_press(c)) {
+            if (guard.check_key_press(c)) {
                 if (c == 'q' || c == 'Q' || c == '\x03') {
                     log_message("Process interrupted by user", LogLevel::WARNING);
-                    std::cerr << "\nProcess interrupted by user\n";
-                    std::cerr.flush();
-#ifndef _WIN32
-                    // Restore terminal from raw mode before exiting
-                    if (terminal_changed) {
-                        tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
-                    }
-#endif
-                    std::exit(1);
+                    throw UserInterrupt("Process interrupted by user");
                 }
             }
         };
@@ -466,9 +413,9 @@ void TorrentCreator::create_torrent() {
         } else {
             // For single large files, use our streaming hasher
             if (fs::file_size(config_.path) > 1 * 1024 * 1024 * 1024) { // Use parallel hashing for files larger than 1GB
-                hash_large_file_parallel(config_.path, t, piece_size);
+                hash_large_file_parallel(config_.path, t, piece_size, guard);
             } else {
-                hash_large_file(config_.path, t, piece_size);
+                hash_large_file(config_.path, t, piece_size, guard);
             }
         }
 
@@ -488,22 +435,6 @@ void TorrentCreator::create_torrent() {
         if (config_.creator) {
             t.set_creator(config_.creator->c_str()); // Set creator string
         }
-
-        // Set up non-blocking input for interruption
-#ifndef _WIN32
-        struct termios old_tio_inner, new_tio_inner;
-        bool inner_terminal_changed = false;
-        
-        if (isatty(STDIN_FILENO)) {
-            tcgetattr(STDIN_FILENO, &old_tio_inner);
-            new_tio_inner = old_tio_inner;
-            new_tio_inner.c_lflag &= (~ICANON & ~ECHO);
-            new_tio_inner.c_cc[VMIN] = 0;
-            new_tio_inner.c_cc[VTIME] = 0;
-            tcsetattr(STDIN_FILENO, TCSANOW, &new_tio_inner);
-            inner_terminal_changed = true;
-        }
-#endif
         
         // Check for user interruption and timeout
         auto loop_start_time = std::chrono::steady_clock::now();
@@ -525,34 +456,15 @@ void TorrentCreator::create_torrent() {
                 if (elapsed.count() > 30 && !timeout_thrown && progress == 0) {
                     timeout_thrown = true;
                     log_message("Hashing timeout after 30 seconds", LogLevel::ERR);
-                    std::cout << "\n"; 
-                    std::cerr << "Runtime error: Hashing timeout" << std::endl;
-                    std::cerr.flush();
-                    
-#ifndef _WIN32
-                    if (terminal_changed) {
-                        tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
-                    }
-#endif
-                    
-                    std::exit(1);
+                    throw UserInterrupt("Hashing timeout");
                 }
 
                 // Check for user interruption
                 char c = 0;
-                if (check_key_press(c)) {
+                if (guard.check_key_press(c)) {
                     if (c == 'q' || c == 'Q' || c == '\x03') {
                         log_message("Process interrupted by user", LogLevel::WARNING);
-                        std::cerr << "\nProcess interrupted by user" << std::endl;
-                        std::cerr.flush();
-                        
-#ifndef _WIN32
-                        if (terminal_changed) {
-                            tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
-                        }
-#endif
-                        
-                        std::exit(1);
+                        throw UserInterrupt("Process interrupted by user");
                     }
                 }
                 
@@ -601,31 +513,19 @@ void TorrentCreator::create_torrent() {
             throw;
         }
 
+    } catch (const UserInterrupt&) {
+        std::cerr << "\n";
+        std::cerr.flush();
+        throw;
     } catch (const std::runtime_error& e) {
         std::cerr << e.what() << std::endl;
         log_message("Runtime error: " + std::string(e.what()), LogLevel::ERR);
-#ifndef _WIN32
-        if (terminal_changed) {
-            tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
-        }
-#endif
         throw;
     } catch (const std::exception& e) {
         std::cerr << "An unexpected error occurred: " << e.what() << std::endl;
         log_message("Unexpected error: " + std::string(e.what()), LogLevel::ERR);
-#ifndef _WIN32
-        if (terminal_changed) {
-            tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
-        }
-#endif
         throw;
     }
-    
-#ifndef _WIN32
-    if (terminal_changed) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
-    }
-#endif
 }
 
 // Prints a summary of the created torrent

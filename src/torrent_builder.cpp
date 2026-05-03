@@ -2,6 +2,7 @@
 #include "logger.hpp"
 #include "constants.hpp"
 #include "utils.hpp"
+#include "terminal.hpp"
 #include "version.hpp"
 #include <iostream>
 #include <vector>
@@ -761,6 +762,12 @@ int main(int argc, char *argv[])
     catch (const std::invalid_argument &e)
     {
         log_message(std::string("Invalid argument: ") + e.what(), LogLevel::ERR);
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
+    catch (const UserInterrupt &e)
+    {
+        log_message(std::string(e.what()), LogLevel::WARNING);
         std::cerr << e.what() << std::endl;
         return 1;
     }

@@ -12,6 +12,8 @@
 #include <libtorrent/session.hpp>
 
 #include "logger.hpp"
+#include "terminal.hpp"
+#include <atomic>
 #include <thread>
 #include <mutex>
 #include <string>
@@ -85,9 +87,9 @@ private:
     void add_files_to_storage();
     void print_torrent_summary(int64_t total_size, int piece_size, int num_pieces) const;
     void print_progress_bar(int progress, int total, double speed, double eta, int64_t processed, int64_t total_size) const;
-    void hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size);
-    void hash_large_file_parallel(const fs::path& path, lt::create_torrent& t, int piece_size);
-    void hash_block(const fs::path& path, lt::create_torrent& t, int piece_size, int64_t start_offset, int64_t end_offset, std::mutex& mutex);
+    void hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard);
+    void hash_large_file_parallel(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard);
+    void hash_block(const fs::path& path, lt::create_torrent& t, int piece_size, int64_t start_offset, int64_t end_offset, std::mutex& mutex, std::atomic<bool>& cancel);
 };
 
 #endif // CREATE_TORRENT_HPP
