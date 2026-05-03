@@ -6,6 +6,7 @@
 #else
 #include <conio.h>
 #include <io.h>
+#include <cstdio>
 #endif
 
 struct TerminalGuard::Impl

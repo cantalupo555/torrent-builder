@@ -233,6 +233,7 @@ TEST_F(PtyTest, CancelFlagPropagation) {
 }
 
 #include <cstdlib>
+#include <csignal>
 #include <sys/wait.h>
 
 class CliInterruptTest : public ::testing::Test {
@@ -270,10 +271,9 @@ protected:
             close(master_fd_);
             int slave_fd = open(slave_name, O_RDWR);
             dup2(slave_fd, STDIN_FILENO);
-            dup2(slave_fd, STDOUT_FILENO);
-            dup2(slave_fd, STDERR_FILENO);
             close(slave_fd);
-            setsid();
+            close(STDOUT_FILENO);
+            close(STDERR_FILENO);
             execl("/bin/sh", "sh", "-c", cmd.c_str(), nullptr);
             _exit(127);
         }
@@ -281,10 +281,19 @@ protected:
         return pid_;
     }
 
-    int wait_for_exit() {
+    int wait_for_exit(int timeout_sec = 30) {
         int status;
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_sec);
+        while (std::chrono::steady_clock::now() < deadline) {
+            int ret = waitpid(pid_, &status, WNOHANG);
+            if (ret > 0) {
+                if (WIFEXITED(status)) return WEXITSTATUS(status);
+                return -1;
+            }
+            usleep(100000);
+        }
+        kill(pid_, SIGKILL);
         waitpid(pid_, &status, 0);
-        if (WIFEXITED(status)) return WEXITSTATUS(status);
         return -1;
     }
 };
