@@ -68,6 +68,8 @@ TEST(CLI, HelpLong) {
     EXPECT_NE(output.find("--torrent-version"), std::string::npos);
     EXPECT_NE(output.find("--tracker"), std::string::npos);
     EXPECT_NE(output.find("--version"), std::string::npos);
+    EXPECT_NE(output.find("--source"), std::string::npos);
+    EXPECT_NE(output.find("--entropy"), std::string::npos);
 }
 
 TEST(CLI, HelpShort) {
@@ -1041,7 +1043,9 @@ TEST(CLI, InteractiveNamePrompt) {
         "n "                               // custom piece size? no
         "n "                               // creator? no
         "'My.Interactive.Name' "           // custom name
-        "n ";                              // creation date? no
+        "n "                               // creation date? no
+        "'' "                              // source (empty/skip)
+        "n ";                              // entropy? no
 
     std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
 
@@ -1054,6 +1058,395 @@ TEST(CLI, InteractiveNamePrompt) {
     TorrentMetadata meta = inspector.inspect();
     EXPECT_EQ(meta.name, "My.Interactive.Name")
         << "Interactive mode should apply custom name";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, SourceFlagSetsInfoSource) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_source_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content for source flag"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 --source PTP 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_TRUE(fs::exists(output_file)) << "Torrent file not created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.source.has_value()) << "Source field should be present";
+    EXPECT_EQ(*meta.source, "PTP");
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, EntropyFlagAddsEntropyField) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_entropy_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content for entropy flag"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 -e 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_TRUE(fs::exists(output_file)) << "Torrent file not created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.entropy.has_value()) << "Entropy field should be present";
+    EXPECT_EQ(meta.entropy->size(), 64u) << "Entropy should be 64 hex chars (32 bytes)";
+    EXPECT_TRUE(std::all_of(meta.entropy->begin(), meta.entropy->end(),
+        [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }))
+        << "Entropy should contain only valid hex digits (0-9, a-f)";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, SourceAndEntropyTogether) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_source_entropy_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content for both flags"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 --source HDB -e 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.source.has_value());
+    EXPECT_EQ(*meta.source, "HDB");
+    ASSERT_TRUE(meta.entropy.has_value());
+    EXPECT_EQ(meta.entropy->size(), 64u);
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, DifferentSourceProducesDifferentHash) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_hash_diff_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output1 = temp_dir / "output1.torrent";
+    auto output2 = temp_dir / "output2.torrent";
+    { std::ofstream(input_file) << "test content for hash comparison"; }
+
+    int exit_code;
+    std::string cmd1 = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output1.string()
+        + " --torrent-version 1 --source PTP 2>&1";
+    exec_command(cmd1, exit_code);
+    ASSERT_EQ(exit_code, 0);
+
+    std::string cmd2 = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output2.string()
+        + " --torrent-version 1 --source HDB 2>&1";
+    exec_command(cmd2, exit_code);
+    ASSERT_EQ(exit_code, 0);
+
+    TorrentInspector inspector1(output1.string());
+    TorrentMetadata meta1 = inspector1.inspect();
+
+    TorrentInspector inspector2(output2.string());
+    TorrentMetadata meta2 = inspector2.inspect();
+
+    EXPECT_NE(meta1.info_hash_v1, meta2.info_hash_v1)
+        << "Different source strings should produce different info hashes";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, EntropyProducesUniqueHash) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_entropy_unique_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output1 = temp_dir / "output1.torrent";
+    auto output2 = temp_dir / "output2.torrent";
+    { std::ofstream(input_file) << "test content for entropy uniqueness"; }
+
+    int exit_code;
+    std::string cmd1 = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output1.string()
+        + " --torrent-version 1 -e 2>&1";
+    exec_command(cmd1, exit_code);
+    ASSERT_EQ(exit_code, 0);
+
+    std::string cmd2 = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output2.string()
+        + " --torrent-version 1 -e 2>&1";
+    exec_command(cmd2, exit_code);
+    ASSERT_EQ(exit_code, 0);
+
+    TorrentInspector inspector1(output1.string());
+    TorrentMetadata meta1 = inspector1.inspect();
+
+    TorrentInspector inspector2(output2.string());
+    TorrentMetadata meta2 = inspector2.inspect();
+
+    EXPECT_NE(meta1.info_hash_v1, meta2.info_hash_v1)
+        << "Entropy flag should produce unique info hashes per run";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, NoSourceNoEntropyByDefault) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_no_source_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content without source"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.source.has_value()) << "Source should not be present by default";
+    EXPECT_FALSE(meta.entropy.has_value()) << "Entropy should not be present by default";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, EmptySourceStringTreatedAsUnset) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_empty_source_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content for empty source"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 --source '' 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.source.has_value()) << "Empty source should be treated as not set";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, SourceWithV2Torrent) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_source_v2_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "file.txt") << "test content for v2 source"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 2 --source PTP 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_TRUE(fs::exists(output_file)) << "Torrent file not created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.source.has_value()) << "Source should be present in v2 torrent";
+    EXPECT_EQ(*meta.source, "PTP");
+    EXPECT_FALSE(meta.info_hash_v2.empty()) << "v2 hash should be present";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, SourceWithHybridTorrent) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_source_hybrid_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content for hybrid source"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 3 --source HDB 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.source.has_value()) << "Source should be present in hybrid torrent";
+    EXPECT_EQ(*meta.source, "HDB");
+    EXPECT_TRUE(meta.is_hybrid) << "Should be a hybrid torrent";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, EntropyWithHybridTorrent) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_entropy_hybrid_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content for hybrid entropy"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 3 -e 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.entropy.has_value()) << "Entropy should be present in hybrid torrent";
+    EXPECT_EQ(meta.entropy->size(), 64u);
+    EXPECT_TRUE(meta.is_hybrid);
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, SameSourceProducesSameHash) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_same_source_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output1 = temp_dir / "output1.torrent";
+    auto output2 = temp_dir / "output2.torrent";
+    { std::ofstream(input_file) << "test content for deterministic hash"; }
+
+    int exit_code;
+    std::string cmd1 = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output1.string()
+        + " --torrent-version 1 --source PTP 2>&1";
+    exec_command(cmd1, exit_code);
+    ASSERT_EQ(exit_code, 0);
+
+    std::string cmd2 = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output2.string()
+        + " --torrent-version 1 --source PTP 2>&1";
+    exec_command(cmd2, exit_code);
+    ASSERT_EQ(exit_code, 0);
+
+    TorrentInspector inspector1(output1.string());
+    TorrentMetadata meta1 = inspector1.inspect();
+
+    TorrentInspector inspector2(output2.string());
+    TorrentMetadata meta2 = inspector2.inspect();
+
+    EXPECT_EQ(meta1.info_hash_v1, meta2.info_hash_v1)
+        << "Same source string should produce identical info hashes";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, EntropyWithV2Torrent) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_entropy_v2_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "file.txt") << "test content for v2 entropy"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 2 -e 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_TRUE(fs::exists(output_file)) << "Torrent file not created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.entropy.has_value()) << "Entropy should be present in v2 torrent";
+    EXPECT_EQ(meta.entropy->size(), 64u);
+    EXPECT_FALSE(meta.info_hash_v2.empty()) << "v2 hash should be present";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, InteractiveSourceAndEntropy) {
+#ifdef _WIN32
+    GTEST_SKIP() << "Skipping interactive test on Windows (popen unreliable for stdin piping)";
+#endif
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_interactive_src_ent_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "interactive source entropy test"; }
+
+    std::string inputs =
+        input_file.string() + " "
+        + output_file.string() + " "
+        "3 "                               // torrent version: hybrid
+        "n "                               // comment? no
+        "n "                               // private? no
+        "n "                               // default trackers? no
+        "n "                               // custom trackers? no
+        "'' "                              // web seed (empty/finish)
+        "n "                               // custom piece size? no
+        "n "                               // creator? no
+        "'' "                              // custom name (empty/default)
+        "n "                               // creation date? no
+        "'PTP' "                           // source: PTP
+        "y ";                              // entropy? yes
+
+    std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.source.has_value()) << "Source should be set from interactive input";
+    EXPECT_EQ(*meta.source, "PTP");
+    ASSERT_TRUE(meta.entropy.has_value()) << "Entropy should be set from interactive input";
+    EXPECT_EQ(meta.entropy->size(), 64u);
 
     std::error_code ec;
     fs::remove_all(temp_dir, ec);
