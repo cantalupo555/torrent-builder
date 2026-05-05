@@ -95,6 +95,7 @@ For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --
   -o, --output arg           Output torrent file path (optional; auto-generated if omitted)
   -t, --torrent-version arg  Torrent version (1=v1, 2=v2, 3=hybrid) (default: 3)
   --comment arg              Torrent comment
+  -n, --name arg             Set custom torrent name (overrides default inferred from path)
   --private                  Make torrent private
   --default-trackers         Use default trackers
   -T, --tracker arg          Add tracker URL (can be used multiple times)

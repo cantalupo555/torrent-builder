@@ -499,6 +499,11 @@ void TorrentCreator::create_torrent() {
             }
 
             lt::entry e = t.generate();
+
+            // Set custom name if provided
+            if (config_.name) {
+                e["info"]["name"] = *config_.name;
+            }
             lt::bencode(std::ostream_iterator<char>(out), e);
 
             if (!out) {

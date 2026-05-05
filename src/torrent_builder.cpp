@@ -380,6 +380,23 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         }
     }
 
+    // Get optional custom torrent name
+    std::optional<std::string> torrent_name = std::nullopt;
+    while (true) {
+        std::string input_name;
+        std::cout << "Custom torrent name (leave blank for default): ";
+        std::getline(std::cin, input_name);
+        if (input_name.empty()) {
+            break;
+        }
+        if (input_name.find_first_not_of(" \t\n\r") == std::string::npos) {
+            std::cout << "Error: Name cannot be whitespace-only\n";
+            continue;
+        }
+        torrent_name = input_name;
+        break;
+    }
+
     // Get creation date
     bool include_creation_date = false;
     while (true)
@@ -404,8 +421,8 @@ get_version: // Label to jump to if overwrite is 'n' or empty
 
     return TorrentConfig(path, output, trackers, tv,
                          comment.empty() ? std::nullopt : std::optional<std::string>(comment),
-                         is_private, web_seeds, piece_size, creator_str, include_creation_date
-
+                         is_private, web_seeds, piece_size, creator_str, torrent_name,
+                         include_creation_date
     );
 }
 
@@ -518,6 +535,15 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
         comment = result["comment"].as<std::string>();
     }
 
+    // Get optional torrent name
+    std::optional<std::string> torrent_name = std::nullopt;
+    if (result.count("name")) {
+        torrent_name = result["name"].as<std::string>();
+        if (torrent_name->find_first_not_of(" \t\n\r") == std::string::npos) {
+            throw std::runtime_error("Torrent name cannot be empty or whitespace-only");
+        }
+    }
+
     // Get web seeds
     std::vector<std::string> web_seeds;
     if (result.count("webseed"))
@@ -570,12 +596,9 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
 
     try
     {
-        return TorrentConfig(input_path,
-                             output_path,
-                             trackers,
-                             tv, comment, result.count("private"), web_seeds, piece_size,
-                             creator_str,          // Pass creator string
-                             include_creation_date // Pass creation date flag
+        return TorrentConfig(input_path, output_path, trackers, tv,
+                             comment, result.count("private") > 0, web_seeds, piece_size,
+                             creator_str, torrent_name, include_creation_date
         );
     }
     catch (const fs::filesystem_error &e)
@@ -680,6 +703,7 @@ int main(int argc, char *argv[])
             "t,torrent-version", "Torrent version (1=v1, 2=v2, 3=hybrid)",
             cxxopts::value<std::string>()->default_value("3"),
             "{1,2,3}")("c,comment", "Torrent comment", cxxopts::value<std::string>(), "COMMENT")(
+            "n,name", "Set custom torrent name", cxxopts::value<std::string>(), "NAME")(
             "private", "Make torrent private")("default-trackers", "Use default trackers")(
             "T,tracker", "Add tracker URL", cxxopts::value<std::vector<std::string>>(), "URL")(
             "w,webseed", "Add web seed URL", cxxopts::value<std::vector<std::string>>(),

@@ -6,6 +6,7 @@
 #include <regex>
 #include <filesystem>
 #include <fstream>
+#include "torrent_inspector.hpp"
 
 namespace {
 
@@ -826,3 +827,234 @@ TEST(CLI, OutputDirCreatePermissionDeniedFails) {
     fs::remove_all(temp_dir, ec);
 }
 #endif
+
+TEST(CLI, NameFlagSetsTorrentName) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_name_flag_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content for name flag"; }
+
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --name \"Custom.Torrent.Name\""
+        + " --torrent-version 1 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_TRUE(fs::exists(output_file)) << "Torrent file not created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.name, "Custom.Torrent.Name")
+        << "Torrent internal name should match --name value";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, NameFlagIndependentOfOutput) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_name_independent_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "MyFile.txt";
+    auto output_file = temp_dir / "OtherName.torrent";
+    { std::ofstream(input_file) << "test content"; }
+
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --name \"Internal.Name\""
+        + " --torrent-version 1 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.name, "Internal.Name");
+
+    EXPECT_TRUE(fs::exists(output_file))
+        << "Output file should be OtherName.torrent, not named after --name";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, NameFlagWithDirectory) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_name_dir_test";
+    auto content_dir = temp_dir / "MyFolder";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "file1.txt") << "content1"; }
+    { std::ofstream(content_dir / "file2.txt") << "content2"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --name \"Dir.Custom.Name\""
+        + " --torrent-version 1 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.name, "Dir.Custom.Name")
+        << "Name should override directory name";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, DefaultNameUnchanged) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_default_name_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "OriginalName.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content"; }
+
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.name, "OriginalName.txt")
+        << "Default name should be inferred from filename";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, EmptyNameRejected) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_empty_name_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    { std::ofstream(input_file) << "test content"; }
+
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output " + (temp_dir / "output.torrent").string()
+        + " --name \"   \""
+        + " --torrent-version 1 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_NE(exit_code, 0) << "Should fail with whitespace-only name";
+    EXPECT_NE(output.find("cannot be empty"), std::string::npos)
+        << "Error message should mention empty name. Output: " << output;
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, NameFlagWithV2Directory) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_name_v2_dir_test";
+    auto content_dir = temp_dir / "MyFolder";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "file1.txt") << "content1"; }
+    { std::ofstream(content_dir / "file2.txt") << "content2"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --name \"V2.Custom.Name\""
+        + " --torrent-version 2 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.name, "V2.Custom.Name")
+        << "V2 torrent internal name should match --name value";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, NameFlagWithHybridDirectory) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_name_hybrid_dir_test";
+    auto content_dir = temp_dir / "MyFolder";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "file1.txt") << "content1"; }
+    { std::ofstream(content_dir / "file2.txt") << "content2"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --name \"Hybrid.Custom.Name\""
+        + " --torrent-version 3 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.name, "Hybrid.Custom.Name")
+        << "Hybrid torrent internal name should match --name value";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, InteractiveNamePrompt) {
+#ifdef _WIN32
+    GTEST_SKIP() << "stdin piping via popen() is unreliable on Windows";
+#endif
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_interactive_name_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content"; }
+
+    std::string inputs =
+        "'" + input_file.string() + "' "   // path
+        "'" + output_file.string() + "' "  // output
+        "1 "                               // version (v1)
+        "'' "                              // comment (empty)
+        "n "                               // private? no
+        "n "                               // default trackers? no
+        "n "                               // custom trackers? no
+        "'' "                              // web seed (empty/finish)
+        "n "                               // custom piece size? no
+        "n "                               // creator? no
+        "'My.Interactive.Name' "           // custom name
+        "n ";                              // creation date? no
+
+    std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.name, "My.Interactive.Name")
+        << "Interactive mode should apply custom name";
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
