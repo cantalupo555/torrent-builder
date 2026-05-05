@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <array>
@@ -1241,6 +1242,9 @@ TEST(CLI, NoSourceNoEntropyByDefault) {
 }
 
 TEST(CLI, EmptySourceStringTreatedAsUnset) {
+#ifdef _WIN32
+    GTEST_SKIP() << "Skipping empty source test on Windows (shell quoting differs)";
+#endif
     namespace fs = std::filesystem;
     auto temp_dir = fs::temp_directory_path() / "torrent_builder_empty_source_test";
     fs::create_directories(temp_dir);
