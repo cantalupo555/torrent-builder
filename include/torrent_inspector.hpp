@@ -54,6 +54,7 @@ struct TorrentMetadata
 
     // Optional fields
     std::optional<std::string> source;
+    std::optional<std::string> entropy;
     std::optional<std::string> comment;
     std::optional<int64_t> creation_date;
     std::optional<std::string> created_by;
@@ -77,6 +78,7 @@ class TorrentInspector
   private:
     fs::path torrent_path_;
     std::unique_ptr<libtorrent::torrent_info> torrent_info_;
+    std::vector<char> raw_buffer_; // stored during parse for manual bencode extraction of custom fields
 
     void parse_torrent_file();
     std::string compute_info_hash_v1(const libtorrent::info_hash_t &hash) const;
