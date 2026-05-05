@@ -131,6 +131,54 @@ TEST_F(InspectorTest, FormatMetadataNonJson)
     EXPECT_NE(output.find("Trackers:"), std::string::npos);
 }
 
+TEST_F(InspectorTest, FormatMetadataWithSourceAndEntropy)
+{
+    TorrentMetadata meta;
+    meta.name = "test_name";
+    meta.info_hash_v1 = "1234567890abcdef1234567890abcdef12345678";
+    meta.total_size = 1024;
+    meta.piece_length = 16384;
+    meta.piece_count = 1;
+    meta.files = {};
+    meta.trackers = {"udp://tracker.example.com"};
+    meta.web_seeds = {};
+    meta.is_private = false;
+    meta.magnet_link = "magnet:?xt=urn:btih:1234567890abcdef1234567890abcdef12345678&dn=test_name";
+    meta.source = "PTP";
+    meta.entropy = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+
+    std::string text_output = TorrentInspector::format_metadata(meta, false);
+    EXPECT_NE(text_output.find("Source: PTP"), std::string::npos);
+    EXPECT_NE(text_output.find("Entropy:"), std::string::npos);
+
+    std::string json_output = TorrentInspector::format_metadata(meta, true);
+    EXPECT_NE(json_output.find("\"source\": \"PTP\""), std::string::npos);
+    EXPECT_NE(json_output.find("\"entropy\":"), std::string::npos);
+}
+
+TEST_F(InspectorTest, FormatMetadataWithoutSourceAndEntropy)
+{
+    TorrentMetadata meta;
+    meta.name = "test_name";
+    meta.info_hash_v1 = "1234567890abcdef1234567890abcdef12345678";
+    meta.total_size = 1024;
+    meta.piece_length = 16384;
+    meta.piece_count = 1;
+    meta.files = {};
+    meta.trackers = {"udp://tracker.example.com"};
+    meta.web_seeds = {};
+    meta.is_private = false;
+    meta.magnet_link = "magnet:?xt=urn:btih:1234567890abcdef1234567890abcdef12345678&dn=test_name";
+
+    std::string text_output = TorrentInspector::format_metadata(meta, false);
+    EXPECT_EQ(text_output.find("Source:"), std::string::npos);
+    EXPECT_EQ(text_output.find("Entropy:"), std::string::npos);
+
+    std::string json_output = TorrentInspector::format_metadata(meta, true);
+    EXPECT_EQ(json_output.find("\"source\":"), std::string::npos);
+    EXPECT_EQ(json_output.find("\"entropy\":"), std::string::npos);
+}
+
 TEST_F(InspectorTest, FormatMetadataJsonValid)
 {
     TorrentMetadata meta;

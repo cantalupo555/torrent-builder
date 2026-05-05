@@ -48,6 +48,8 @@ struct TorrentConfig {
     std::optional<std::string> creator; // Optional creator string
     std::optional<std::string> name;       // Optional custom torrent name (overrides default inferred from path)
     bool include_creation_date;       // Flag to include creation date
+    std::optional<std::string> source;     // Source string for cross-seeding (sets info.source)
+    bool entropy;                          // Add random entropy field for unique info hash
 
 
 
@@ -57,10 +59,13 @@ struct TorrentConfig {
                  bool priv = false, std::vector<std::string> ws = {}, std::optional<int> ps = std::nullopt,
                  std::optional<std::string> creator = std::nullopt,
                  std::optional<std::string> name_val = std::nullopt,
-                 bool include_creation_date = false)
+                 bool include_creation_date = false,
+                 std::optional<std::string> source = std::nullopt,
+                 bool entropy = false)
         : path(p), output(o), trackers(t), version(v),
           comment(c), is_private(priv), web_seeds(ws), piece_size(ps),
-          creator(creator), name(name_val), include_creation_date(include_creation_date)
+          creator(creator), name(name_val), include_creation_date(include_creation_date),
+          source(source), entropy(entropy)
     {
         // Validate that the provided path exists
         std::error_code ec;

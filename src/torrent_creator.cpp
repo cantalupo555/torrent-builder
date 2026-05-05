@@ -13,6 +13,29 @@
 #include <thread>
 #include <stdexcept>
 #include <system_error>
+#include <random>
+
+namespace {
+constexpr char HEX_CHARS[] = "0123456789abcdef";
+
+// Generates 32 random bytes formatted as a 64-character lowercase hex string.
+// Used for the entropy field to ensure unique info hashes per invocation.
+std::string generate_entropy_hex()
+{
+    std::random_device rd;
+    // Note: rd.entropy() may return 0 on some platforms (MSVC, MinGW) even when
+    // the implementation uses a proper entropy source. We avoid blocking on that
+    // check and let the call succeed or throw naturally from the OS.
+    std::uniform_int_distribution<unsigned> dist(0, 255);
+    std::string result(64, '\0');
+    for (int i = 0; i < 32; ++i) {
+        unsigned byte = dist(rd);
+        result[i * 2] = HEX_CHARS[byte >> 4];
+        result[i * 2 + 1] = HEX_CHARS[byte & 0xF];
+    }
+    return result;
+}
+}
 
 // Constructor for TorrentCreator
 TorrentCreator::TorrentCreator(const TorrentConfig& config)
@@ -500,10 +523,23 @@ void TorrentCreator::create_torrent() {
 
             lt::entry e = t.generate();
 
-            // Set custom name if provided
             if (config_.name) {
                 e["info"]["name"] = *config_.name;
             }
+
+            if (config_.source) {
+                e["info"]["source"] = *config_.source;
+            }
+
+            if (config_.entropy) {
+                try {
+                    e["info"]["entropy"] = generate_entropy_hex();
+                } catch (const std::exception& ex) {
+                    log_message("Failed to generate entropy: " + std::string(ex.what()), LogLevel::ERR);
+                    throw std::runtime_error("Failed to generate entropy: " + std::string(ex.what()));
+                }
+            }
+
             lt::bencode(std::ostream_iterator<char>(out), e);
 
             if (!out) {
@@ -552,4 +588,10 @@ void TorrentCreator::print_torrent_summary(int64_t total_size, int piece_size, i
     std::cout << "Trackers: " << config_.trackers.size() << "\n"; // Simplified tracker count
     std::cout << "Web seeds: " << config_.web_seeds.size() << "\n";
     std::cout << "Private: " << (config_.is_private ? "Yes" : "No") << "\n";
+    if (config_.source) {
+        std::cout << "Source: " << *config_.source << "\n";
+    }
+    if (config_.entropy) {
+        std::cout << "Entropy: Yes (randomized info hash)\n";
+    }
 }

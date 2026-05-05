@@ -14,6 +14,7 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 - Support for private torrents
 - Add multiple trackers and web seeds
 - Include comments in torrent metadata
+- Cross-seeding support: source field and info hash randomization
 - Detailed summary output after creation
 - Auto-naming: output filename generated from tracker domain and content name
 - Collision-safe naming: automatically resolves filename conflicts with `(1)`, `(2)`, etc.
@@ -103,6 +104,8 @@ For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --
   -s, --piece-size arg       Piece size in KB (must be one of: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)
   --creator                  Set "Torrent Builder" as creator
   --creation-date            Set creation date
+  --source arg               Add source string to torrent info for cross-seeding
+  -e, --entropy              Randomize info hash by adding entropy field
       --skip-prefix          Omit tracker domain from auto-generated output filename
       --output-dir DIR       Directory for auto-generated output filename (created if needed)
       --tracker-index N      Index of tracker to use for filename prefix (0-based, default: 0)
@@ -182,6 +185,18 @@ Create torrent with comment:
 ```bash
 ./torrent_builder --path /data/file --output file.torrent \
   --comment "My important file"
+```
+
+Cross-seeding (unique info hash per tracker):
+```bash
+./torrent_builder --path /data/file --output ptp.torrent \
+  --source "PTP" --tracker "https://ptp.example/announce"
+
+./torrent_builder --path /data/file --output hdb.torrent \
+  --source "HDB" --tracker "https://hdb.example/announce"
+
+./torrent_builder --path /data/file --output unique.torrent \
+  -e --tracker "https://tracker.example/announce"
 ```
 
 Create a torrent with default trackers and custom trackers:

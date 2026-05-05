@@ -5,6 +5,8 @@
 #include <libtorrent/announce_entry.hpp>
 #include <libtorrent/info_hash.hpp>
 #include <libtorrent/file_storage.hpp>
+#include <libtorrent/bencode.hpp>
+#include <libtorrent/entry.hpp>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
@@ -37,8 +39,10 @@ void TorrentInspector::parse_torrent_file()
                                  std::istreambuf_iterator<char>());
         file.close();
 
+        raw_buffer_ = std::move(buffer);
+
         torrent_info_ = std::make_unique<libtorrent::torrent_info>(
-            libtorrent::span<const char>(buffer.data(), buffer.size()), libtorrent::from_span);
+            libtorrent::span<const char>(raw_buffer_.data(), raw_buffer_.size()), libtorrent::from_span);
     }
     catch (const libtorrent::system_error &e)
     {
@@ -191,6 +195,35 @@ TorrentMetadata TorrentInspector::inspect()
         meta.creation_date = torrent_info_->creation_date();
     }
 
+    // libtorrent::torrent_info does not expose arbitrary info-dict fields.
+    // Parse the stored raw buffer to extract source and entropy if present.
+    try
+    {
+        lt::entry root = lt::bdecode(lt::span<const char>(raw_buffer_.data(), raw_buffer_.size()));
+        if (auto it = root.find_key("info"); it != nullptr)
+        {
+            const lt::entry &info = *it;
+            if (auto src = info.find_key("source"); src != nullptr)
+            {
+                if (src->type() == lt::entry::string_t)
+                {
+                    meta.source = src->string();
+                }
+            }
+            if (auto ent = info.find_key("entropy"); ent != nullptr)
+            {
+                if (ent->type() == lt::entry::string_t)
+                {
+                    meta.entropy = ent->string();
+                }
+            }
+        }
+    }
+    catch (const std::exception &e)
+    {
+        log_message("Could not extract source/entropy fields: " + std::string(e.what()), LogLevel::WARNING);
+    }
+
     generate_magnet_link(meta);
 
     return meta;
@@ -258,6 +291,14 @@ std::string TorrentInspector::format_metadata(const TorrentMetadata &meta, bool 
         if (meta.created_by)
         {
             json << "  \"created_by\": \"" << utils::escape_json(*meta.created_by) << "\",\n";
+        }
+        if (meta.source)
+        {
+            json << "  \"source\": \"" << utils::escape_json(*meta.source) << "\",\n";
+        }
+        if (meta.entropy)
+        {
+            json << "  \"entropy\": \"" << utils::escape_json(*meta.entropy) << "\",\n";
         }
 
         json << "  \"trackers\": [\n";
@@ -327,6 +368,14 @@ std::string TorrentInspector::format_metadata(const TorrentMetadata &meta, bool 
         if (meta.created_by)
         {
             output << "Created By: " << *meta.created_by << "\n";
+        }
+        if (meta.source)
+        {
+            output << "Source: " << *meta.source << "\n";
+        }
+        if (meta.entropy)
+        {
+            output << "Entropy: " << *meta.entropy << "\n";
         }
 
         output << "\n";

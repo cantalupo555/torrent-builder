@@ -34,6 +34,40 @@ enum class OverwriteDecision
     Declined
 };
 
+// Prompts the user with a y/N question. Returns true for 'y'/'Y', false for 'n'/'N'/empty.
+// Loops on invalid input until a valid response is given.
+bool prompt_yes_no(const std::string &prompt_text)
+{
+    while (true)
+    {
+        std::string input;
+        std::cout << prompt_text << " (y/N): ";
+        std::getline(std::cin, input);
+        if (input == "y" || input == "Y")
+        {
+            return true;
+        }
+        else if (input == "n" || input == "N" || input.empty())
+        {
+            return false;
+        }
+        std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
+    }
+}
+
+// Prompts the user for an optional string. Returns std::nullopt if input is empty.
+std::optional<std::string> prompt_optional_string(const std::string &prompt_text)
+{
+    std::string input;
+    std::cout << prompt_text;
+    std::getline(std::cin, input);
+    if (input.empty())
+    {
+        return std::nullopt;
+    }
+    return input;
+}
+
 OverwriteDecision prompt_overwrite(const std::string &filepath)
 {
     while (true)
@@ -183,89 +217,39 @@ get_version: // Label to jump to if overwrite is 'n' or empty
     std::getline(std::cin, comment);
 
     // Get private flag
-    bool is_private = false;
-    while (true)
-    { // Loop for private flag validation
-        std::string priv;
-        std::cout << "Private torrent? (y/N): ";
-        std::getline(std::cin, priv);
-        if (priv == "y" || priv == "Y")
-        {
-            is_private = true;
-            break;
-        }
-        else if (priv == "n" || priv == "N" || priv.empty())
-        {
-            break;
-        }
-        else
-        {
-            std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
-        }
-    }
+    bool is_private = prompt_yes_no("Private torrent?");
 
     // Get trackers
     std::vector<std::string> trackers;
-    while (true)
-    { // Loop for Use default trackers
-        std::string use_default;
-        std::cout << "Use default trackers? (y/N): ";
-        std::getline(std::cin, use_default);
-        if (use_default == "y" || use_default == "Y")
-        {
-            trackers.insert(trackers.end(), default_trackers.begin(), default_trackers.end());
-            break;
-        }
-        else if (use_default == "n" || use_default == "N" || use_default.empty())
-        {
-            break;
-        }
-        else
-        {
-            std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
-        }
+    if (prompt_yes_no("Use default trackers?"))
+    {
+        trackers.insert(trackers.end(), default_trackers.begin(), default_trackers.end());
     }
 
-    while (true)
-    { // Loop for Add custom trackers
-        std::string add_trackers;
-        std::cout << "Add custom trackers? (y/N): ";
-        std::getline(std::cin, add_trackers);
-        if (add_trackers == "y" || add_trackers == "Y")
+    if (prompt_yes_no("Add custom trackers?"))
+    {
+        while (true)
         {
-            while (true)
+            std::string tracker;
+            std::cout << "Add tracker (leave blank to finish): ";
+            std::getline(std::cin, tracker);
+            if (tracker.empty())
+                break;
+
+            if (!utils::is_valid_url(tracker))
             {
-                std::string tracker;
-                std::cout << "Add tracker (leave blank to finish): ";
-                std::getline(std::cin, tracker);
-                if (tracker.empty())
-                    break;
-
-                if (!utils::is_valid_url(tracker))
-                {
-                    std::cout << "Error: Invalid tracker URL. Must start with http://, https://, "
-                                 "or udp://\n";
-                    continue;
-                }
-
-                // Check if the tracker already exists using std::ranges::contains
-                if (std::ranges::contains(trackers, tracker))
-                {
-                    std::cout << "Error: Tracker already added.\n";
-                    continue;
-                }
-
-                trackers.push_back(tracker);
+                std::cout << "Error: Invalid tracker URL. Must start with http://, https://, "
+                             "or udp://\n";
+                continue;
             }
-            break;
-        }
-        else if (add_trackers == "n" || add_trackers == "N" || add_trackers.empty())
-        {
-            break;
-        }
-        else
-        {
-            std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
+
+            if (std::ranges::contains(trackers, tracker))
+            {
+                std::cout << "Error: Tracker already added.\n";
+                continue;
+            }
+
+            trackers.push_back(tracker);
         }
     }
 
@@ -291,105 +275,71 @@ get_version: // Label to jump to if overwrite is 'n' or empty
 
     // Get piece size
     std::optional<int> piece_size = std::nullopt;
-    while (true)
-    { // Loop for Set custom piece size
-        std::string set_piece_size;
-        std::cout << "Set custom piece size? (y/N): ";
-        std::getline(std::cin, set_piece_size);
-        if (set_piece_size == "y" || set_piece_size == "Y")
+    if (prompt_yes_no("Set custom piece size?"))
+    {
+        while (true)
         {
-            while (true)
-            { // Loop to repeat the question
-                std::string piece_size_str;
-                std::cout << "Piece size in KB: \n";
+            std::string piece_size_str;
+            std::cout << "Piece size in KB: \n";
 
-                // Show valid options
-                std::cout << "Valid options: ";
-                for (size_t i = 0; i < allowed_piece_sizes.size(); ++i)
+            std::cout << "Valid options: ";
+            for (size_t i = 0; i < allowed_piece_sizes.size(); ++i)
+            {
+                std::cout << allowed_piece_sizes[i];
+                if (i < allowed_piece_sizes.size() - 1)
                 {
-                    std::cout << allowed_piece_sizes[i];
-                    if (i < allowed_piece_sizes.size() - 1)
-                    {
-                        std::cout << ", ";
-                    }
-                }
-                std::cout << "\n";
-
-                std::getline(std::cin, piece_size_str);
-                if (piece_size_str.empty())
-                {
-                    break; // Exit the inner loop if input is empty
-                }
-
-                try
-                {
-                    int ps = std::stoi(piece_size_str);
-                    // Validate using std::ranges::contains
-                    if (std::ranges::contains(allowed_piece_sizes, ps))
-                    {
-                        piece_size = ps * 1024; // Store in bytes
-                        break;                  // Exit the loop if input is valid
-                    }
-                    else
-                    {
-                        std::cout << "Error: Invalid piece size. Please enter a valid option.\n";
-                    }
-                }
-                catch (const std::invalid_argument &e)
-                { // Catch invalid argument exception
-                    std::cout << "Invalid input. Please enter a valid integer.\n";
-                    continue;
-                }
-                catch (const std::out_of_range &e)
-                { // Catch out of range exception
-                    std::cout << "Input out of range. Please enter a valid integer.\n";
-                    continue;
+                    std::cout << ", ";
                 }
             }
-            break; // Exit the outer piece_size loop
-        }
-        else if (set_piece_size == "n" || set_piece_size == "N" || set_piece_size.empty())
-        {
-            break;
-        }
-        else
-        {
-            std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
+            std::cout << "\n";
+
+            std::getline(std::cin, piece_size_str);
+            if (piece_size_str.empty())
+            {
+                break;
+            }
+
+            try
+            {
+                int ps = std::stoi(piece_size_str);
+                if (std::ranges::contains(allowed_piece_sizes, ps))
+                {
+                    piece_size = ps * 1024;
+                    break;
+                }
+                else
+                {
+                    std::cout << "Error: Invalid piece size. Please enter a valid option.\n";
+                }
+            }
+            catch (const std::invalid_argument &e)
+            {
+                std::cout << "Invalid input. Please enter a valid integer.\n";
+                continue;
+            }
+            catch (const std::out_of_range &e)
+            {
+                std::cout << "Input out of range. Please enter a valid integer.\n";
+                continue;
+            }
         }
     }
 
     // Get creator
-    std::string set_creator;
     std::optional<std::string> creator_str = std::nullopt;
-    while (true)
-    { // Loop to repeat the question
-        std::cout << "Set \"Torrent Builder\" as creator? (y/N): ";
-        std::getline(std::cin, set_creator);
-        if (set_creator == "y" || set_creator == "Y")
-        {
-            creator_str = "Torrent Builder";
-            break;
-        }
-        else if (set_creator == "n" || set_creator == "N" || set_creator.empty())
-        {
-            break;
-        }
-        else
-        {
-            std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
-        }
+    if (prompt_yes_no("Set \"Torrent Builder\" as creator?"))
+    {
+        creator_str = "Torrent Builder";
     }
 
     // Get optional custom torrent name
     std::optional<std::string> torrent_name = std::nullopt;
     while (true) {
-        std::string input_name;
-        std::cout << "Custom torrent name (leave blank for default): ";
-        std::getline(std::cin, input_name);
-        if (input_name.empty()) {
+        auto input_name = prompt_optional_string("Custom torrent name (leave blank for default): ");
+        if (!input_name.has_value()) {
             break;
         }
-        if (input_name.find_first_not_of(" \t\n\r") == std::string::npos) {
+        if (input_name->find_first_not_of(" \t\n\r") == std::string::npos) {
             std::cout << "Error: Name cannot be whitespace-only\n";
             continue;
         }
@@ -398,31 +348,18 @@ get_version: // Label to jump to if overwrite is 'n' or empty
     }
 
     // Get creation date
-    bool include_creation_date = false;
-    while (true)
-    { // Loop to repeat the question
-        std::string set_creation_date;
-        std::cout << "Set creation date? (y/N): ";
-        std::getline(std::cin, set_creation_date);
-        if (set_creation_date == "y" || set_creation_date == "Y")
-        {
-            include_creation_date = true;
-            break;
-        }
-        else if (set_creation_date == "n" || set_creation_date == "N" || set_creation_date.empty())
-        {
-            break;
-        }
-        else
-        {
-            std::cout << "Error: Invalid input. Please enter 'y' or 'n'.\n";
-        }
-    }
+    bool include_creation_date = prompt_yes_no("Set creation date?");
+
+    // Get optional source string
+    std::optional<std::string> source = prompt_optional_string("Source string for cross-seeding (leave blank to skip): ");
+
+    // Get entropy flag
+    bool entropy = prompt_yes_no("Add random entropy for unique info hash?");
 
     return TorrentConfig(path, output, trackers, tv,
                          comment.empty() ? std::nullopt : std::optional<std::string>(comment),
                          is_private, web_seeds, piece_size, creator_str, torrent_name,
-                         include_creation_date
+                         include_creation_date, source, entropy
     );
 }
 
@@ -594,11 +531,26 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
     // Get creation date flag
     bool include_creation_date = result.count("creation-date") > 0;
 
+    // Get optional source string
+    std::optional<std::string> source = std::nullopt;
+    if (result.count("source"))
+    {
+        std::string source_str = result["source"].as<std::string>();
+        if (!source_str.empty())
+        {
+            source = source_str;
+        }
+    }
+
+    // Get entropy flag
+    bool entropy = result.count("entropy") > 0;
+
     try
     {
         return TorrentConfig(input_path, output_path, trackers, tv,
                              comment, result.count("private") > 0, web_seeds, piece_size,
-                             creator_str, torrent_name, include_creation_date
+                             creator_str, torrent_name, include_creation_date,
+                             source, entropy
         );
     }
     catch (const fs::filesystem_error &e)
@@ -718,7 +670,10 @@ int main(int argc, char *argv[])
             "output-dir", "Directory for auto-generated output filename (created if needed)",
             cxxopts::value<std::string>(), "DIR")(
             "tracker-index", "Index of tracker to use for filename prefix (0-based, defaults to 0 on out-of-range)",
-            cxxopts::value<int>()->default_value("0"), "N");
+            cxxopts::value<int>()->default_value("0"), "N")(
+            "source", "Add source string to torrent info for cross-seeding",
+            cxxopts::value<std::string>(), "SOURCE")(
+            "e,entropy", "Randomize info hash by adding entropy field");
 
         options.positional_help("PATH [OUTPUT]");
         options.parse_positional({"path", "output"});
