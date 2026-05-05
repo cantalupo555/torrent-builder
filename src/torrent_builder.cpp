@@ -221,47 +221,36 @@ get_version: // Label to jump to if overwrite is 'n' or empty
 
     // Get trackers
     std::vector<std::string> trackers;
-    while (true)
+    if (prompt_yes_no("Use default trackers?"))
     {
-        if (prompt_yes_no("Use default trackers?"))
-        {
-            trackers.insert(trackers.end(), default_trackers.begin(), default_trackers.end());
-            break;
-        }
-        break;
+        trackers.insert(trackers.end(), default_trackers.begin(), default_trackers.end());
     }
 
-    while (true)
+    if (prompt_yes_no("Add custom trackers?"))
     {
-        if (prompt_yes_no("Add custom trackers?"))
+        while (true)
         {
-            while (true)
+            std::string tracker;
+            std::cout << "Add tracker (leave blank to finish): ";
+            std::getline(std::cin, tracker);
+            if (tracker.empty())
+                break;
+
+            if (!utils::is_valid_url(tracker))
             {
-                std::string tracker;
-                std::cout << "Add tracker (leave blank to finish): ";
-                std::getline(std::cin, tracker);
-                if (tracker.empty())
-                    break;
-
-                if (!utils::is_valid_url(tracker))
-                {
-                    std::cout << "Error: Invalid tracker URL. Must start with http://, https://, "
-                                 "or udp://\n";
-                    continue;
-                }
-
-                // Check if the tracker already exists using std::ranges::contains
-                if (std::ranges::contains(trackers, tracker))
-                {
-                    std::cout << "Error: Tracker already added.\n";
-                    continue;
-                }
-
-                trackers.push_back(tracker);
+                std::cout << "Error: Invalid tracker URL. Must start with http://, https://, "
+                             "or udp://\n";
+                continue;
             }
-            break;
+
+            if (std::ranges::contains(trackers, tracker))
+            {
+                std::cout << "Error: Tracker already added.\n";
+                continue;
+            }
+
+            trackers.push_back(tracker);
         }
-        break;
     }
 
     // Get web seeds
