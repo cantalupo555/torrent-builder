@@ -46,6 +46,7 @@ struct TorrentConfig {
     std::vector<std::string> web_seeds; // List of web seed URLs
     std::optional<int> piece_size;    // Optional piece size in bytes
     std::optional<std::string> creator; // Optional creator string
+    std::optional<std::string> name;       // Optional custom torrent name (overrides default inferred from path)
     bool include_creation_date;       // Flag to include creation date
 
 
@@ -54,10 +55,12 @@ struct TorrentConfig {
     TorrentConfig(fs::path p, fs::path o, std::vector<std::string> t,
                  TorrentVersion v, std::optional<std::string> c = std::nullopt,
                  bool priv = false, std::vector<std::string> ws = {}, std::optional<int> ps = std::nullopt,
-                 std::optional<std::string> creator = std::nullopt, bool include_creation_date = false) // Add new parameters with default values
+                 std::optional<std::string> creator = std::nullopt,
+                 std::optional<std::string> name_val = std::nullopt,
+                 bool include_creation_date = false)
         : path(p), output(o), trackers(t), version(v),
           comment(c), is_private(priv), web_seeds(ws), piece_size(ps),
-          creator(creator), include_creation_date(include_creation_date) // Initialize new members
+          creator(creator), name(name_val), include_creation_date(include_creation_date)
     {
         // Validate that the provided path exists
         std::error_code ec;
