@@ -356,10 +356,57 @@ get_version: // Label to jump to if overwrite is 'n' or empty
     // Get entropy flag
     bool entropy = prompt_yes_no("Add random entropy for unique info hash?");
 
+    // Compile glob patterns to regex once at config time. glob_to_regex() escapes
+    // all metacharacters so regex_error is unreachable — the catch is defense-in-depth.
+    std::vector<std::regex> exclude_regex_compiled;
+    if (prompt_yes_no("Exclude files by pattern?"))
+    {
+        while (true)
+        {
+            std::string pattern;
+            std::cout << "Exclude pattern (glob, leave blank to finish): ";
+            std::getline(std::cin, pattern);
+            if (pattern.empty())
+                break;
+            try
+            {
+                exclude_regex_compiled.push_back(utils::glob_to_regex(pattern));
+            }
+            catch (const std::regex_error &)
+            {
+                std::cout << "Error: Invalid glob pattern: " << pattern << "\n";
+                log_message("Invalid glob pattern entered: " + pattern, LogLevel::WARNING);
+            }
+        }
+    }
+
+    std::vector<std::regex> include_regex_compiled;
+    if (prompt_yes_no("Include only matching files?"))
+    {
+        while (true)
+        {
+            std::string pattern;
+            std::cout << "Include pattern (glob, leave blank to finish): ";
+            std::getline(std::cin, pattern);
+            if (pattern.empty())
+                break;
+            try
+            {
+                include_regex_compiled.push_back(utils::glob_to_regex(pattern));
+            }
+            catch (const std::regex_error &)
+            {
+                std::cout << "Error: Invalid glob pattern: " << pattern << "\n";
+                log_message("Invalid glob pattern entered: " + pattern, LogLevel::WARNING);
+            }
+        }
+    }
+
     return TorrentConfig(path, output, trackers, tv,
                          comment.empty() ? std::nullopt : std::optional<std::string>(comment),
                          is_private, web_seeds, piece_size, creator_str, torrent_name,
-                         include_creation_date, source, entropy
+                         include_creation_date, source, entropy,
+                         std::move(exclude_regex_compiled), std::move(include_regex_compiled)
     );
 }
 
@@ -545,12 +592,37 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
     // Get entropy flag
     bool entropy = result.count("entropy") > 0;
 
+    // Compile glob patterns to regex once at config time. glob_to_regex() escapes
+    // all metacharacters so regex_error is unreachable — the catch is defense-in-depth.
+    std::vector<std::regex> exclude_regex_compiled;
+    if (result.count("exclude"))
+    {
+        auto patterns = result["exclude"].as<std::vector<std::string>>();
+        for (const auto &p : patterns)
+        {
+            try { exclude_regex_compiled.push_back(utils::glob_to_regex(p)); }
+            catch (const std::regex_error &) { throw std::runtime_error("Invalid exclude pattern: " + p); }
+        }
+    }
+
+    std::vector<std::regex> include_regex_compiled;
+    if (result.count("include"))
+    {
+        auto patterns = result["include"].as<std::vector<std::string>>();
+        for (const auto &p : patterns)
+        {
+            try { include_regex_compiled.push_back(utils::glob_to_regex(p)); }
+            catch (const std::regex_error &) { throw std::runtime_error("Invalid include pattern: " + p); }
+        }
+    }
+
     try
     {
         return TorrentConfig(input_path, output_path, trackers, tv,
                              comment, result.count("private") > 0, web_seeds, piece_size,
                              creator_str, torrent_name, include_creation_date,
-                             source, entropy
+                             source, entropy,
+                             std::move(exclude_regex_compiled), std::move(include_regex_compiled)
         );
     }
     catch (const fs::filesystem_error &e)
@@ -673,7 +745,11 @@ int main(int argc, char *argv[])
             cxxopts::value<int>()->default_value("0"), "N")(
             "source", "Add source string to torrent info for cross-seeding",
             cxxopts::value<std::string>(), "SOURCE")(
-            "e,entropy", "Randomize info hash by adding entropy field");
+            "e,entropy", "Randomize info hash by adding entropy field")(
+            "x,exclude", "Exclude files matching glob pattern (supports *, **, ?)",
+             cxxopts::value<std::vector<std::string>>(), "PATTERN")(
+            "I,include", "Include only files matching glob pattern (supports *, **, ?)",
+             cxxopts::value<std::vector<std::string>>(), "PATTERN");
 
         options.positional_help("PATH [OUTPUT]");
         options.parse_positional({"path", "output"});
@@ -706,8 +782,15 @@ int main(int argc, char *argv[])
                          "\"https://tracker.example/announce\" --output-dir /torrents\n";
             std::cout << "  ./torrent_builder --path /data/file --default-trackers "
                          "--tracker-index 2\n";
+            std::cout << "  ./torrent_builder --path /data/folder --exclude \"*.nfo\" "
+                         "--exclude \"*.txt\"\n";
+            std::cout << "  ./torrent_builder --path /data/folder --include \"*.mkv\" "
+                         "--include \"*.mp4\"\n";
             std::cout << "\nNote: Allowed piece sizes (in KB): 16, 32, 64, 128, 256, 512, 1024, "
                          "2048, 4096, 8192, 16384, 32768\n";
+            std::cout << "Glob patterns: * (any non-slash), **/ (zero or more dirs), "
+                         "** (any path), ? (single char). Case-insensitive.\n";
+            std::cout << "Note: --include patterns take precedence over --exclude when both match.\n";
             return 0;
         }
 
