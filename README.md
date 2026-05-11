@@ -106,7 +106,9 @@ For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --
   --creation-date            Set creation date
   --source arg               Add source string to torrent info for cross-seeding
   -e, --entropy              Randomize info hash by adding entropy field
-      --skip-prefix          Omit tracker domain from auto-generated output filename
+  -x, --exclude arg          Exclude files matching glob pattern (can be used multiple times)
+  -I, --include arg          Include only files matching glob pattern (can be used multiple times)
+       --skip-prefix          Omit tracker domain from auto-generated output filename
       --output-dir DIR       Directory for auto-generated output filename (created if needed)
       --tracker-index N      Index of tracker to use for filename prefix (0-based, default: 0)
 ```
@@ -203,6 +205,23 @@ Create a torrent with default trackers and custom trackers:
 ```bash
 ./torrent_builder --path /data/file --output file.torrent --default-trackers --tracker udp://mytracker.com:8080
 ```
+
+Exclude unwanted files from a directory:
+```bash
+./torrent_builder --path /data/folder --output folder.torrent \
+  --exclude "*.nfo" --exclude "*.txt"
+
+./torrent_builder --path /data/folder --output folder.torrent \
+  --exclude "subs/**"
+```
+
+Include only specific file types:
+```bash
+./torrent_builder --path /data/folder --output folder.torrent \
+  --include "*.mkv" --include "*.mp4"
+```
+
+> **Note:** `--include` patterns take precedence over `--exclude` when both match. Glob syntax: `*` (any non-slash), `**/` (zero or more dirs), `**` (any path), `?` (single char). Matching is case-insensitive.
 
 Inspect torrent metadata:
 ```bash
