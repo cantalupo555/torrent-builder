@@ -498,4 +498,97 @@ std::string generate_auto_output_path(const std::filesystem::path &content_path,
     return (dir / resolved).string();
 }
 
+// All regex metacharacters are escaped below, so no user input can produce an
+// invalid regex. The try/catch around glob_to_regex() at call sites is
+// defense-in-depth — the catch path is unreachable by design.
+std::regex glob_to_regex(const std::string &pattern)
+{
+    std::string regex_str;
+    regex_str.reserve(pattern.size() * 2);
+    regex_str += '^';
+
+    std::size_t i = 0;
+    while (i < pattern.size())
+    {
+        char c = pattern[i];
+
+        if (c == '*' && i + 1 < pattern.size() && pattern[i + 1] == '*')
+        {
+            if (i + 2 < pattern.size() && pattern[i + 2] == '/')
+            {
+                regex_str += "(?:.*/)?";
+                i += 3;
+            }
+            else
+            {
+                regex_str += ".*";
+                i += 2;
+            }
+        }
+        else if (c == '*')
+        {
+            regex_str += "[^/]*";
+            ++i;
+        }
+        else if (c == '?')
+        {
+            regex_str += "[^/]";
+            ++i;
+        }
+        else if (c == '.' || c == '+' || c == '(' || c == ')' || c == '[' ||
+                 c == ']' || c == '{' || c == '}' || c == '^' || c == '$' ||
+                 c == '|' || c == '\\')
+        {
+            regex_str += '\\';
+            regex_str += c;
+            ++i;
+        }
+        else
+        {
+            regex_str += c;
+            ++i;
+        }
+    }
+
+    regex_str += '$';
+    return std::regex(regex_str, std::regex::icase | std::regex::optimize);
+}
+
+bool should_include_file(const std::string &relative_path,
+                          const std::vector<std::regex> &exclude_regex,
+                          const std::vector<std::regex> &include_regex)
+{
+    if (!include_regex.empty())
+    {
+        bool matched = false;
+        for (const auto &re : include_regex)
+        {
+            if (std::regex_match(relative_path, re))
+            {
+                matched = true;
+                break;
+            }
+        }
+        if (matched)
+            return true;
+        if (!exclude_regex.empty())
+        {
+            for (const auto &re : exclude_regex)
+            {
+                if (std::regex_match(relative_path, re))
+                    return false;
+            }
+        }
+        return false;
+    }
+
+    for (const auto &re : exclude_regex)
+    {
+        if (std::regex_match(relative_path, re))
+            return false;
+    }
+
+    return true;
+}
+
 } // namespace utils
