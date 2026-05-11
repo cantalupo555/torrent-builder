@@ -60,16 +60,73 @@ lt::create_flags_t TorrentCreator::get_torrent_flags(TorrentVersion version) {
     return flags;
 }
 
-// Adds files to the libtorrent file_storage
-void TorrentCreator::add_files_to_storage() {
-    if (fs::is_directory(config_.path)) {
-        // If the path is a directory, add all files in the directory
-        lt::add_files(fs_, config_.path.string(), [](std::string const&) { return true; });
-    } else {
-        // If the path is a file, add the single file
-        fs_.add_file(config_.path.filename().string(), fs::file_size(config_.path));
+    void TorrentCreator::add_files_to_storage() {
+        if (fs::is_directory(config_.path)) {
+            const auto &exclude_regex = config_.exclude_regex;
+            const auto &include_regex = config_.include_regex;
+
+            int file_count_before = fs_.num_files();
+
+            if (exclude_regex.empty() && include_regex.empty()) {
+                lt::add_files(fs_, config_.path.string(), [](std::string const&) { return true; });
+            } else {
+                fs::path base = fs::absolute(config_.path);
+                int dirs_excluded = 0;
+                int files_excluded = 0;
+
+                // lt::add_files callback signature is (std::string const&) — only a path string,
+                // no file type information. is_directory() is mandatory to distinguish files from
+                // directories for pruning. There is no alternative without replacing lt::add_files.
+                lt::add_files(fs_, config_.path.string(),
+                    [&base, &exclude_regex, &include_regex, &dirs_excluded, &files_excluded](std::string const &file_path) {
+                        std::error_code ec;
+                        fs::path rel = fs::path(file_path).lexically_relative(base);
+
+                        // Fail-open: if lexically_relative fails (different mount points, symlinks),
+                        // include the entry rather than silently dropping it. This guard is
+                        // defense-in-depth — lt::add_files always passes paths within the base tree.
+                        if (rel.empty()) {
+                            log_message("Could not compute relative path for: " + file_path, LogLevel::WARNING);
+                            return true;
+                        }
+                        std::string rel_str = rel.generic_string();
+                        if (fs::is_directory(file_path, ec)) {
+                            // When include patterns exist, never prune directories — their files
+                            // must be checked individually against include rules.
+                            if (!include_regex.empty()) return true;
+                            std::string dir_path = rel_str + "/";
+                            for (const auto &re : exclude_regex) {
+                                if (std::regex_match(dir_path, re) || std::regex_match(rel_str, re)) {
+                                    ++dirs_excluded;
+                                    return false;
+                                }
+                            }
+                            return true;
+                        }
+                        if (!utils::should_include_file(rel_str, exclude_regex, include_regex)) {
+                            ++files_excluded;
+                            return false;
+                        }
+                        return true;
+                    });
+
+                int files_added = fs_.num_files() - file_count_before;
+                std::string filter_summary = "Pattern filter: " + std::to_string(files_added) + " file(s) included";
+                if (files_excluded > 0) filter_summary += ", " + std::to_string(files_excluded) + " file(s) excluded";
+                if (dirs_excluded > 0) filter_summary += ", " + std::to_string(dirs_excluded) + " directory(ies) excluded";
+                log_message(filter_summary);
+            }
+
+            if (fs_.num_files() == 0) {
+                throw std::runtime_error("No files matched the specified patterns ("
+                    + std::to_string(config_.exclude_regex.size()) + " exclude, "
+                    + std::to_string(config_.include_regex.size()) + " include). "
+                    "Torrent would be empty.");
+            }
+        } else {
+            fs_.add_file(config_.path.filename().string(), fs::file_size(config_.path));
+        }
     }
-}
 
 // Hashing with streaming for large files
 void TorrentCreator::hash_large_file_parallel(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard) {

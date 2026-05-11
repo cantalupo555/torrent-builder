@@ -22,6 +22,7 @@
 #include <iostream>
 #include <filesystem>
 #include <fstream>
+#include <regex>
 
 namespace fs = std::filesystem;
 
@@ -50,8 +51,8 @@ struct TorrentConfig {
     bool include_creation_date;       // Flag to include creation date
     std::optional<std::string> source;     // Source string for cross-seeding (sets info.source)
     bool entropy;                          // Add random entropy field for unique info hash
-
-
+    std::vector<std::regex> exclude_regex;      // Pre-compiled exclude patterns
+    std::vector<std::regex> include_regex;      // Pre-compiled include patterns (overrides exclude)
 
     // Constructor for TorrentConfig
     TorrentConfig(fs::path p, fs::path o, std::vector<std::string> t,
@@ -61,11 +62,15 @@ struct TorrentConfig {
                  std::optional<std::string> name_val = std::nullopt,
                  bool include_creation_date = false,
                  std::optional<std::string> source = std::nullopt,
-                 bool entropy = false)
+                 bool entropy = false,
+                 std::vector<std::regex> exclude_re = {},
+                 std::vector<std::regex> include_re = {})
         : path(p), output(o), trackers(t), version(v),
           comment(c), is_private(priv), web_seeds(ws), piece_size(ps),
           creator(creator), name(name_val), include_creation_date(include_creation_date),
-          source(source), entropy(entropy)
+          source(source), entropy(entropy),
+          exclude_regex(std::move(exclude_re)),
+          include_regex(std::move(include_re))
     {
         // Validate that the provided path exists
         std::error_code ec;

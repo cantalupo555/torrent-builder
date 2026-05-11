@@ -861,3 +861,158 @@ TEST(GenerateAutoOutputPath, EmptyOutputDirUsesCurrentPath) {
     std::filesystem::current_path(original_dir);
     std::filesystem::remove_all(temp_dir);
 }
+
+TEST(GlobToRegex, StarMatchesExtension) {
+    auto re = utils::glob_to_regex("*.nfo");
+    EXPECT_TRUE(std::regex_match("readme.nfo", re));
+    EXPECT_FALSE(std::regex_match("readme.txt", re));
+}
+
+TEST(GlobToRegex, StarMatchesFilename) {
+    auto re = utils::glob_to_regex("file.*");
+    EXPECT_TRUE(std::regex_match("file.txt", re));
+    EXPECT_TRUE(std::regex_match("file.mkv", re));
+    EXPECT_FALSE(std::regex_match("other.txt", re));
+}
+
+TEST(GlobToRegex, CaseInsensitive) {
+    auto re = utils::glob_to_regex("*.NFO");
+    EXPECT_TRUE(std::regex_match("readme.nfo", re));
+    EXPECT_TRUE(std::regex_match("readme.Nfo", re));
+}
+
+TEST(GlobToRegex, QuestionMark) {
+    auto re = utils::glob_to_regex("file?.txt");
+    EXPECT_TRUE(std::regex_match("file1.txt", re));
+    EXPECT_TRUE(std::regex_match("fileA.txt", re));
+    EXPECT_FALSE(std::regex_match("file.txt", re));
+    EXPECT_FALSE(std::regex_match("file12.txt", re));
+}
+
+TEST(GlobToRegex, DoubleStarRecursive) {
+    auto re = utils::glob_to_regex("subs/**");
+    EXPECT_TRUE(std::regex_match("subs/en/sub.srt", re));
+    EXPECT_TRUE(std::regex_match("subs/sub.srt", re));
+}
+
+TEST(GlobToRegex, DoubleStarSlashZeroOrMoreDirs) {
+    auto re = utils::glob_to_regex("**/*.nfo");
+    EXPECT_TRUE(std::regex_match("movie.nfo", re));
+    EXPECT_TRUE(std::regex_match("dir/movie.nfo", re));
+    EXPECT_TRUE(std::regex_match("a/b/c/movie.nfo", re));
+    EXPECT_FALSE(std::regex_match("movie.txt", re));
+}
+
+TEST(GlobToRegex, DoubleStarNoSlash) {
+    auto re = utils::glob_to_regex("dir/**");
+    EXPECT_TRUE(std::regex_match("dir/file.txt", re));
+    EXPECT_TRUE(std::regex_match("dir/sub/file.txt", re));
+}
+
+TEST(GlobToRegex, LiteralMatch) {
+    auto re = utils::glob_to_regex("readme.txt");
+    EXPECT_TRUE(std::regex_match("readme.txt", re));
+    EXPECT_FALSE(std::regex_match("readme.md", re));
+}
+
+TEST(GlobToRegex, EscapesRegexMetacharacters) {
+    auto re = utils::glob_to_regex("file.name.txt");
+    EXPECT_TRUE(std::regex_match("file.name.txt", re));
+    EXPECT_FALSE(std::regex_match("fileXname.txt", re));
+}
+
+TEST(GlobToRegex, StarDoesNotMatchSlash) {
+    auto re = utils::glob_to_regex("*.txt");
+    EXPECT_TRUE(std::regex_match("file.txt", re));
+    EXPECT_FALSE(std::regex_match("dir/file.txt", re));
+}
+
+TEST(ShouldIncludeFile, NoPatternsIncludesAll) {
+    std::vector<std::regex> exclude_re, include_re;
+    EXPECT_TRUE(utils::should_include_file("file.txt", exclude_re, include_re));
+}
+
+TEST(ShouldIncludeFile, ExcludeOnly) {
+    std::vector<std::regex> include_re;
+    std::vector<std::regex> exclude_re = {utils::glob_to_regex("*.nfo")};
+    EXPECT_FALSE(utils::should_include_file("readme.nfo", exclude_re, include_re));
+    EXPECT_TRUE(utils::should_include_file("movie.mkv", exclude_re, include_re));
+}
+
+TEST(ShouldIncludeFile, IncludeOnly) {
+    std::vector<std::regex> exclude_re;
+    std::vector<std::regex> include_re = {utils::glob_to_regex("*.mkv")};
+    EXPECT_TRUE(utils::should_include_file("movie.mkv", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("readme.txt", exclude_re, include_re));
+}
+
+TEST(ShouldIncludeFile, IncludeOverridesExclude) {
+    std::vector<std::regex> exclude_re = {utils::glob_to_regex("*.mkv")};
+    std::vector<std::regex> include_re = {utils::glob_to_regex("*.mkv")};
+    EXPECT_TRUE(utils::should_include_file("movie.mkv", exclude_re, include_re));
+}
+
+TEST(ShouldIncludeFile, MultipleExcludes) {
+    std::vector<std::regex> include_re;
+    std::vector<std::regex> exclude_re = {utils::glob_to_regex("*.nfo"), utils::glob_to_regex("*.txt")};
+    EXPECT_FALSE(utils::should_include_file("readme.nfo", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("info.txt", exclude_re, include_re));
+    EXPECT_TRUE(utils::should_include_file("movie.mkv", exclude_re, include_re));
+}
+
+TEST(ShouldIncludeFile, MultipleIncludes) {
+    std::vector<std::regex> exclude_re;
+    std::vector<std::regex> include_re = {utils::glob_to_regex("*.mkv"), utils::glob_to_regex("*.mp4")};
+    EXPECT_TRUE(utils::should_include_file("movie.mkv", exclude_re, include_re));
+    EXPECT_TRUE(utils::should_include_file("clip.mp4", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("readme.txt", exclude_re, include_re));
+}
+
+TEST(ShouldIncludeFile, IncludeWithExcludeNonOverlap) {
+    std::vector<std::regex> include_re = {utils::glob_to_regex("*.mkv"), utils::glob_to_regex("*.srt")};
+    std::vector<std::regex> exclude_re = {utils::glob_to_regex("*.srt")};
+    EXPECT_TRUE(utils::should_include_file("movie.mkv", exclude_re, include_re));
+    EXPECT_TRUE(utils::should_include_file("subs.srt", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("readme.txt", exclude_re, include_re));
+}
+
+TEST(ShouldIncludeFile, RecursivePatternExclude) {
+    std::vector<std::regex> include_re;
+    std::vector<std::regex> exclude_re = {utils::glob_to_regex("subs/**")};
+    EXPECT_FALSE(utils::should_include_file("subs/en/sub.srt", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("subs/sub.srt", exclude_re, include_re));
+    EXPECT_TRUE(utils::should_include_file("movie.mkv", exclude_re, include_re));
+}
+
+TEST(GlobToRegex, EmptyPattern) {
+    auto re = utils::glob_to_regex("");
+    EXPECT_TRUE(std::regex_match("", re));
+    EXPECT_FALSE(std::regex_match("file.txt", re));
+}
+
+TEST(GlobToRegex, DirSlashStarPattern) {
+    auto re = utils::glob_to_regex("dir/*.txt");
+    EXPECT_TRUE(std::regex_match("dir/file.txt", re));
+    EXPECT_FALSE(std::regex_match("dir/file.mkv", re));
+    EXPECT_FALSE(std::regex_match("dir/sub/file.txt", re));
+}
+
+TEST(GlobToRegex, BackslashEscaped) {
+    auto re = utils::glob_to_regex("file\\name.txt");
+    EXPECT_TRUE(std::regex_match("file\\name.txt", re));
+    EXPECT_FALSE(std::regex_match("filename.txt", re));
+}
+
+TEST(GlobToRegex, LoneDoubleStarMatchesAll) {
+    auto re = utils::glob_to_regex("**");
+    EXPECT_TRUE(std::regex_match("file.txt", re));
+    EXPECT_TRUE(std::regex_match("dir/file.txt", re));
+    EXPECT_TRUE(std::regex_match("a/b/c/file.txt", re));
+}
+
+TEST(GlobToRegex, TrailingSlashPattern) {
+    auto re = utils::glob_to_regex("dir/");
+    EXPECT_TRUE(std::regex_match("dir/", re));
+    EXPECT_FALSE(std::regex_match("dir", re));
+    EXPECT_FALSE(std::regex_match("dir/file.txt", re));
+}

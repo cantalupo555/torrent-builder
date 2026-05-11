@@ -1046,7 +1046,9 @@ TEST(CLI, InteractiveNamePrompt) {
         "'My.Interactive.Name' "           // custom name
         "n "                               // creation date? no
         "'' "                              // source (empty/skip)
-        "n ";                              // entropy? no
+        "n "                               // entropy? no
+        "n "                               // exclude patterns? no
+        "n ";                              // include patterns? no
 
     std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
 
@@ -1436,7 +1438,9 @@ TEST(CLI, InteractiveSourceAndEntropy) {
         "'' "                              // custom name (empty/default)
         "n "                               // creation date? no
         "'PTP' "                           // source: PTP
-        "y ";                              // entropy? yes
+        "y "                                // entropy? yes
+        "n "                                // exclude patterns? no
+        "n ";                               // include patterns? no
 
     std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
 
@@ -1454,4 +1458,444 @@ TEST(CLI, InteractiveSourceAndEntropy) {
 
     std::error_code ec;
     fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, ExcludePatternFiltersFiles) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_exclude_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "info.nfo") << "nfo data"; }
+    { std::ofstream(content_dir / "readme.txt") << "text data"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1"
+        + " --exclude \"*.nfo\""
+        + " --exclude \"*.txt\" 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_TRUE(fs::exists(output_file)) << "Torrent file not created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.files.size(), 1u) << "Should only have 1 file (movie.mkv)";
+    EXPECT_NE(meta.files[0].path.find("movie.mkv"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, IncludePatternFiltersFiles) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_include_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "clip.mp4") << "clip content"; }
+    { std::ofstream(content_dir / "readme.txt") << "text data"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1"
+        + " --include \"*.mkv\""
+        + " --include \"*.mp4\" 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_TRUE(fs::exists(output_file)) << "Torrent file not created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.files.size(), 2u) << "Should have 2 files (movie.mkv, clip.mp4)";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, IncludeOverridesExclude) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_inc_over_exc_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "subs.srt") << "subtitle data"; }
+    { std::ofstream(content_dir / "readme.txt") << "text data"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1"
+        + " --include \"*.mkv\""
+        + " --include \"*.srt\""
+        + " --exclude \"*.srt\" 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.files.size(), 2u) << "Include should override exclude for .srt";
+
+    bool has_srt = false;
+    bool has_mkv = false;
+    for (const auto &f : meta.files) {
+        if (f.path.find(".srt") != std::string::npos) has_srt = true;
+        if (f.path.find(".mkv") != std::string::npos) has_mkv = true;
+    }
+    EXPECT_TRUE(has_mkv) << "movie.mkv should be included";
+    EXPECT_TRUE(has_srt) << "subs.srt should be included (include wins over exclude)";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, ExcludeAllFilesFails) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_exclude_all_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "info.nfo") << "nfo data"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1"
+        + " --exclude \"*\" 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_NE(exit_code, 0) << "Should fail when all files are excluded";
+    EXPECT_NE(output.find("No files matched"), std::string::npos)
+        << "Output should mention no files matched";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, HelpShowsExcludeInclude) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " --help", exit_code);
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("--exclude"), std::string::npos);
+    EXPECT_NE(output.find("--include"), std::string::npos);
+}
+
+TEST(CLI, ExcludePatternSubdirectory) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_exclude_subdir_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    fs::create_directories(content_dir / "subs");
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "subs" / "en.srt") << "subtitle"; }
+    { std::ofstream(content_dir / "subs" / "es.srt") << "subtitulo"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1"
+        + " --exclude \"subs/**\" 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.files.size(), 1u) << "Should only have movie.mkv (subs/** excluded)";
+    EXPECT_NE(meta.files[0].path.find("movie.mkv"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, IncludeOnlyNoMatchFails) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_include_nomatch_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "readme.txt") << "text data"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1"
+        + " --include \"*.mkv\" 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_NE(exit_code, 0) << "Should fail when include matches nothing";
+    EXPECT_NE(output.find("No files matched"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, SingleFileWithPatterns) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_single_pattern_test";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "movie.mkv";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "video content"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1"
+        + " --exclude \"*.txt\" 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Patterns should not affect single-file mode. Output: " << output;
+    EXPECT_TRUE(fs::exists(output_file)) << "Torrent file should be created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.files.size(), 1u);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, InteractiveExcludePatterns) {
+#ifdef _WIN32
+    GTEST_SKIP() << "Skipping interactive test on Windows";
+#endif
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_interactive_exc_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "info.nfo") << "nfo data"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    std::string inputs =
+        content_dir.string() + " "
+        + output_file.string() + " "
+        "1 "                               // torrent version: v1
+        "n "                               // comment? no
+        "n "                               // private? no
+        "n "                               // default trackers? no
+        "n "                               // custom trackers? no
+        "'' "                              // web seed (empty/finish)
+        "n "                               // custom piece size? no
+        "n "                               // creator? no
+        "'' "                              // custom name (empty/default)
+        "n "                               // creation date? no
+        "'' "                              // source (empty)
+        "n "                               // entropy? no
+        "y "                               // exclude patterns? yes
+        "*.nfo "                           // exclude pattern
+        " "                                // blank to finish exclude
+        "n "                               // include patterns? no
+        "";
+
+    std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.files.size(), 1u) << "Should only have movie.mkv (.nfo excluded)";
+    EXPECT_NE(meta.files[0].path.find("movie.mkv"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, ExcludePatternV2Torrent) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_exclude_v2_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "info.nfo") << "nfo data"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 2"
+        + " --exclude \"*.nfo\" 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    bool has_mkv = false;
+    bool has_nfo = false;
+    for (const auto &f : meta.files) {
+        if (f.path.find(".mkv") != std::string::npos) has_mkv = true;
+        if (f.path.find(".nfo") != std::string::npos) has_nfo = true;
+    }
+    EXPECT_TRUE(has_mkv) << "movie.mkv should be present in v2 torrent";
+    EXPECT_FALSE(has_nfo) << "info.nfo should be excluded from v2 torrent";
+    EXPECT_FALSE(meta.info_hash_v2.empty()) << "v2 hash should be present";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, ExcludePatternHybridTorrent) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_exclude_hybrid_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "readme.txt") << "text data"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 3"
+        + " --exclude \"*.txt\" 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    bool has_mkv = false;
+    bool has_txt = false;
+    for (const auto &f : meta.files) {
+        if (f.path.find(".mkv") != std::string::npos) has_mkv = true;
+        if (f.path.find(".txt") != std::string::npos) has_txt = true;
+    }
+    EXPECT_TRUE(has_mkv) << "movie.mkv should be present in hybrid torrent";
+    EXPECT_FALSE(has_txt) << "readme.txt should be excluded from hybrid torrent";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, ExcludeSubdirectoryPruning) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_dir_prune_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    fs::create_directories(content_dir / "extras");
+    fs::create_directories(content_dir / "extras" / "deep");
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "extras" / "trailer.mkv") << "trailer"; }
+    { std::ofstream(content_dir / "extras" / "deep" / "bonus.mkv") << "bonus"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1"
+        + " --exclude \"extras/**\" 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.files.size(), 1u) << "Should only have movie.mkv (extras/ pruned)";
+    EXPECT_NE(meta.files[0].path.find("movie.mkv"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, InteractiveMultipleExcludePatterns) {
+#ifdef _WIN32
+    GTEST_SKIP() << "Skipping interactive test on Windows";
+#endif
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_interactive_multi_exc_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "info.nfo") << "nfo data"; }
+    { std::ofstream(content_dir / "sample.srt") << "subtitle data"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    std::string inputs =
+        content_dir.string() + " "
+        + output_file.string() + " "
+        "1 "                               // torrent version: v1
+        "n "                               // comment? no
+        "n "                               // private? no
+        "n "                               // default trackers? no
+        "n "                               // custom trackers? no
+        "'' "                              // web seed (empty/finish)
+        "n "                               // custom piece size? no
+        "n "                               // creator? no
+        "'' "                              // custom name (empty/default)
+        "n "                               // creation date? no
+        "'' "                              // source (empty)
+        "n "                               // entropy? no
+        "y "                               // exclude patterns? yes
+        "*.nfo "                           // exclude pattern 1
+        "*.srt "                           // exclude pattern 2
+        " "                                // blank to finish exclude
+        "n "                               // include patterns? no
+        " ";
+
+    std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.files.size(), 1u) << "Should only have movie.mkv";
+    EXPECT_NE(meta.files[0].path.find("movie.mkv"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, IncludePatternNestedDirectories) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_include_nested_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    fs::create_directories(content_dir / "subs");
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "subs" / "en.srt") << "subtitle"; }
+    { std::ofstream(content_dir / "readme.txt") << "text"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1"
+        + " --include \"*.mkv\""
+        + " --include \"**/*.srt\" 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    bool has_mkv = false;
+    bool has_srt = false;
+    bool has_txt = false;
+    for (const auto &f : meta.files) {
+        if (f.path.find(".mkv") != std::string::npos) has_mkv = true;
+        if (f.path.find(".srt") != std::string::npos) has_srt = true;
+        if (f.path.find(".txt") != std::string::npos) has_txt = true;
+    }
+    EXPECT_TRUE(has_mkv) << "movie.mkv should be included";
+    EXPECT_TRUE(has_srt) << "subs/en.srt should be included (directory traversed)";
+    EXPECT_FALSE(has_txt) << "readme.txt should be excluded";
+
+    fs::remove_all(temp_dir);
 }

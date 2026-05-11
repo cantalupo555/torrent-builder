@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <vector>
+#include <regex>
 
 namespace utils
 {
@@ -178,6 +179,47 @@ std::string generate_auto_output_path(const std::filesystem::path &content_path,
                                        bool skip_prefix,
                                        int tracker_index,
                                        const std::filesystem::path &output_dir);
+
+/**
+ * @brief Convert a glob pattern to a compiled std::regex for case-insensitive matching.
+ *
+ * Supports the following glob tokens:
+ *   - Asterisk (*) matches any sequence of characters except forward slash
+ *   - Double-asterisk-slash (**) followed by slash matches zero or more directory
+ *     levels; the slash itself is optional in the matched path
+ *   - Double-asterisk (**) without trailing slash matches any sequence including slashes
+ *   - Question mark (?) matches exactly one character
+ *
+ * All other characters are treated as literal matches.
+ * Regex metacharacters are automatically escaped.
+ *
+ * @param pattern Glob pattern string.
+ * @return Compiled std::regex with ECMAScript syntax and case-insensitive flag.
+ * @throws std::regex_error if the resulting regex is invalid.
+ */
+std::regex glob_to_regex(const std::string &pattern);
+
+/**
+ * @brief Determine whether a file should be included based on exclude/include patterns.
+ *
+ * Decision logic (evaluated in order):
+ *   1. If both lists are empty, include the file.
+ *   2. If include patterns exist and the file matches any, include.
+ *   3. If include patterns exist and the file matches none, exclude.
+ *   4. If only exclude patterns exist and the file matches any, exclude.
+ *   5. Otherwise, include.
+ *
+ * Include patterns take precedence over exclude patterns: a file matching both
+ * an exclude and an include pattern is included.
+ *
+ * @param relative_path File path relative to the torrent root (using forward slashes).
+ * @param exclude_regex Pre-compiled regex patterns for exclusion.
+ * @param include_regex Pre-compiled regex patterns for inclusion (takes precedence).
+ * @return true if the file should be included in the torrent, false to exclude it.
+ */
+bool should_include_file(const std::string &relative_path,
+                          const std::vector<std::regex> &exclude_regex,
+                          const std::vector<std::regex> &include_regex);
 
 } // namespace utils
 
