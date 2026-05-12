@@ -2022,11 +2022,13 @@ TEST(CLI, QuietOverwriteAutoDeclines) {
         + " --output " + output_file + " --quiet 2>&1", exit_code);
 
     EXPECT_EQ(exit_code, 1) << "Quiet mode should auto-decline overwrite with exit code 1";
-    std::ifstream check(output_file);
-    std::string content((std::istreambuf_iterator<char>(check)),
-                        std::istreambuf_iterator<char>());
-    EXPECT_EQ(content, "dummy torrent content")
-        << "Original file should be preserved when quiet auto-declines overwrite";
+    {
+        std::ifstream check(output_file);
+        std::string content((std::istreambuf_iterator<char>(check)),
+                            std::istreambuf_iterator<char>());
+        EXPECT_EQ(content, "dummy torrent content")
+            << "Original file should be preserved when quiet auto-declines overwrite";
+    }
 
     fs::remove_all(temp_dir);
 }
@@ -2066,11 +2068,13 @@ TEST(CLI, JsonOverwriteAutoDeclines) {
         + " --output " + output_file + " --json 2>&1", exit_code);
 
     EXPECT_EQ(exit_code, 1) << "JSON mode should auto-decline overwrite. Output: " << output;
-    std::ifstream check(output_file);
-    std::string content((std::istreambuf_iterator<char>(check)),
-                        std::istreambuf_iterator<char>());
-    EXPECT_EQ(content, "dummy torrent content")
-        << "Original file should be preserved when JSON auto-declines overwrite";
+    {
+        std::ifstream check(output_file);
+        std::string content((std::istreambuf_iterator<char>(check)),
+                            std::istreambuf_iterator<char>());
+        EXPECT_EQ(content, "dummy torrent content")
+            << "Original file should be preserved when JSON auto-declines overwrite";
+    }
 
     fs::remove_all(temp_dir);
 }
