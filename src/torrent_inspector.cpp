@@ -87,10 +87,12 @@ std::string TorrentInspector::compute_info_hash_v2(const libtorrent::info_hash_t
 void TorrentInspector::generate_magnet_link(TorrentMetadata &meta)
 {
     std::stringstream magnet;
+    // xt=urn:btih is the v1 info hash (SHA-1); btih = BitTorrent Info Hash
     magnet << "magnet:?xt=urn:btih:" << meta.info_hash_v1;
 
     if (meta.is_hybrid && !meta.info_hash_v2.empty())
     {
+        // xt=urn:btmh is the v2 info hash (SHA-256); btmh = BitTorrent Multi Hash
         magnet << "&xt=urn:btmh:" << meta.info_hash_v2;
     }
 
@@ -164,6 +166,7 @@ TorrentMetadata TorrentInspector::inspect()
         meta.trackers.push_back(entry.url);
     }
 
+    // url_seeds()/http_seeds() deprecated in newer libtorrent but still needed for backward compat
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     for (const auto &url_seed : torrent_info_->url_seeds())

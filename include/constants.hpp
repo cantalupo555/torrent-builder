@@ -3,6 +3,9 @@
 
 #include <array>
 
+/**
+ * Standard torrent protocol piece sizes in bytes (16 KB to 32 MB, powers of 2).
+ */
 namespace PieceSizes {
     constexpr int k16KB = 16 * 1024;
     constexpr int k32KB = 32 * 1024;
@@ -18,7 +21,9 @@ namespace PieceSizes {
     constexpr int k32768KB = 32768 * 1024;
 }
 
-// Allowed piece sizes in KB for command-line validation (powers of 2)
+/**
+ * Valid piece sizes for command-line input validation (powers of 2, in KB).
+ */
 namespace AllowedPieceSizes {
     constexpr std::array<int, 12> values = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768};
 }

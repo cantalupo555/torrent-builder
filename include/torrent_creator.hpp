@@ -7,7 +7,6 @@
 #include <libtorrent/entry.hpp>
 #include <libtorrent/bencode.hpp>
 #include <libtorrent/error_code.hpp>
-// Add the following includes:
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/session.hpp>
 
@@ -26,35 +25,50 @@
 
 namespace fs = std::filesystem;
 
-// Default trackers to be used if none are provided
 extern const std::vector<std::string> default_trackers;
 
-// Enum for supported torrent versions
 enum class TorrentVersion {
     V1,
     V2,
     HYBRID
 };
 
-// Struct to hold the configuration for creating a torrent
 struct TorrentConfig {
-    fs::path path;                   // Path to the file or directory to be included in the torrent
-    fs::path output;                 // Path to save the generated .torrent file
-    std::vector<std::string> trackers; // List of tracker URLs
-    TorrentVersion version;          // Torrent version (V1, V2, or HYBRID)
-    std::optional<std::string> comment; // Optional comment to be included in the torrent
-    bool is_private;                 // Flag to indicate if the torrent is private
-    std::vector<std::string> web_seeds; // List of web seed URLs
-    std::optional<int> piece_size;    // Optional piece size in bytes
-    std::optional<std::string> creator; // Optional creator string
-    std::optional<std::string> name;       // Optional custom torrent name (overrides default inferred from path)
-    bool include_creation_date;       // Flag to include creation date
-    std::optional<std::string> source;     // Source string for cross-seeding (sets info.source)
-    bool entropy;                          // Add random entropy field for unique info hash
-    std::vector<std::regex> exclude_regex;      // Pre-compiled exclude patterns
-    std::vector<std::regex> include_regex;      // Pre-compiled include patterns (overrides exclude)
+    fs::path path;
+    fs::path output;
+    std::vector<std::string> trackers;
+    TorrentVersion version;
+    std::optional<std::string> comment;
+    bool is_private;
+    std::vector<std::string> web_seeds;
+    std::optional<int> piece_size;
+    std::optional<std::string> creator;
+    std::optional<std::string> name;              // Overrides default name inferred from path
+    bool include_creation_date;
+    std::optional<std::string> source;            // Cross-seeding identity (sets info.source)
+    bool entropy;                                 // Randomize info hash per invocation
+    std::vector<std::regex> exclude_regex;        // Pre-compiled exclude patterns
+    std::vector<std::regex> include_regex;        // Pre-compiled include patterns (overrides exclude)
 
-    // Constructor for TorrentConfig
+    /**
+     * @brief Construct a torrent configuration with all creation parameters.
+     * @param p Path to the file or directory to include.
+     * @param o Output path for the generated .torrent file.
+     * @param t List of tracker announce URLs.
+     * @param v Torrent protocol version (V1, V2, or HYBRID).
+     * @param c Optional comment string.
+     * @param priv Whether the torrent is private (disables DHT/PEX).
+     * @param ws List of web seed URLs.
+     * @param ps Optional piece size in bytes (std::nullopt = auto-calculated).
+     * @param creator Optional creator string.
+     * @param name_val Optional custom torrent name (overrides name from path).
+     * @param include_creation_date Whether to embed the current timestamp.
+     * @param source Source string for cross-seeding (sets info.source).
+     * @param entropy Add random entropy field for unique info hash.
+     * @param exclude_re Pre-compiled regex patterns for file exclusion.
+     * @param include_re Pre-compiled regex patterns for file inclusion (overrides exclude).
+     * @throws std::filesystem::filesystem_error if the path does not exist.
+     */
     TorrentConfig(fs::path p, fs::path o, std::vector<std::string> t,
                  TorrentVersion v, std::optional<std::string> c = std::nullopt,
                  bool priv = false, std::vector<std::string> ws = {}, std::optional<int> ps = std::nullopt,
@@ -82,7 +96,21 @@ struct TorrentConfig {
 
 class TorrentCreator {
 public:
+    /**
+     * @brief Construct a torrent creator with the given configuration.
+     * @param config Fully populated TorrentConfig.
+     */
     explicit TorrentCreator(const TorrentConfig& config);
+
+    /**
+     * @brief Create and save a .torrent file according to the configuration.
+     *
+     * Orchestrates file scanning, piece hashing (single-threaded or parallel
+     * based on file size), metadata assembly, and disk write.
+     *
+     * @throws std::runtime_error on hashing, I/O, or configuration errors.
+     * @throws UserInterrupt if the user presses 'q' or hashing times out.
+     */
     void create_torrent();
     /**
      * @brief Get libtorrent creation flags for a given torrent version.
@@ -93,8 +121,8 @@ public:
 private:
     TorrentConfig config_;
     lt::file_storage fs_;
-    lt::session ses;
-    std::mutex progress_mutex_;
+    lt::session ses;              // Needed for libtorrent async hashing alerts
+    std::mutex progress_mutex_;   // Guards total_processed_ across worker threads
     int64_t total_processed_ = 0;
 
     void add_files_to_storage();

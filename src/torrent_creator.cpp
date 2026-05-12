@@ -18,8 +18,8 @@
 namespace {
 constexpr char HEX_CHARS[] = "0123456789abcdef";
 
-// Generates 32 random bytes formatted as a 64-character lowercase hex string.
-// Used for the entropy field to ensure unique info hashes per invocation.
+// Generates 32 random bytes (256 bits) as a 64-char hex string.
+// Hex encoding ensures the bencode string field stays valid UTF-8.
 std::string generate_entropy_hex()
 {
     std::random_device rd;
@@ -39,7 +39,7 @@ std::string generate_entropy_hex()
 
 // Constructor for TorrentCreator
 TorrentCreator::TorrentCreator(const TorrentConfig& config)
-    : config_(config), ses(lt::session_params{}) { // Initialize session with default parameters
+    : config_(config), ses(lt::session_params{}) {
 }
 
 
@@ -131,8 +131,10 @@ lt::create_flags_t TorrentCreator::get_torrent_flags(TorrentVersion version) {
 // Hashing with streaming for large files
 void TorrentCreator::hash_large_file_parallel(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard) {
     const int64_t file_size = fs::file_size(path);
+    // Hashing is CPU-bound SHA-1, so matching thread count to physical cores
+    // maximizes throughput without oversubscribing the CPU.
     const int num_threads = std::thread::hardware_concurrency();
-    const int64_t block_size = (file_size / num_threads) + 1;
+    const int64_t block_size = (file_size / num_threads) + 1; // +1 prevents dropping last block on integer truncation
 
     std::vector<std::thread> threads;
     std::mutex mutex;
@@ -145,6 +147,8 @@ void TorrentCreator::hash_large_file_parallel(const fs::path& path, lt::create_t
         threads.emplace_back(&TorrentCreator::hash_block, this, path, std::ref(t), piece_size, start_offset, end_offset, std::ref(mutex), std::ref(cancel));
     }
 
+    // Monitor thread polls for 'q' keypress while workers block on I/O;
+    // signals shutdown via cancel atomic so workers can exit cleanly.
     std::thread monitor([&guard, &cancel]() {
         while (!cancel.load()) {
             char c = 0;
@@ -172,7 +176,7 @@ void TorrentCreator::hash_large_file_parallel(const fs::path& path, lt::create_t
 }
 
 void TorrentCreator::hash_block(const fs::path& path, lt::create_torrent& t, int piece_size, int64_t start_offset, int64_t end_offset, std::mutex& mutex, std::atomic<bool>& cancel) {
-    const size_t buffer_size = PieceSizes::k16384KB; // 16MB buffer
+    const size_t buffer_size = PieceSizes::k16384KB; // Largest supported piece size; minimizes read syscalls
     std::vector<char> buffer(buffer_size);
     std::ifstream file(path, std::ios::binary);
 
@@ -187,7 +191,6 @@ void TorrentCreator::hash_block(const fs::path& path, lt::create_torrent& t, int
     lt::hasher piece_hasher;
     int bytes_in_current_piece = 0;
     
-    // Add these variables
     int64_t file_size = fs::file_size(path);
     auto start_time = std::chrono::steady_clock::now();
 
@@ -246,7 +249,7 @@ void TorrentCreator::hash_block(const fs::path& path, lt::create_torrent& t, int
 }
 
 void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard) {
-    const size_t buffer_size = PieceSizes::k16384KB; // 16MB buffer
+    const size_t buffer_size = PieceSizes::k16384KB; // Largest supported piece size; minimizes read syscalls
     std::vector<char> buffer(buffer_size);
     std::ifstream file(path, std::ios::binary);
 
@@ -260,7 +263,7 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
     lt::hasher piece_hasher;
     int bytes_in_current_piece = 0;
 
-    auto start_time = std::chrono::steady_clock::now(); // Start time
+    auto start_time = std::chrono::steady_clock::now();
     double speed = 0.0;
     double eta = 0.0;
 
@@ -306,7 +309,7 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
 
-        if (elapsed.count() > 30) {
+        if (elapsed.count() > 30) { // 30s stall threshold: filesystem freeze or unresponsive I/O
             log_message("Hashing timeout after 30 seconds", LogLevel::ERR);
             throw UserInterrupt("Hashing timeout");
         }
@@ -388,7 +391,7 @@ void TorrentCreator::create_torrent() {
                 required_space = fs::file_size(config_.path);
             }
             
-            if (si.available < required_space * 1.1) { // 10% buffer
+            if (si.available < required_space * 1.1) { // 10% buffer for filesystem metadata overhead
                 throw std::runtime_error("Not enough disk space. Required: " + 
                     std::to_string(required_space) + " bytes, Available: " + 
                     std::to_string(si.available) + " bytes");
@@ -407,7 +410,6 @@ void TorrentCreator::create_torrent() {
         int piece_size = config_.piece_size ? *config_.piece_size : utils::auto_piece_size(fs_.total_size());
         lt::create_flags_t flags = get_torrent_flags(config_.version);
 
-        // Simplify the torrent for debugging
         lt::create_torrent t(fs_, piece_size, flags);
 
         // Add trackers to create_torrent object
@@ -421,7 +423,6 @@ void TorrentCreator::create_torrent() {
         log_message("Starting hashing process for: " + config_.path.string(), LogLevel::INFO);
         int num_pieces = t.num_pieces();
 
-        // Declaring variables to track progress and time
         auto start_time = std::chrono::steady_clock::now();
         double speed = 0.0;
         double eta = 0.0;
@@ -492,7 +493,7 @@ void TorrentCreator::create_torrent() {
 
         } else {
             // For single large files, use our streaming hasher
-            if (fs::file_size(config_.path) > 1 * 1024 * 1024 * 1024) { // Use parallel hashing for files larger than 1GB
+            if (fs::file_size(config_.path) > 1 * 1024 * 1024 * 1024) { // Below 1GB single-threaded is cheaper than thread coordination
                 hash_large_file_parallel(config_.path, t, piece_size, guard);
             } else {
                 hash_large_file(config_.path, t, piece_size, guard);
@@ -522,18 +523,21 @@ void TorrentCreator::create_torrent() {
 
         // Only run progress loop for directory hashing (libtorrent async)
         if (fs::is_directory(config_.path)) {
+            // Progress monitoring loop: polls libtorrent alerts and user keypress
+            // until hashing completes or times out.
             while (true) {
                 auto now = std::chrono::steady_clock::now();
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - loop_start_time);
 
-                // Reset timeout timer only if we're making meaningful progress
+                // Reset: progress→0 each iteration so timeout detects stalls;
+                // timer refreshes only on meaningful progress.
                 if (progress > 0 && progress < num_pieces - 1) {
                     loop_start_time = std::chrono::steady_clock::now();
                     progress = 0;
                 }
                 
-                // Timeout after 30 seconds of no progress
-                if (elapsed.count() > 30 && !timeout_thrown && progress == 0) {
+                // progress == 0 means no piece completed since the last reset → stalled
+                if (elapsed.count() > 30 && !timeout_thrown && progress == 0) { // 30s stall threshold
                     timeout_thrown = true;
                     log_message("Hashing timeout after 30 seconds", LogLevel::ERR);
                     throw UserInterrupt("Hashing timeout");
@@ -548,7 +552,7 @@ void TorrentCreator::create_torrent() {
                     }
                 }
                 
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                std::this_thread::sleep_for(std::chrono::milliseconds(10)); // keypress polling interval
 
                 if (progress >= num_pieces - 1) {
                     print_progress_bar(num_pieces, num_pieces, speed, 0.0, total_size, total_size);
@@ -557,7 +561,7 @@ void TorrentCreator::create_torrent() {
                 }
 
                 ses.pop_alerts(&alerts);
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::this_thread::sleep_for(std::chrono::milliseconds(100)); // alert drain interval
             }
         } else {
             // For single files, hashing is already complete - just show final progress
