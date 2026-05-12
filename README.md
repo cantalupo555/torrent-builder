@@ -16,6 +16,9 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 - Include comments in torrent metadata
 - Cross-seeding support: source field and info hash randomization
 - Detailed summary output after creation
+- Verbose mode for detailed creation diagnostics
+- Quiet mode for scripts and CI pipelines
+- JSON output for programmatic consumption
 - Auto-naming: output filename generated from tracker domain and content name
 - Collision-safe naming: automatically resolves filename conflicts with `(1)`, `(2)`, etc.
 - Filename truncation with UTF-8 boundary safety (255-byte filesystem limit)
@@ -91,6 +94,9 @@ For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --
 ```
   -h, --help                 Show help
   -v, --version              Show version
+  --verbose                  Enable verbose output (conflicts with --quiet, --json)
+  -q, --quiet                Suppress non-essential output, auto-decline prompts (conflicts with --verbose)
+  --json                     Output torrent metadata as JSON (implies --quiet, conflicts with --verbose)
   -i, --interactive          Run in interactive mode
   -p, --path arg             Path to file or directory (required)
   -o, --output arg           Output torrent file path (optional; auto-generated if omitted)
@@ -112,6 +118,32 @@ For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --
       --output-dir DIR       Directory for auto-generated output filename (created if needed)
       --tracker-index N      Index of tracker to use for filename prefix (0-based, default: 0)
 ```
+
+> **Note:** `--verbose`, `--quiet`, and `--json` are ignored in interactive mode. In CLI mode, `--verbose` and `--quiet` are mutually exclusive, as are `--verbose` and `--json`. The `--json` flag implies `--quiet` and auto-declines any overwrite prompts.
+
+### JSON Output Format
+
+When using `--json`, the output is a single JSON object to stdout (errors go to stderr):
+
+```json
+{
+  "name": "filename",
+  "info_hash_v1": "...",
+  "info_hash_v2": "...",
+  "is_hybrid": false,
+  "total_size": 12345678,
+  "piece_length": 262144,
+  "piece_count": 48,
+  "files_count": 1,
+  "is_private": false,
+  "trackers": ["https://tracker.example/announce"],
+  "web_seeds": [],
+  "magnet_link": "...",
+  "output_path": "/path/to/output.torrent"
+}
+```
+
+Optional fields (`comment`, `creation_date`, `created_by`, `source`, `entropy`) appear only when present in the torrent metadata.
 
 > **Note:** `--version` now shows the software version. For torrent format version, use `--torrent-version` or `-t`.
 
@@ -222,6 +254,18 @@ Include only specific file types:
 ```
 
 > **Note:** `--include` patterns take precedence over `--exclude` when both match. Glob syntax: `*` (any non-slash), `**/` (zero or more dirs), `**` (any path), `?` (single char). Matching is case-insensitive.
+
+Verbose, quiet, and JSON output:
+```bash
+./torrent_builder --path /data/file --output file.torrent --verbose
+# Shows extra detail: file count, piece size reasoning, tracker tiers
+
+./torrent_builder --path /data/file --output file.torrent --quiet
+# Suppresses progress bar and summary; errors still shown
+
+./torrent_builder --path /data/file --output file.torrent --json
+# Outputs torrent metadata as JSON to stdout (useful for scripting)
+```
 
 Inspect torrent metadata:
 ```bash

@@ -3,6 +3,7 @@
 #include "constants.hpp"
 #include "utils.hpp"
 #include "terminal.hpp"
+#include "output.hpp"
 #include <fstream>
 #include <iomanip>
 #include <chrono>
@@ -342,27 +343,7 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
 
 // Displays a progress bar
 void TorrentCreator::print_progress_bar(int progress, int total, double speed, double eta, int64_t processed, int64_t total_size) const {
-    const int bar_width = 50;
-    float progress_percentage = static_cast<float>(progress) / total;
-    int filled_width = static_cast<int>(std::round(bar_width * progress_percentage));
-
-    std::cout << "[";
-    for (int i = 0; i < bar_width; ++i) {
-        if (i < filled_width) {
-            std::cout << "=";
-        } else {
-            std::cout << " ";
-        }
-    }
-    std::cout << "] " << static_cast<int>(progress_percentage * 100) << "% ";
-
-    // Display processed data / total
-    std::cout << utils::format_size(processed) << " / " << utils::format_size(total_size) << " ";
-
-    std::cout << "Speed: " << utils::format_speed(speed) << " ";
-
-    std::cout << "ETA: " << utils::format_eta(eta) << "\r";
-    std::cout.flush();
+    print_progress(progress, total, speed, eta, processed, total_size);
 }
 
 
@@ -405,9 +386,17 @@ void TorrentCreator::create_torrent() {
 
         // Add files to the file storage
         add_files_to_storage();
+        print_verbose("Files added to storage: " + std::to_string(fs_.num_files()) + " file(s), total size: " + utils::format_size(fs_.total_size()) + "\n");
+        log_message("Files in storage: " + std::to_string(fs_.num_files()) + ", total size: " + std::to_string(fs_.total_size()) + " bytes", LogLevel::INFO);
 
-        // Use the specified piece_size or calculate automatically
         int piece_size = config_.piece_size ? *config_.piece_size : utils::auto_piece_size(fs_.total_size());
+        if (config_.piece_size) {
+            print_verbose("Piece size: " + std::to_string(piece_size / 1024) + " KB (user-specified)\n");
+            log_message("Piece size: " + std::to_string(piece_size / 1024) + " KB (user-specified)", LogLevel::INFO);
+        } else {
+            print_verbose("Piece size: " + std::to_string(piece_size / 1024) + " KB (auto-calculated for " + utils::format_size(fs_.total_size()) + " total)\n");
+            log_message("Piece size: " + std::to_string(piece_size / 1024) + " KB (auto-calculated for " + std::to_string(fs_.total_size()) + " bytes)", LogLevel::INFO);
+        }
         lt::create_flags_t flags = get_torrent_flags(config_.version);
 
         lt::create_torrent t(fs_, piece_size, flags);
@@ -416,10 +405,11 @@ void TorrentCreator::create_torrent() {
         int tier = 0;
         for (const auto& tracker : config_.trackers) {
             t.add_tracker(tracker, tier++);
+            print_verbose("Tracker tier " + std::to_string(tier - 1) + ": " + tracker + "\n");
         }
 
         // Set piece hashes using streaming for large files
-        std::cout << "Hashing pieces...\n";
+        print_info("Hashing pieces...\n");
         log_message("Starting hashing process for: " + config_.path.string(), LogLevel::INFO);
         int num_pieces = t.num_pieces();
 
@@ -556,7 +546,7 @@ void TorrentCreator::create_torrent() {
 
                 if (progress >= num_pieces - 1) {
                     print_progress_bar(num_pieces, num_pieces, speed, 0.0, total_size, total_size);
-                    std::cout << "\n";
+                    print_info("\n");
                     break;
                 }
 
@@ -566,7 +556,7 @@ void TorrentCreator::create_torrent() {
         } else {
             // For single files, hashing is already complete - just show final progress
             print_progress_bar(num_pieces, num_pieces, speed, 0.0, total_size, total_size);
-            std::cout << "\n";
+            print_info("\n");
         }
 
         // If there was an error, throw an exception
@@ -616,15 +606,14 @@ void TorrentCreator::create_torrent() {
         }
 
     } catch (const UserInterrupt&) {
-        std::cerr << "\n";
-        std::cerr.flush();
+        print_error("\n");
         throw;
     } catch (const std::runtime_error& e) {
-        std::cerr << e.what() << std::endl;
+        print_error(std::string(e.what()) + "\n");
         log_message("Runtime error: " + std::string(e.what()), LogLevel::ERR);
         throw;
     } catch (const std::exception& e) {
-        std::cerr << "An unexpected error occurred: " << e.what() << std::endl;
+        print_error(std::string("An unexpected error occurred: ") + e.what() + "\n");
         log_message("Unexpected error: " + std::string(e.what()), LogLevel::ERR);
         throw;
     }
@@ -632,27 +621,26 @@ void TorrentCreator::create_torrent() {
 
 // Prints a summary of the created torrent
 void TorrentCreator::print_torrent_summary(int64_t total_size, int piece_size, int num_pieces) const {
-    std::cout << "\n=== TORRENT CREATED SUCCESSFULLY ===\n";
-    std::cout << "File: " << config_.output << "\n";
+    print_info("\n=== TORRENT CREATED SUCCESSFULLY ===\n");
+    print_info("File: " + config_.output.string() + "\n");
     
-    // Display torrent version
     std::string version_str;
     switch(config_.version) {
         case TorrentVersion::V1: version_str = "v1"; break;
         case TorrentVersion::V2: version_str = "v2"; break;
         case TorrentVersion::HYBRID: version_str = "hybrid"; break;
     }
-    std::cout << "Version: " << version_str << "\n";
+    print_info("Version: " + version_str + "\n");
 
-    std::cout << "Total size: " << utils::format_size(total_size) << "\n";
-    std::cout << "Pieces: " << num_pieces << " of " << piece_size / 1024 << "KB\n"; // Show piece_size in KB
-    std::cout << "Trackers: " << config_.trackers.size() << "\n"; // Simplified tracker count
-    std::cout << "Web seeds: " << config_.web_seeds.size() << "\n";
-    std::cout << "Private: " << (config_.is_private ? "Yes" : "No") << "\n";
+    print_info("Total size: " + utils::format_size(total_size) + "\n");
+    print_info("Pieces: " + std::to_string(num_pieces) + " of " + std::to_string(piece_size / 1024) + "KB\n");
+    print_info("Trackers: " + std::to_string(config_.trackers.size()) + "\n");
+    print_info("Web seeds: " + std::to_string(config_.web_seeds.size()) + "\n");
+    print_info("Private: " + std::string(config_.is_private ? "Yes" : "No") + "\n");
     if (config_.source) {
-        std::cout << "Source: " << *config_.source << "\n";
+        print_info("Source: " + *config_.source + "\n");
     }
     if (config_.entropy) {
-        std::cout << "Entropy: Yes (randomized info hash)\n";
+        print_info("Entropy: Yes (randomized info hash)\n");
     }
 }

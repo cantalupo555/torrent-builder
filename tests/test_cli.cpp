@@ -197,7 +197,7 @@ TEST(CLI, OverwriteDeclinedExitsZero) {
     int exit_code;
     std::string output = exec_command(cmd, exit_code);
 
-    EXPECT_EQ(exit_code, 0);
+    EXPECT_EQ(exit_code, 1);
     EXPECT_NE(output.find("Operation cancelled"), std::string::npos) << "Output: " << output;
 
     // Verify the original file was NOT overwritten
@@ -271,11 +271,11 @@ TEST(CLI, OverwriteDeclinedLogsToFile) {
     int exit_code;
     std::string output = exec_command(cmd, exit_code);
 
-    EXPECT_EQ(exit_code, 0);
+    EXPECT_EQ(exit_code, 1);
 
     std::string log = read_log_file(temp_dir);
     EXPECT_NE(log.find("[INFO]"), std::string::npos) << "Log: " << log;
-    EXPECT_NE(log.find("User declined to overwrite"), std::string::npos) << "Log: " << log;
+    EXPECT_NE(log.find("Overwrite declined"), std::string::npos) << "Log: " << log;
 
     fs::remove_all(temp_dir, ec);
 }
@@ -361,7 +361,7 @@ TEST(CLI, OverwriteDeclinedPreservesFileContent) {
     int exit_code;
     std::string output = exec_command(cmd, exit_code);
 
-    EXPECT_EQ(exit_code, 0);
+    EXPECT_EQ(exit_code, 1);
 
     // Verify file content is unchanged
     std::ifstream check(output_file);
@@ -372,7 +372,7 @@ TEST(CLI, OverwriteDeclinedPreservesFileContent) {
 
     // Verify log entry includes the output path
     std::string log = read_log_file(temp_dir);
-    EXPECT_NE(log.find("User declined to overwrite"), std::string::npos) << "Log: " << log;
+    EXPECT_NE(log.find("Overwrite declined"), std::string::npos) << "Log: " << log;
     EXPECT_NE(log.find(output_file.filename().string()), std::string::npos) << "Log: " << log;
 
     fs::remove_all(temp_dir, ec);
@@ -656,7 +656,7 @@ TEST(CLI, ExplicitOutputStillPromptsOverwrite) {
     int exit_code;
     std::string output = exec_command(cmd, exit_code);
 
-    EXPECT_EQ(exit_code, 0);
+    EXPECT_EQ(exit_code, 1);
     EXPECT_NE(output.find("Operation cancelled"), std::string::npos)
         << "Explicit --output should still prompt overwrite. Output: " << output;
 
@@ -1898,4 +1898,235 @@ TEST(CLI, IncludePatternNestedDirectories) {
     EXPECT_FALSE(has_txt) << "readme.txt should be excluded";
 
     fs::remove_all(temp_dir);
+}
+
+TEST(CLI, VerboseQuietMutualExclusion) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " --verbose --quiet 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 1);
+    EXPECT_NE(output.find("mutually exclusive"), std::string::npos);
+}
+
+TEST(CLI, VerboseJsonMutualExclusion) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " --verbose --json 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 1);
+    EXPECT_NE(output.find("mutually exclusive"), std::string::npos);
+}
+
+TEST(CLI, HelpShowsVerbose) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " --help", exit_code);
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("--verbose"), std::string::npos);
+}
+
+TEST(CLI, HelpShowsQuiet) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " --help", exit_code);
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("--quiet"), std::string::npos);
+}
+
+TEST(CLI, HelpShowsJson) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " --help", exit_code);
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("--json"), std::string::npos);
+}
+
+TEST(CLI, QuietModeSuppressesOutput) {
+    auto temp_dir = fs::temp_directory_path() / "tb_quiet_test";
+    fs::create_directories(temp_dir);
+    std::ofstream(temp_dir / "file.bin") << "quiet test data";
+
+    std::string output_file = (temp_dir / "quiet.torrent").string();
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " --path " + (temp_dir / "file.bin").string()
+        + " --output " + output_file + " --quiet 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_TRUE(output.empty() || output.find("TORRENT CREATED") == std::string::npos)
+        << "Quiet mode should suppress creation summary. Output: " << output;
+
+    ASSERT_TRUE(fs::exists(output_file));
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, JsonModeOutputIsValidJson) {
+    auto temp_dir = fs::temp_directory_path() / "tb_json_test";
+    fs::create_directories(temp_dir);
+    std::ofstream(temp_dir / "file.bin") << "json test data here";
+
+    std::string output_file = (temp_dir / "json_out.torrent").string();
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " --path " + (temp_dir / "file.bin").string()
+        + " --output " + output_file + " --json 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    ASSERT_TRUE(fs::exists(output_file));
+
+    EXPECT_NE(output.find("\"name\""), std::string::npos) << "JSON should contain 'name' field";
+    EXPECT_NE(output.find("\"info_hash_v1\""), std::string::npos) << "JSON should contain info_hash_v1";
+    EXPECT_NE(output.find("\"total_size\""), std::string::npos) << "JSON should contain total_size";
+    EXPECT_NE(output.find("\"piece_length\""), std::string::npos) << "JSON should contain piece_length";
+    EXPECT_NE(output.find("\"piece_count\""), std::string::npos) << "JSON should contain piece_count";
+    EXPECT_NE(output.find("\"is_private\""), std::string::npos) << "JSON should contain is_private";
+    EXPECT_NE(output.find("\"trackers\""), std::string::npos) << "JSON should contain trackers";
+    EXPECT_NE(output.find("\"output_path\""), std::string::npos) << "JSON should contain output_path";
+    EXPECT_NE(output.find("json_out.torrent"), std::string::npos) << "JSON output_path should contain the torrent filename";
+
+    ASSERT_GT(output.size(), 1u);
+    EXPECT_EQ(output.front(), '{') << "JSON output should start with '{'";
+    std::string trimmed = output;
+    while (!trimmed.empty() && (trimmed.back() == '\n' || trimmed.back() == '\r'))
+        trimmed.pop_back();
+    EXPECT_EQ(trimmed.back(), '}') << "JSON output should end with '}'";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, JsonWithTrackers) {
+    auto temp_dir = fs::temp_directory_path() / "tb_json_trackers";
+    fs::create_directories(temp_dir);
+    std::ofstream(temp_dir / "file.bin") << "json tracker test";
+
+    std::string output_file = (temp_dir / "json_track.torrent").string();
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " --path " + (temp_dir / "file.bin").string()
+        + " --output " + output_file
+        + " --tracker \"https://tracker.example/announce\""
+        + " --json 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("tracker.example"), std::string::npos)
+        << "JSON output should contain tracker URL";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, QuietOverwriteAutoDeclines) {
+    auto temp_dir = fs::temp_directory_path() / "tb_quiet_overwrite";
+    fs::create_directories(temp_dir);
+    std::ofstream(temp_dir / "file.bin") << "overwrite test";
+
+    std::string output_file = (temp_dir / "existing.torrent").string();
+    std::ofstream(output_file) << "dummy torrent content";
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " --path " + (temp_dir / "file.bin").string()
+        + " --output " + output_file + " --quiet 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 1) << "Quiet mode should auto-decline overwrite with exit code 1";
+    {
+        std::ifstream check(output_file);
+        std::string content((std::istreambuf_iterator<char>(check)),
+                            std::istreambuf_iterator<char>());
+        EXPECT_EQ(content, "dummy torrent content")
+            << "Original file should be preserved when quiet auto-declines overwrite";
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, VerboseShowsPieceSizeInfo) {
+    auto temp_dir = fs::temp_directory_path() / "tb_verbose_test";
+    fs::create_directories(temp_dir);
+    std::ofstream(temp_dir / "file.bin") << "verbose test data";
+
+    std::string output_file = (temp_dir / "verbose.torrent").string();
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " --path " + (temp_dir / "file.bin").string()
+        + " --output " + output_file + " --verbose 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_NE(output.find("Piece size:"), std::string::npos)
+        << "Verbose should show piece size info";
+    EXPECT_NE(output.find("Files added to storage:"), std::string::npos)
+        << "Verbose should show file count";
+
+    ASSERT_TRUE(fs::exists(output_file));
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, JsonOverwriteAutoDeclines) {
+    auto temp_dir = fs::temp_directory_path() / "tb_json_overwrite";
+    fs::create_directories(temp_dir);
+    std::ofstream(temp_dir / "file.bin") << "overwrite json test";
+
+    std::string output_file = (temp_dir / "existing.torrent").string();
+    std::ofstream(output_file) << "dummy torrent content";
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " --path " + (temp_dir / "file.bin").string()
+        + " --output " + output_file + " --json 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 1) << "JSON mode should auto-decline overwrite. Output: " << output;
+    {
+        std::ifstream check(output_file);
+        std::string content((std::istreambuf_iterator<char>(check)),
+                            std::istreambuf_iterator<char>());
+        EXPECT_EQ(content, "dummy torrent content")
+            << "Original file should be preserved when JSON auto-declines overwrite";
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, NormalModeNoVerboseMessages) {
+    auto temp_dir = fs::temp_directory_path() / "tb_normal_test";
+    fs::create_directories(temp_dir);
+    std::ofstream(temp_dir / "file.bin") << "normal mode test";
+
+    std::string output_file = (temp_dir / "normal.torrent").string();
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " --path " + (temp_dir / "file.bin").string()
+        + " --output " + output_file + " 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_EQ(output.find("Files added to storage:"), std::string::npos)
+        << "Normal mode should not show verbose file count";
+    EXPECT_EQ(output.find("Piece size:"), std::string::npos)
+        << "Normal mode should not show verbose piece size info";
+
+    ASSERT_TRUE(fs::exists(output_file));
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, JsonQuietComboWorks) {
+    auto temp_dir = fs::temp_directory_path() / "tb_json_quiet";
+    fs::create_directories(temp_dir);
+    std::ofstream(temp_dir / "file.bin") << "json+quiet test";
+
+    std::string output_file = (temp_dir / "jq.torrent").string();
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " --path " + (temp_dir / "file.bin").string()
+        + " --output " + output_file + " --json --quiet 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_NE(output.find("\"name\""), std::string::npos) << "JSON output expected";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, HelpAlwaysVisibleEvenWithQuiet) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " --help --quiet 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("--verbose"), std::string::npos) << "--help should show output even with --quiet";
+}
+
+TEST(CLI, VersionAlwaysVisibleEvenWithQuiet) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " --version --quiet 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("torrent_builder"), std::string::npos) << "--version should show output even with --quiet";
 }
