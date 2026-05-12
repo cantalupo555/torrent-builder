@@ -16,7 +16,7 @@
 
 namespace fs = std::filesystem;
 
-// Default trackers to be used if none are provided
+// Public open trackers from the NewTrackon list. Provide redundancy for peer discovery when no private tracker is configured.
 const std::vector<std::string> default_trackers = {
     "udp://open.stealth.si:80/announce",         "udp://tracker.opentrackr.org:1337/announce",
     "udp://tracker.torrent.eu.org:451/announce", "udp://explodie.org:6969/announce",
@@ -142,6 +142,7 @@ TorrentConfig get_interactive_config()
             std::cout << "Error: Output path cannot be empty\n";
             continue;
         }
+        // 8 is the minimum length that can carry ".torrent" suffix
         if (output.size() < 8 || output.substr(output.size() - 8) != ".torrent")
         {
             std::cout << "Error: Output path must end with '.torrent'\n";
@@ -704,7 +705,7 @@ int handle_inspect_command(const std::vector<std::string> &args)
         return 1;
     }
 }
-// Main function
+
 int main(int argc, char *argv[])
 {
     // Check for subcommands

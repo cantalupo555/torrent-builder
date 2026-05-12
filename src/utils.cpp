@@ -14,6 +14,9 @@
 namespace utils
 {
 
+// Piece size scales with total content size: smaller torrents get smaller pieces
+// for finer granularity during partial downloads, while larger torrents get larger
+// pieces to reduce metadata overhead and the number of hash verifications.
 int auto_piece_size(int64_t total_size)
 {
     using namespace PieceSizes;
@@ -358,18 +361,24 @@ std::string truncate_filename(const std::string &filename, std::size_t max_bytes
     std::size_t available = max_bytes - ext.size();
     std::size_t orig_available = available;
 
+    // Walk backwards past UTF-8 continuation bytes (0x80–0xBF, pattern 10xxxxxx).
+    // The mask & 0xC0 isolates the two high bits; 0x80 means both are 10xxxxxx.
     while (available > 0 && (static_cast<unsigned char>(filename[available - 1]) & 0xC0) == 0x80)
         --available;
 
+    // If we landed on a UTF-8 lead byte (11xxxxxx), determine how many continuation
+    // bytes follow it so we can keep or drop the whole character atomically.
     if (available > 0 && (static_cast<unsigned char>(filename[available - 1]) & 0xC0) == 0xC0)
     {
         unsigned char leader = static_cast<unsigned char>(filename[available - 1]);
+        // Lead byte masks: 0xE0→2-byte, 0xF0→3-byte, default (0xC0)→2-byte char
         int expected = 1;
         if ((leader & 0xF0) == 0xE0)
             expected = 2;
         else if ((leader & 0xF8) == 0xF0)
             expected = 3;
 
+        // Keep the complete multi-byte character if it fits, otherwise drop the lead byte
         if (available + expected <= orig_available)
             available += expected;
         else
@@ -415,9 +424,11 @@ std::string resolve_collision(const std::filesystem::path &directory,
             if (max_stem == 0)
                 continue;
             candidate_stem.resize(max_stem);
+            // Strip trailing UTF-8 continuation bytes to avoid splitting a multi-byte character
             while (candidate_stem.size() > 1
                    && (static_cast<unsigned char>(candidate_stem.back()) & 0xC0) == 0x80)
                 candidate_stem.pop_back();
+            // Also remove the lead byte if the character would be incomplete
             if (candidate_stem.size() > 1
                 && (static_cast<unsigned char>(candidate_stem.back()) & 0xC0) == 0xC0)
                 candidate_stem.pop_back();
@@ -488,10 +499,10 @@ std::string generate_auto_output_path(const std::filesystem::path &content_path,
                                        const std::filesystem::path &output_dir)
 {
     std::string filename = generate_output_filename(content_path, trackers, skip_prefix, tracker_index);
-    filename = truncate_filename(filename, 255 - 6);
+    filename = truncate_filename(filename, 255 - 6); // 255 bytes max filename; subtract 6 for collision suffix overhead (_N.ext)
 
     std::filesystem::path dir = output_dir.empty() ? std::filesystem::current_path() : output_dir;
-    std::string resolved = resolve_collision(dir, filename, 255);
+    std::string resolved = resolve_collision(dir, filename, 255); // 255 bytes = ext4/XFS per-component filename limit
     if (resolved != filename)
         log_message("Filename collision detected, resolved to: " + resolved, LogLevel::INFO);
 

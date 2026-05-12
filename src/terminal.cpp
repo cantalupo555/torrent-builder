@@ -26,7 +26,11 @@ struct TerminalGuard::Impl
         {
             tcgetattr(STDIN_FILENO, &original_termios);
             struct termios raw = original_termios;
+            // Disable ICANON (line buffering, so each keypress is available immediately)
+            // and ECHO (input display, so keypresses are not shown on screen)
             raw.c_lflag &= ~(ICANON | ECHO);
+            // VMIN=0: read() returns immediately even with no data pending
+            // VTIME=1: 100ms inter-byte timeout (decisecond units)
             raw.c_cc[VMIN] = 0;
             raw.c_cc[VTIME] = 1;
             tcsetattr(STDIN_FILENO, TCSANOW, &raw);

@@ -10,9 +10,32 @@
 namespace utils
 {
 
+/**
+ * @brief Percent-encode a string for safe embedding in URLs (RFC 3986).
+ * @param str The raw string to encode.
+ * @return URL-safe string with non-alphanumeric characters percent-encoded.
+ */
 std::string url_encode(const std::string &str);
+
+/**
+ * @brief Escape a string for safe embedding in JSON string literals.
+ * @param str The raw string to escape.
+ * @return JSON-safe string with control characters and special chars backslash-escaped.
+ */
 std::string escape_json(const std::string &str);
+
+/**
+ * @brief Format a byte count as a human-readable string using binary prefixes (KiB, MiB, etc.).
+ * @param bytes Size in bytes.
+ * @return Formatted string with 2 decimal places, e.g. "1.50 GiB".
+ */
 std::string format_file_size(int64_t bytes);
+
+/**
+ * @brief Format a Unix timestamp as a UTC date-time string.
+ * @param timestamp Unix epoch time in seconds.
+ * @return Formatted string "YYYY-MM-DD HH:MM:SS UTC", or "Invalid timestamp" for non-positive values.
+ */
 std::string format_timestamp(int64_t timestamp);
 /**
  * @brief Calculate the recommended piece size based on total content size.
