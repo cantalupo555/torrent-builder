@@ -13,6 +13,7 @@
 #include <ranges>
 #include <stdexcept>
 #include "torrent_inspector.hpp"
+#include "output.hpp"
 
 namespace fs = std::filesystem;
 
@@ -70,6 +71,10 @@ std::optional<std::string> prompt_optional_string(const std::string &prompt_text
 
 OverwriteDecision prompt_overwrite(const std::string &filepath)
 {
+    if (get_verbosity() == Verbosity::QUIET || is_json_mode())
+    {
+        return OverwriteDecision::Declined;
+    }
     while (true)
     {
         std::string overwrite;
@@ -91,18 +96,18 @@ OverwriteDecision prompt_overwrite(const std::string &filepath)
 // Get torrent configuration from user input (interactive mode)
 TorrentConfig get_interactive_config()
 {
-    std::cout << "=== TORRENT CONFIGURATION ===" << std::endl;
+    print_info("=== TORRENT CONFIGURATION ===\n");
 
     // Get input path
     std::string path;
     while (true)
     {
-        std::cout << "Path to file or directory: ";
+        print_info("Path to file or directory: ");
         std::getline(std::cin, path);
         path = utils::sanitize_path(path);
         if (path.empty())
         {
-            std::cout << "Error: Input path cannot be empty\n";
+            print_info("Error: Input path cannot be empty\n");
             continue;
         }
         try
@@ -110,22 +115,22 @@ TorrentConfig get_interactive_config()
             // Check if the path exists
             if (!fs::exists(path))
             {
-                std::cout << "Error: The specified path does not exist. Please check the path and "
-                             "try again.\n";
+                print_info("Error: The specified path does not exist. Please check the path and "
+                             "try again.\n");
                 continue;
             }
             // Check if we have read permissions
             fs::file_status status = fs::status(path);
             if ((status.permissions() & fs::perms::owner_read) == fs::perms::none)
             {
-                std::cout << "Error: No read permissions for path\n";
+                print_info("Error: No read permissions for path\n");
                 continue;
             }
             break;
         }
         catch (const fs::filesystem_error &e)
         {
-            std::cout << "Filesystem error: " << e.what() << "\n";
+            print_info(std::string("Filesystem error: ") + e.what() + "\n");
             continue;
         }
     }
@@ -134,18 +139,18 @@ TorrentConfig get_interactive_config()
     std::string output;
     while (true)
     {
-        std::cout << "Path to save torrent: ";
+        print_info("Path to save torrent: ");
         std::getline(std::cin, output);
         output = utils::sanitize_path(output);
         if (output.empty())
         {
-            std::cout << "Error: Output path cannot be empty\n";
+            print_info("Error: Output path cannot be empty\n");
             continue;
         }
         // 8 is the minimum length that can carry ".torrent" suffix
         if (output.size() < 8 || output.substr(output.size() - 8) != ".torrent")
         {
-            std::cout << "Error: Output path must end with '.torrent'\n";
+            print_info("Error: Output path must end with '.torrent'\n");
             continue;
         }
 
@@ -164,21 +169,21 @@ TorrentConfig get_interactive_config()
             fs::path parent_dir = fs::path(output).parent_path();
             if (!parent_dir.empty() && !fs::exists(parent_dir))
             {
-                std::cout << "Error: Parent directory does not exist\n";
+                print_info("Error: Parent directory does not exist\n");
                 continue;
             }
             // Check write permissions
             fs::file_status status = fs::status(parent_dir);
             if ((status.permissions() & fs::perms::owner_write) == fs::perms::none)
             {
-                std::cout << "Error: No write permissions for directory\n";
+                print_info("Error: No write permissions for directory\n");
                 continue;
             }
             break;
         }
         catch (const fs::filesystem_error &e)
         {
-            std::cout << "Filesystem error: " << e.what() << "\n";
+            print_info(std::string("Filesystem error: ") + e.what() + "\n");
             continue;
         }
     }
@@ -189,7 +194,7 @@ get_version: // Label to jump to if overwrite is 'n' or empty
     TorrentVersion tv = TorrentVersion::V1; // Initialize tv here
     while (true)
     {
-        std::cout << "Torrent version (1-v1, 2-v2, 3-Hybrid) [3]: ";
+        print_info("Torrent version (1-v1, 2-v2, 3-Hybrid) [3]: ");
         std::getline(std::cin, version);
         if (version.empty() || version == "3")
         {
@@ -208,13 +213,13 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         }
         else
         {
-            std::cout << "Error: Invalid input. Please enter '1', '2', or '3'.\n";
+            print_info("Error: Invalid input. Please enter '1', '2', or '3'.\n");
         }
     }
 
     // Get optional comment
     std::string comment;
-    std::cout << "Comment (optional): ";
+    print_info("Comment (optional): ");
     std::getline(std::cin, comment);
 
     // Get private flag
@@ -232,21 +237,21 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         while (true)
         {
             std::string tracker;
-            std::cout << "Add tracker (leave blank to finish): ";
+            print_info("Add tracker (leave blank to finish): ");
             std::getline(std::cin, tracker);
             if (tracker.empty())
                 break;
 
             if (!utils::is_valid_url(tracker))
             {
-                std::cout << "Error: Invalid tracker URL. Must start with http://, https://, "
-                             "or udp://\n";
+                print_info("Error: Invalid tracker URL. Must start with http://, https://, "
+                             "or udp://\n");
                 continue;
             }
 
             if (std::ranges::contains(trackers, tracker))
             {
-                std::cout << "Error: Tracker already added.\n";
+                print_info("Error: Tracker already added.\n");
                 continue;
             }
 
@@ -259,15 +264,14 @@ get_version: // Label to jump to if overwrite is 'n' or empty
     while (true)
     {
         std::string seed;
-        std::cout << "Add web seed (leave blank to finish): ";
+        print_info("Add web seed (leave blank to finish): ");
         std::getline(std::cin, seed);
         if (seed.empty())
             break;
 
         if (!utils::is_valid_url(seed))
         {
-            std::cout
-                << "Error: Invalid web seed URL. Must start with http://, https://, or udp://\n";
+            print_info("Error: Invalid web seed URL. Must start with http://, https://, or udp://\n");
             continue;
         }
 
@@ -281,18 +285,19 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         while (true)
         {
             std::string piece_size_str;
-            std::cout << "Piece size in KB: \n";
+            print_info("Piece size in KB: \n");
 
-            std::cout << "Valid options: ";
+            std::string valid_options = "Valid options: ";
             for (size_t i = 0; i < allowed_piece_sizes.size(); ++i)
             {
-                std::cout << allowed_piece_sizes[i];
+                valid_options += std::to_string(allowed_piece_sizes[i]);
                 if (i < allowed_piece_sizes.size() - 1)
                 {
-                    std::cout << ", ";
+                    valid_options += ", ";
                 }
             }
-            std::cout << "\n";
+            valid_options += "\n";
+            print_info(valid_options);
 
             std::getline(std::cin, piece_size_str);
             if (piece_size_str.empty())
@@ -310,17 +315,17 @@ get_version: // Label to jump to if overwrite is 'n' or empty
                 }
                 else
                 {
-                    std::cout << "Error: Invalid piece size. Please enter a valid option.\n";
+                    print_info("Error: Invalid piece size. Please enter a valid option.\n");
                 }
             }
             catch (const std::invalid_argument &e)
             {
-                std::cout << "Invalid input. Please enter a valid integer.\n";
+                print_info("Invalid input. Please enter a valid integer.\n");
                 continue;
             }
             catch (const std::out_of_range &e)
             {
-                std::cout << "Input out of range. Please enter a valid integer.\n";
+                print_info("Input out of range. Please enter a valid integer.\n");
                 continue;
             }
         }
@@ -341,7 +346,7 @@ get_version: // Label to jump to if overwrite is 'n' or empty
             break;
         }
         if (input_name->find_first_not_of(" \t\n\r") == std::string::npos) {
-            std::cout << "Error: Name cannot be whitespace-only\n";
+            print_info("Error: Name cannot be whitespace-only\n");
             continue;
         }
         torrent_name = input_name;
@@ -365,7 +370,7 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         while (true)
         {
             std::string pattern;
-            std::cout << "Exclude pattern (glob, leave blank to finish): ";
+            print_info("Exclude pattern (glob, leave blank to finish): ");
             std::getline(std::cin, pattern);
             if (pattern.empty())
                 break;
@@ -375,7 +380,7 @@ get_version: // Label to jump to if overwrite is 'n' or empty
             }
             catch (const std::regex_error &)
             {
-                std::cout << "Error: Invalid glob pattern: " << pattern << "\n";
+                print_info(std::string("Error: Invalid glob pattern: ") + pattern + "\n");
                 log_message("Invalid glob pattern entered: " + pattern, LogLevel::WARNING);
             }
         }
@@ -387,7 +392,7 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         while (true)
         {
             std::string pattern;
-            std::cout << "Include pattern (glob, leave blank to finish): ";
+            print_info("Include pattern (glob, leave blank to finish): ");
             std::getline(std::cin, pattern);
             if (pattern.empty())
                 break;
@@ -397,7 +402,7 @@ get_version: // Label to jump to if overwrite is 'n' or empty
             }
             catch (const std::regex_error &)
             {
-                std::cout << "Error: Invalid glob pattern: " << pattern << "\n";
+                print_info(std::string("Error: Invalid glob pattern: ") + pattern + "\n");
                 log_message("Invalid glob pattern entered: " + pattern, LogLevel::WARNING);
             }
         }
@@ -555,16 +560,17 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
         }
         else
         {
-            std::cerr << "Error: Invalid piece size. Must be one of: ";
+            std::string piece_sizes_str = "Error: Invalid piece size. Must be one of: ";
             for (size_t i = 0; i < allowed_piece_sizes.size(); ++i)
             {
-                std::cerr << allowed_piece_sizes[i];
+                piece_sizes_str += std::to_string(allowed_piece_sizes[i]);
                 if (i < allowed_piece_sizes.size() - 1)
                 {
-                    std::cerr << ", ";
+                    piece_sizes_str += ", ";
                 }
             }
-            std::cerr << " KB\n";
+            piece_sizes_str += " KB\n";
+            print_error(piece_sizes_str);
             throw std::runtime_error("Invalid piece size");
         }
     }
@@ -658,12 +664,12 @@ int handle_inspect_command(const std::vector<std::string> &args)
 
         if (result.count("help") || !result.count("path"))
         {
-            std::cout << inspect_options.help() << "\n";
-            std::cout << "\nExamples:\n";
-            std::cout << "  torrent-builder inspect file.torrent\n";
-            std::cout << "  torrent-builder inspect file.torrent --json\n";
-            std::cout << "  torrent-builder inspect file.torrent --files\n";
-            std::cout << "  torrent-builder inspect file.torrent --verify --base-path /data\n";
+            print_info(inspect_options.help() + "\n");
+            print_info("\nExamples:\n");
+            print_info("  torrent-builder inspect file.torrent\n");
+            print_info("  torrent-builder inspect file.torrent --json\n");
+            print_info("  torrent-builder inspect file.torrent --files\n");
+            print_info("  torrent-builder inspect file.torrent --verify --base-path /data\n");
             return 0;
         }
 
@@ -674,7 +680,7 @@ int handle_inspect_command(const std::vector<std::string> &args)
         if (result.count("files"))
         {
             bool json_output = result.count("json") > 0;
-            std::cout << TorrentInspector::format_file_tree(metadata, json_output);
+            print_info(TorrentInspector::format_file_tree(metadata, json_output));
         }
         else if (result.count("verify"))
         {
@@ -682,26 +688,27 @@ int handle_inspect_command(const std::vector<std::string> &args)
             bool verified = inspector.verify_files(base_path);
             if (verified)
             {
-                std::cout << "✓ All files verified successfully\n";
+                print_info("✓ All files verified successfully\n");
                 return 0;
             }
             else
             {
-                std::cerr << "✗ Verification failed - missing or corrupt files\n";
+                print_error("✗ Verification failed - missing or corrupt files\n");
                 return 1;
             }
         }
         else
         {
             bool json_output = result.count("json") > 0;
-            std::cout << TorrentInspector::format_metadata(metadata, json_output);
+            print_info(TorrentInspector::format_metadata(metadata, json_output));
         }
 
         return 0;
     }
     catch (const std::exception &e)
     {
-        std::cerr << "Error: " << e.what() << std::endl;
+        log_message("Inspect error: " + std::string(e.what()), LogLevel::ERR);
+        print_error(std::string("Error: ") + e.what() + "\n");
         return 1;
     }
 }
@@ -724,6 +731,8 @@ int main(int argc, char *argv[])
         // Define command-line options
         cxxopts::Options options("torrent_builder", "Create torrent files");
         options.add_options()("h,help", "Show help")("v,version", "Show version")(
+            "verbose", "Enable verbose output (conflicts with --quiet, --json)")("q,quiet", "Suppress non-essential output, auto-decline prompts (conflicts with --verbose)")(
+            "json", "Output torrent metadata as JSON (implies --quiet, conflicts with --verbose)")(
             "i,interactive", "Run in interactive mode")(
             "t,torrent-version", "Torrent version (1=v1, 2=v2, 3=hybrid)",
             cxxopts::value<std::string>()->default_value("3"),
@@ -756,7 +765,16 @@ int main(int argc, char *argv[])
         options.parse_positional({"path", "output"});
         auto result = options.parse(argc, argv);
 
-        // Help and version
+        if (result.count("verbose") && result.count("quiet")) {
+            print_error("Error: --verbose and --quiet are mutually exclusive\n");
+            return 1;
+        }
+        if (result.count("verbose") && result.count("json")) {
+            print_error("Error: --verbose and --json are mutually exclusive\n");
+            return 1;
+        }
+
+        // Help and version — always print regardless of verbosity
         if (result.count("version"))
         {
             std::cout << "torrent_builder " << TORRENT_BUILDER_VERSION << std::endl;
@@ -787,12 +805,28 @@ int main(int argc, char *argv[])
                          "--exclude \"*.txt\"\n";
             std::cout << "  ./torrent_builder --path /data/folder --include \"*.mkv\" "
                          "--include \"*.mp4\"\n";
+            std::cout << "  ./torrent_builder --path /data/file --verbose\n";
+            std::cout << "  ./torrent_builder --path /data/file --quiet\n";
+            std::cout << "  ./torrent_builder --path /data/file --json\n";
             std::cout << "\nNote: Allowed piece sizes (in KB): 16, 32, 64, 128, 256, 512, 1024, "
                          "2048, 4096, 8192, 16384, 32768\n";
             std::cout << "Glob patterns: * (any non-slash), **/ (zero or more dirs), "
                          "** (any path), ? (single char). Case-insensitive.\n";
             std::cout << "Note: --include patterns take precedence over --exclude when both match.\n";
             return 0;
+        }
+
+        // Set verbosity only when NOT in interactive mode
+        // (interactive mode needs print_info for prompts)
+        if (!result.count("interactive")) {
+            if (result.count("json")) {
+                set_json_mode(true);
+                set_verbosity(Verbosity::QUIET);
+            } else if (result.count("quiet")) {
+                set_verbosity(Verbosity::QUIET);
+            } else if (result.count("verbose")) {
+                set_verbosity(Verbosity::VERBOSE);
+            }
         }
 
         // Run in interactive or command-line mode based on arguments
@@ -808,42 +842,60 @@ int main(int argc, char *argv[])
             auto config_opt = get_commandline_config(result, declined_path);
             if (!config_opt)
             {
-                log_message("User declined to overwrite: " + declined_path, LogLevel::INFO);
-                std::cout << "Operation cancelled.\n";
-                return 0;
+                log_message("Overwrite declined: " + declined_path, LogLevel::INFO);
+                if (is_json_mode()) {
+                    print_error("Error: Output file already exists: " + declined_path + "\n");
+                } else {
+                    print_info("Operation cancelled.\n");
+                }
+                return 1;
             }
             TorrentCreator creator(*config_opt);
             creator.create_torrent();
+            if (is_json_mode()) {
+                try {
+                    TorrentInspector inspector(config_opt->output);
+                    TorrentMetadata meta = inspector.inspect();
+                    std::string json = TorrentInspector::format_metadata(meta, true);
+                    std::string path_field = ",\n  \"output_path\": \"" + utils::escape_json(config_opt->output.string()) + "\"\n";
+                    json.insert(json.rfind('}'), path_field);
+                    std::cout << json;
+                } catch (const std::exception& e) {
+                    log_message("JSON output generation error: " + std::string(e.what()), LogLevel::ERR);
+                    print_error(std::string("Error generating JSON output: ") + e.what() + "\n");
+                    return 1;
+                }
+            }
         }
     }
     catch (const std::filesystem::filesystem_error &e)
     {
         log_message(std::string("Filesystem error: ") + e.what(), LogLevel::ERR);
-        std::cerr << e.what() << std::endl;
+        print_error(std::string(e.what()) + "\n");
         return 1;
     }
     catch (const std::invalid_argument &e)
     {
         log_message(std::string("Invalid argument: ") + e.what(), LogLevel::ERR);
-        std::cerr << e.what() << std::endl;
+        print_error(std::string(e.what()) + "\n");
         return 1;
     }
     catch (const UserInterrupt &e)
     {
         log_message(std::string(e.what()), LogLevel::WARNING);
-        std::cerr << e.what() << std::endl;
+        print_error(std::string(e.what()) + "\n");
         return 1;
     }
     catch (const std::runtime_error &e)
     {
         log_message(std::string("Runtime error: ") + e.what(), LogLevel::ERR);
-        std::cerr << e.what() << std::endl;
+        print_error(std::string(e.what()) + "\n");
         return 1;
     }
     catch (const std::exception &e)
     {
         log_message(std::string("Unexpected error: ") + e.what(), LogLevel::ERR);
-        std::cerr << "An unexpected error occurred: " << e.what() << std::endl;
+        print_error(std::string("An unexpected error occurred: ") + e.what() + "\n");
         return 1;
     }
 
