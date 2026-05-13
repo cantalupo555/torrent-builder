@@ -10,6 +10,8 @@
 #include <fstream>
 #include <algorithm>
 #include <iomanip>
+#include <sstream>
+#include <libtorrent/bdecode.hpp>
 
 TorrentModifier::TorrentModifier(const ModifyConfig &config) : config_(config)
 {
@@ -19,12 +21,66 @@ void TorrentModifier::modify()
 {
     load();
 
-    lt::entry root = lt::bdecode(lt::span<const char>(raw_buffer_.data(), raw_buffer_.size()));
+    bool has_any_mod = config_.trackers.has_value() ||
+                       !config_.add_trackers.empty() ||
+                       !config_.remove_trackers.empty() ||
+                       config_.is_private.has_value() ||
+                       config_.source.has_value() ||
+                       config_.comment.has_value() ||
+                       config_.name.has_value() ||
+                       config_.entropy;
 
+    if (!has_any_mod)
+    {
+        log_message("No modifications requested", LogLevel::WARNING);
+        print_info("No modifications requested - nothing to change\n");
+        return;
+    }
+
+    bool info_modified = config_.is_private.has_value() ||
+                         config_.source.has_value() ||
+                         config_.name.has_value() ||
+                         config_.entropy;
+
+    lt::span<const char> orig_info_bytes;
+    if (!info_modified)
+    {
+        lt::bdecode_node node;
+        lt::error_code ec;
+        if (lt::bdecode(raw_buffer_.data(), raw_buffer_.data() + raw_buffer_.size(), node, ec) == 0)
+        {
+            auto info = node.dict_find("info");
+            if (info.type() == lt::bdecode_node::dict_t)
+            {
+                orig_info_bytes = info.data_section();
+            }
+        }
+    }
+
+    lt::entry root = lt::bdecode(lt::span<const char>(raw_buffer_.data(), raw_buffer_.size()));
     apply_modifications(root);
 
     std::vector<char> new_buffer;
     lt::bencode(std::back_inserter(new_buffer), root);
+
+    if (!orig_info_bytes.empty())
+    {
+        lt::bdecode_node new_node;
+        lt::error_code ec;
+        if (lt::bdecode(new_buffer.data(), new_buffer.data() + new_buffer.size(), new_node, ec) == 0)
+        {
+            auto new_info = new_node.dict_find("info");
+            if (new_info.type() == lt::bdecode_node::dict_t)
+            {
+                auto new_span = new_info.data_section();
+                if (new_span.size() == orig_info_bytes.size())
+                {
+                    std::copy(orig_info_bytes.begin(), orig_info_bytes.end(),
+                              new_buffer.begin() + (new_span.data() - new_buffer.data()));
+                }
+            }
+        }
+    }
 
     auto [new_hash_v1, new_hash_v2] = compute_hashes(new_buffer);
     print_diff(new_hash_v1, new_hash_v2);
@@ -145,27 +201,12 @@ void TorrentModifier::save(const std::vector<char> &buffer)
 {
     fs::path output = config_.output.empty() ? config_.input : config_.output;
 
-    if (output == config_.input)
+    if (output != config_.input && output.has_parent_path())
     {
-        utils::atomic_write(output, buffer);
+        fs::create_directories(output.parent_path());
     }
-    else
-    {
-        if (output.has_parent_path())
-        {
-            fs::create_directories(output.parent_path());
-        }
-        std::ofstream out(output, std::ios::binary);
-        if (!out)
-        {
-            throw std::runtime_error("Failed to open output file: " + output.string());
-        }
-        out.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-        if (!out)
-        {
-            throw std::runtime_error("Failed to write output file: " + output.string());
-        }
-    }
+
+    utils::atomic_write(output, buffer);
 
     print_info("Torrent saved to: " + output.string() + "\n");
     log_message("Torrent modified successfully: " + output.string(), LogLevel::INFO);
@@ -225,12 +266,12 @@ void TorrentModifier::rebuild_trackers(lt::entry &root, const std::vector<std::s
     root["announce"] = lt::entry(urls[0]);
 
     lt::entry::list_type announce_list;
+    lt::entry::list_type tier;
     for (const auto &url : urls)
     {
-        lt::entry::list_type tier;
         tier.emplace_back(lt::entry(url));
-        announce_list.push_back(lt::entry(std::move(tier)));
     }
+    announce_list.push_back(lt::entry(std::move(tier)));
     root["announce-list"] = lt::entry(std::move(announce_list));
 }
 
