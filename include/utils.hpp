@@ -241,8 +241,38 @@ std::regex glob_to_regex(const std::string &pattern);
  * @return true if the file should be included in the torrent, false to exclude it.
  */
 bool should_include_file(const std::string &relative_path,
-                          const std::vector<std::regex> &exclude_regex,
-                          const std::vector<std::regex> &include_regex);
+                           const std::vector<std::regex> &exclude_regex,
+                           const std::vector<std::regex> &include_regex);
+
+/**
+ * @brief Generate 32 random bytes as a 64-char lowercase hex string.
+ * @return 64-character hex string suitable for use as torrent info entropy field.
+ */
+std::string generate_entropy_hex();
+
+/**
+ * @brief Write data directly to a file via std::ofstream.
+ *
+ * Used as fallback by atomic_write when rename fails across devices.
+ *
+ * @param dest Output file path.
+ * @param data Binary content to write.
+ * @throws std::runtime_error on I/O failure.
+ */
+void direct_write(const std::filesystem::path &dest, const std::vector<char> &data);
+
+/**
+ * @brief Atomically write data to a file via temp file + rename.
+ *
+ * Writes to a temporary file first, then renames to the destination.
+ * Falls back to direct_write on cross-device link errors.
+ * Cleans up the temporary file in all error paths.
+ *
+ * @param dest Output file path.
+ * @param data Binary content to write.
+ * @throws std::runtime_error on I/O failure.
+ */
+void atomic_write(const std::filesystem::path &dest, const std::vector<char> &data);
 
 } // namespace utils
 
