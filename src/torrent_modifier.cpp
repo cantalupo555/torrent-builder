@@ -266,12 +266,12 @@ void TorrentModifier::rebuild_trackers(lt::entry &root, const std::vector<std::s
     root["announce"] = lt::entry(urls[0]);
 
     lt::entry::list_type announce_list;
-    lt::entry::list_type tier;
     for (const auto &url : urls)
     {
+        lt::entry::list_type tier;
         tier.emplace_back(lt::entry(url));
+        announce_list.push_back(lt::entry(std::move(tier)));
     }
-    announce_list.push_back(lt::entry(std::move(tier)));
     root["announce-list"] = lt::entry(std::move(announce_list));
 }
 
