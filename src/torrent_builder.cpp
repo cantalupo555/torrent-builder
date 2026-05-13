@@ -13,6 +13,7 @@
 #include <ranges>
 #include <stdexcept>
 #include "torrent_inspector.hpp"
+#include "torrent_modifier.hpp"
 #include "output.hpp"
 
 namespace fs = std::filesystem;
@@ -713,9 +714,180 @@ int handle_inspect_command(const std::vector<std::string> &args)
     }
 }
 
+int handle_modify_command(const std::vector<std::string> &args)
+{
+    try
+    {
+        int argc = static_cast<int>(args.size()) + 1;
+        std::vector<const char *> argv;
+        argv.push_back("torrent-builder");
+        for (const auto &arg : args)
+        {
+            argv.push_back(arg.c_str());
+        }
+
+        cxxopts::Options modify_options("torrent-builder modify", "Modify torrent metadata");
+        modify_options.add_options()(
+            "h,help", "Show help")(
+            "t,tracker", "Replace all trackers (exclusive with --add-tracker/--remove-tracker)",
+            cxxopts::value<std::vector<std::string>>(), "URL")(
+            "add-tracker", "Add tracker URL",
+            cxxopts::value<std::vector<std::string>>(), "URL")(
+            "remove-tracker", "Remove tracker URL",
+            cxxopts::value<std::vector<std::string>>(), "URL")(
+            "private", "Mark torrent as private")(
+            "public", "Mark torrent as public")(
+            "source", "Set source field (empty string removes it)",
+            cxxopts::value<std::string>(), "SOURCE")(
+            "comment", "Set comment (empty string removes it)",
+            cxxopts::value<std::string>(), "COMMENT")(
+            "name", "Change torrent name",
+            cxxopts::value<std::string>(), "NAME")(
+            "entropy", "Randomize info hash by adding entropy field")(
+            "o,output", "Output torrent file path (defaults to in-place)",
+            cxxopts::value<std::string>(), "OUTPUT")(
+            "dry-run", "Preview changes without writing")(
+            "input", "Input torrent file",
+            cxxopts::value<std::string>());
+
+        modify_options.parse_positional({"input"});
+        auto result = modify_options.parse(argc, argv.data());
+
+        if (result.count("help") || !result.count("input"))
+        {
+            print_info(modify_options.help() + "\n");
+            print_info("\nExamples:\n");
+            print_info("  torrent-builder modify file.torrent --tracker \"https://tracker.example/announce\"\n");
+            print_info("  torrent-builder modify file.torrent --add-tracker \"https://tracker2.example/announce\"\n");
+            print_info("  torrent-builder modify file.torrent --remove-tracker \"https://old.example/announce\"\n");
+            print_info("  torrent-builder modify file.torrent --private\n");
+            print_info("  torrent-builder modify file.torrent --public\n");
+            print_info("  torrent-builder modify file.torrent --source \"PTP\"\n");
+            print_info("  torrent-builder modify file.torrent --source \"\" --comment \"Updated\"\n");
+            print_info("  torrent-builder modify file.torrent --name \"New Name\" --entropy\n");
+            print_info("  torrent-builder modify file.torrent --dry-run --tracker \"https://tracker.example/announce\"\n");
+            print_info("  torrent-builder modify file.torrent --output modified.torrent --entropy\n");
+            return 0;
+        }
+
+        if (result.count("tracker") && (result.count("add-tracker") || result.count("remove-tracker")))
+        {
+            print_error("Error: --tracker is exclusive with --add-tracker/--remove-tracker\n");
+            return 1;
+        }
+
+        if (result.count("private") && result.count("public"))
+        {
+            print_error("Error: --private and --public are mutually exclusive\n");
+            return 1;
+        }
+
+        bool has_modification = result.count("tracker") || result.count("add-tracker") ||
+                                result.count("remove-tracker") || result.count("private") ||
+                                result.count("public") || result.count("source") ||
+                                result.count("comment") || result.count("name") ||
+                                result.count("entropy");
+
+        if (!has_modification && !result.count("dry-run"))
+        {
+            print_error("Error: at least one modification option is required\n");
+            return 1;
+        }
+
+        ModifyConfig config;
+        config.input = result["input"].as<std::string>();
+
+        if (result.count("output"))
+        {
+            config.output = result["output"].as<std::string>();
+        }
+
+        if (result.count("tracker"))
+        {
+            auto urls = result["tracker"].as<std::vector<std::string>>();
+            for (const auto &url : urls)
+            {
+                if (!utils::is_valid_url(url))
+                    throw std::runtime_error("Invalid tracker URL: " + url);
+            }
+            config.trackers = std::move(urls);
+        }
+
+        if (result.count("add-tracker"))
+        {
+            auto urls = result["add-tracker"].as<std::vector<std::string>>();
+            for (const auto &url : urls)
+            {
+                if (!utils::is_valid_url(url))
+                    throw std::runtime_error("Invalid tracker URL: " + url);
+            }
+            config.add_trackers = std::move(urls);
+        }
+
+        if (result.count("remove-tracker"))
+        {
+            auto urls = result["remove-tracker"].as<std::vector<std::string>>();
+            for (const auto &url : urls)
+            {
+                if (!utils::is_valid_url(url))
+                    throw std::runtime_error("Invalid tracker URL: " + url);
+            }
+            config.remove_trackers = std::move(urls);
+        }
+
+        if (result.count("private"))
+        {
+            config.is_private = true;
+        }
+        else if (result.count("public"))
+        {
+            config.is_private = false;
+        }
+
+        if (result.count("source"))
+        {
+            config.source = result["source"].as<std::string>();
+        }
+
+        if (result.count("comment"))
+        {
+            config.comment = result["comment"].as<std::string>();
+        }
+
+        if (result.count("name"))
+        {
+            config.name = result["name"].as<std::string>();
+        }
+
+        config.entropy = result.count("entropy") > 0;
+        config.dry_run = result.count("dry-run") > 0;
+
+        TorrentModifier modifier(config);
+        modifier.modify();
+
+        return 0;
+    }
+    catch (const std::exception &e)
+    {
+        log_message("Modify error: " + std::string(e.what()), LogLevel::ERR);
+        print_error(std::string("Error: ") + e.what() + "\n");
+        return 1;
+    }
+}
+
 int main(int argc, char *argv[])
 {
     // Check for subcommands
+    if (argc >= 2 && std::string(argv[1]) == "modify")
+    {
+        std::vector<std::string> args;
+        for (int i = 2; i < argc; ++i)
+        {
+            args.push_back(argv[i]);
+        }
+        return handle_modify_command(args);
+    }
+
     if (argc >= 2 && std::string(argv[1]) == "inspect")
     {
         std::vector<std::string> args;
