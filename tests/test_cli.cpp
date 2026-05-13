@@ -2130,3 +2130,241 @@ TEST(CLI, VersionAlwaysVisibleEvenWithQuiet) {
     EXPECT_EQ(exit_code, 0);
     EXPECT_NE(output.find("torrent_builder"), std::string::npos) << "--version should show output even with --quiet";
 }
+
+TEST(CLI, ModifyHelpShowsOptions) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " modify --help", exit_code);
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("--tracker"), std::string::npos);
+    EXPECT_NE(output.find("--add-tracker"), std::string::npos);
+    EXPECT_NE(output.find("--remove-tracker"), std::string::npos);
+    EXPECT_NE(output.find("--private"), std::string::npos);
+    EXPECT_NE(output.find("--public"), std::string::npos);
+    EXPECT_NE(output.find("--source"), std::string::npos);
+    EXPECT_NE(output.find("--comment"), std::string::npos);
+    EXPECT_NE(output.find("--name"), std::string::npos);
+    EXPECT_NE(output.find("--entropy"), std::string::npos);
+    EXPECT_NE(output.find("--dry-run"), std::string::npos);
+    EXPECT_NE(output.find("--output"), std::string::npos);
+}
+
+TEST(CLI, ModifyNoArgsShowsHelp) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " modify 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("Modify torrent metadata"), std::string::npos);
+}
+
+TEST(CLI, ModifyTrackerConflict) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_modify_conflict";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    { std::ofstream(input_file) << "test content"; }
+    auto torrent_file = temp_dir / "input.torrent";
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " modify " + torrent_file.string()
+        + " --tracker \"https://t1.com/announce\""
+        + " --add-tracker \"https://t2.com/announce\" 2>&1", exit_code);
+
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("exclusive"), std::string::npos) << "Output: " << output;
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, ModifyPrivatePublicConflict) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_modify_pp_conflict";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    { std::ofstream(input_file) << "test content"; }
+    auto torrent_file = temp_dir / "input.torrent";
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " modify " + torrent_file.string()
+        + " --private --public 2>&1", exit_code);
+
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("mutually exclusive"), std::string::npos) << "Output: " << output;
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, ModifyNoModificationOption) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_modify_nomod";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    { std::ofstream(input_file) << "test content"; }
+    auto torrent_file = temp_dir / "input.torrent";
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " modify " + torrent_file.string() + " 2>&1", exit_code);
+
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("at least one modification"), std::string::npos) << "Output: " << output;
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, ModifyTrackerReplaceEndToEnd) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_modify_tracker";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    { std::ofstream(input_file) << "test content"; }
+    auto torrent_file = temp_dir / "input.torrent";
+    auto output_file = temp_dir / "modified.torrent";
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " modify " + torrent_file.string()
+        + " --tracker \"https://new-tracker.example.com/announce\""
+        + " --output " + output_file.string() + " 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.trackers.size(), 1u);
+    EXPECT_EQ(meta.trackers[0], "https://new-tracker.example.com/announce");
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, ModifySourceEndToEnd) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_modify_source";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    { std::ofstream(input_file) << "test content"; }
+    auto torrent_file = temp_dir / "input.torrent";
+    auto output_file = temp_dir / "modified.torrent";
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " modify " + torrent_file.string()
+        + " --source PTP --output " + output_file.string() + " 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.source.has_value());
+    EXPECT_EQ(*meta.source, "PTP");
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, ModifyPrivateEndToEnd) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_modify_private";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    { std::ofstream(input_file) << "test content"; }
+    auto torrent_file = temp_dir / "input.torrent";
+    auto output_file = temp_dir / "modified.torrent";
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " modify " + torrent_file.string()
+        + " --private --output " + output_file.string() + " 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_TRUE(meta.is_private);
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, ModifyDryRunNoFileWritten) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_modify_dryrun";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    { std::ofstream(input_file) << "test content"; }
+    auto torrent_file = temp_dir / "input.torrent";
+    auto output_file = temp_dir / "should_not_exist.torrent";
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " modify " + torrent_file.string()
+        + " --source TEST --output " + output_file.string()
+        + " --dry-run 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_NE(output.find("Dry run"), std::string::npos) << "Output: " << output;
+    EXPECT_FALSE(fs::exists(output_file));
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, ModifyEntropyEndToEnd) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_modify_entropy";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    { std::ofstream(input_file) << "test content"; }
+    auto torrent_file = temp_dir / "input.torrent";
+    auto output_file = temp_dir / "modified.torrent";
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+
+    TorrentInspector orig(torrent_file.string());
+    auto orig_meta = orig.inspect();
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " modify " + torrent_file.string()
+        + " --entropy --output " + output_file.string() + " 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.entropy.has_value());
+    EXPECT_EQ(meta.entropy->size(), 64u);
+    if (!orig_meta.info_hash_v1.empty() && !meta.info_hash_v1.empty())
+    {
+        EXPECT_NE(orig_meta.info_hash_v1, meta.info_hash_v1);
+    }
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
