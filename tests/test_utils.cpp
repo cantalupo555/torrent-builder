@@ -1028,9 +1028,12 @@ TEST(AtomicWrite, CreatesFileWithCorrectContent) {
     utils::atomic_write(dest, data);
 
     ASSERT_TRUE(fs::exists(dest));
-    std::ifstream in(dest, std::ios::binary);
-    std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    EXPECT_EQ(contents, "Hello");
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(contents, "Hello");
+        in.close();
+    }
 
     fs::remove_all(temp_dir);
 }
@@ -1047,9 +1050,12 @@ TEST(AtomicWrite, OverwritesExistingFile) {
     std::vector<char> data = {'n', 'e', 'w'};
     utils::atomic_write(dest, data);
 
-    std::ifstream in(dest, std::ios::binary);
-    std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    EXPECT_EQ(contents, "new");
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(contents, "new");
+        in.close();
+    }
 
     fs::remove_all(temp_dir);
 }
@@ -1107,10 +1113,13 @@ TEST(AtomicWrite, BinaryDataPreserved) {
 
     utils::atomic_write(dest, data);
 
-    std::ifstream in(dest, std::ios::binary);
-    std::vector<char> read_data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    EXPECT_EQ(read_data.size(), data.size());
-    EXPECT_EQ(read_data, data);
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::vector<char> read_data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(read_data.size(), data.size());
+        EXPECT_EQ(read_data, data);
+        in.close();
+    }
 
     fs::remove_all(temp_dir);
 }
@@ -1125,9 +1134,12 @@ TEST(DirectWrite, CreatesFileWithCorrectContent) {
     utils::direct_write(dest, data);
 
     ASSERT_TRUE(fs::exists(dest));
-    std::ifstream in(dest, std::ios::binary);
-    std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    EXPECT_EQ(contents, "Hello");
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(contents, "Hello");
+        in.close();
+    }
 
     fs::remove_all(temp_dir);
 }
@@ -1143,9 +1155,12 @@ TEST(DirectWrite, OverwritesExistingFile) {
     std::vector<char> data = {'n', 'e', 'w'};
     utils::direct_write(dest, data);
 
-    std::ifstream in(dest, std::ios::binary);
-    std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    EXPECT_EQ(contents, "new");
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(contents, "new");
+        in.close();
+    }
 
     fs::remove_all(temp_dir);
 }
@@ -1161,9 +1176,12 @@ TEST(DirectWrite, CreatesParentDirectoriesIfNeeded) {
     utils::direct_write(dest, data);
 
     ASSERT_TRUE(fs::exists(dest));
-    std::ifstream in(dest, std::ios::binary);
-    std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    EXPECT_EQ(contents, "data");
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(contents, "data");
+        in.close();
+    }
 
     fs::remove_all(temp_dir);
 }
@@ -1185,9 +1203,12 @@ TEST(DirectWrite, BinaryDataPreserved) {
 
     utils::direct_write(dest, data);
 
-    std::ifstream in(dest, std::ios::binary);
-    std::vector<char> read_data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    EXPECT_EQ(read_data, data);
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::vector<char> read_data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(read_data, data);
+        in.close();
+    }
 
     fs::remove_all(temp_dir);
 }
