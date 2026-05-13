@@ -6,6 +6,7 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 
 - Create torrent files from single files or directories
 - Inspect existing torrent files (metadata, file tree, verification, magnet link)
+- Modify existing torrent metadata without re-hashing file content
 - Support for torrent versions: V1, V2, and Hybrid
 - Interactive mode with step-by-step configuration
 - Command-line interface with options for all features
@@ -87,6 +88,14 @@ For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --
 ./torrent_builder inspect file.torrent [options]
 ```
 
+### Modify Torrent Metadata
+
+```bash
+./torrent_builder modify file.torrent [options]
+```
+
+Edit metadata of an existing .torrent file in-place without re-hashing file content. Supports V1, V2, and hybrid torrents. Changes are written atomically (temp file + rename).
+
 > **Note:** `--output` is optional. When omitted, the output filename is auto-generated from the tracker domain and content name (e.g., `tracker.example.com_myfile.torrent`).
 
 ## Options
@@ -157,6 +166,27 @@ Optional fields (`comment`, `creation_date`, `created_by`, `source`, `entropy`) 
   --verify         Verify files exist on disk
   --base-path DIR  Base path for file verification (default: current directory)
 ```
+
+### Modify Options
+
+```
+  ./torrent_builder modify <torrent_file> [options]
+
+  -h, --help              Show help
+  -t, --tracker URL       Replace all trackers (exclusive with --add-tracker/--remove-tracker)
+      --add-tracker URL   Add tracker URL (can be used multiple times)
+      --remove-tracker URL Remove tracker URL (can be used multiple times)
+      --private           Mark torrent as private
+      --public            Mark torrent as public
+      --source SOURCE     Set source field (empty string removes it)
+      --comment COMMENT   Set comment (empty string removes it)
+      --name NAME         Change torrent name
+      --entropy           Randomize info hash by adding entropy field
+  -o, --output OUTPUT     Output torrent file path (defaults to in-place)
+      --dry-run           Preview changes without writing
+```
+
+> **Note:** `--tracker` is exclusive with `--add-tracker`/`--remove-tracker`. `--private` and `--public` are mutually exclusive. At least one modification option is required.
 
 ## Examples
 
@@ -280,6 +310,45 @@ Inspect torrent metadata:
 
 ./torrent_builder inspect file.torrent --verify --base-path /data
 # Verifies all files exist on disk under /data
+```
+
+Modify torrent metadata:
+```bash
+./torrent_builder modify file.torrent --tracker "https://tracker.example/announce"
+# Replaces all trackers with the specified one
+
+./torrent_builder modify file.torrent --add-tracker "https://tracker2.example/announce"
+# Adds a tracker to the existing list
+
+./torrent_builder modify file.torrent --remove-tracker "https://old.example/announce"
+# Removes a specific tracker
+
+./torrent_builder modify file.torrent --private
+# Marks torrent as private
+
+./torrent_builder modify file.torrent --public
+# Marks torrent as public (removes private flag)
+
+./torrent_builder modify file.torrent --source "PTP"
+# Sets source field for cross-seeding
+
+./torrent_builder modify file.torrent --source ""
+# Removes source field
+
+./torrent_builder modify file.torrent --comment "Updated comment"
+# Sets or updates comment
+
+./torrent_builder modify file.torrent --comment ""
+# Removes comment
+
+./torrent_builder modify file.torrent --name "New Name" --entropy
+# Changes torrent name and randomizes info hash
+
+./torrent_builder modify file.torrent --dry-run --tracker "https://tracker.example/announce"
+# Preview changes without writing to file
+
+./torrent_builder modify file.torrent --output modified.torrent --entropy
+# Write to a new file instead of modifying in-place
 ```
 
 ## Troubleshooting

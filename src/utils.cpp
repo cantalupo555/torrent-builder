@@ -10,6 +10,17 @@
 #include <vector>
 #include <chrono>
 #include <ctime>
+#include <random>
+#include <fstream>
+#include <filesystem>
+
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace utils
 {
@@ -600,6 +611,163 @@ bool should_include_file(const std::string &relative_path,
     }
 
     return true;
+}
+
+std::string generate_entropy_hex()
+{
+    constexpr char hex_chars[] = "0123456789abcdef";
+    std::random_device rd;
+    std::uniform_int_distribution<unsigned> dist(0, 255);
+    std::string result(64, '\0');
+    for (int i = 0; i < 32; ++i)
+    {
+        unsigned byte = dist(rd);
+        result[i * 2] = hex_chars[byte >> 4];
+        result[i * 2 + 1] = hex_chars[byte & 0xF];
+    }
+    return result;
+}
+
+void direct_write(const std::filesystem::path &dest, const std::vector<char> &data)
+{
+    std::ofstream out(dest, std::ios::binary);
+    if (!out)
+    {
+        throw std::runtime_error("Failed to open output file: " + dest.string());
+    }
+    out.write(data.data(), static_cast<std::streamsize>(data.size()));
+    if (!out)
+    {
+        throw std::runtime_error("Failed to write output file: " + dest.string());
+    }
+}
+
+void atomic_write(const std::filesystem::path &dest, const std::vector<char> &data)
+{
+    namespace fs = std::filesystem;
+
+#ifdef _WIN32
+    fs::path tmp = dest;
+    tmp += ".tmp.XXXXXX";
+
+    std::string tmp_str = tmp.string();
+    if (_mktemp(tmp_str.data()) == nullptr)
+    {
+        throw std::runtime_error("Failed to generate temporary file name: " + tmp.string());
+    }
+    tmp = fs::path(tmp_str);
+
+    int fd = _open(tmp_str.c_str(), _O_CREAT | _O_WRONLY | _O_BINARY | _O_TRUNC, _S_IWRITE);
+    if (fd == -1)
+    {
+        throw std::runtime_error("Failed to create temporary file: " + tmp.string());
+    }
+
+    size_t total_written = 0;
+    while (total_written < data.size())
+    {
+        int n = _write(fd, data.data() + total_written,
+                       static_cast<unsigned int>(data.size() - total_written));
+        if (n <= 0)
+        {
+            _close(fd);
+            fs::remove(tmp);
+            throw std::runtime_error("Failed to write data to temporary file: " + tmp.string());
+        }
+        total_written += static_cast<size_t>(n);
+    }
+
+    if (_commit(fd) == -1)
+    {
+        _close(fd);
+        fs::remove(tmp);
+        throw std::runtime_error("Failed to flush temporary file: " + tmp.string());
+    }
+    _close(fd);
+
+    std::error_code ec;
+    fs::rename(tmp, dest, ec);
+    if (ec)
+    {
+        if (ec == std::errc::cross_device_link)
+        {
+            try
+            {
+                direct_write(dest, data);
+                fs::remove(tmp);
+            }
+            catch (...)
+            {
+                fs::remove(tmp);
+                throw;
+            }
+        }
+        else
+        {
+            std::string msg = "Failed to rename temporary file: " + ec.message();
+            fs::remove(tmp);
+            throw std::runtime_error(msg);
+        }
+    }
+#else
+    fs::path tmp = dest;
+    tmp += ".tmp.XXXXXX";
+
+    std::string tmp_native = tmp.string();
+    int fd = mkstemp(tmp_native.data());
+    tmp = fs::path(tmp_native);
+    if (fd == -1)
+    {
+        throw std::runtime_error("Failed to create temporary file: " + tmp.string());
+    }
+
+    size_t total_written = 0;
+    while (total_written < data.size())
+    {
+        ssize_t n = write(fd, data.data() + total_written,
+                          static_cast<ssize_t>(data.size() - total_written));
+        if (n <= 0)
+        {
+            close(fd);
+            fs::remove(tmp);
+            throw std::runtime_error("Failed to write data to temporary file: " + tmp.string());
+        }
+        total_written += static_cast<size_t>(n);
+    }
+
+    if (fsync(fd) == -1)
+    {
+        close(fd);
+        fs::remove(tmp);
+        throw std::runtime_error("Failed to fsync temporary file: " + tmp.string());
+    }
+    close(fd);
+
+    std::error_code ec;
+    fs::rename(tmp, dest, ec);
+    if (ec)
+    {
+        if (ec == std::errc::cross_device_link)
+        {
+            try
+            {
+                direct_write(dest, data);
+                fs::remove(tmp);
+            }
+            catch (...)
+            {
+                fs::remove(tmp);
+                throw;
+            }
+        }
+        else
+        {
+            std::string msg = "Failed to rename temporary file: " + ec.message();
+            fs::remove(tmp);
+            throw std::runtime_error(msg);
+        }
+    }
+#endif
 }
 
 } // namespace utils

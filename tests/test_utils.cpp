@@ -2,6 +2,7 @@
 #include "utils.hpp"
 #include "constants.hpp"
 #include <fstream>
+#include <filesystem>
 
 TEST(AutoPieceSize, ZeroBytes) {
     EXPECT_EQ(utils::auto_piece_size(0), PieceSizes::k16KB);
@@ -1015,4 +1016,214 @@ TEST(GlobToRegex, TrailingSlashPattern) {
     EXPECT_TRUE(std::regex_match("dir/", re));
     EXPECT_FALSE(std::regex_match("dir", re));
     EXPECT_FALSE(std::regex_match("dir/file.txt", re));
+}
+
+TEST(AtomicWrite, CreatesFileWithCorrectContent) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_atomic_write";
+    fs::create_directories(temp_dir);
+    auto dest = temp_dir / "output.bin";
+
+    std::vector<char> data = {'H', 'e', 'l', 'l', 'o'};
+    utils::atomic_write(dest, data);
+
+    ASSERT_TRUE(fs::exists(dest));
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(contents, "Hello");
+        in.close();
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(AtomicWrite, OverwritesExistingFile) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_atomic_overwrite";
+    fs::create_directories(temp_dir);
+    auto dest = temp_dir / "output.bin";
+
+    { std::ofstream(dest) << "old content"; }
+    ASSERT_TRUE(fs::exists(dest));
+
+    std::vector<char> data = {'n', 'e', 'w'};
+    utils::atomic_write(dest, data);
+
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(contents, "new");
+        in.close();
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(AtomicWrite, NoTempFileLeftOnSuccess) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_atomic_no_tmp";
+    fs::create_directories(temp_dir);
+    auto dest = temp_dir / "output.bin";
+
+    std::vector<char> data = {'d', 'a', 't', 'a'};
+    utils::atomic_write(dest, data);
+
+    int tmp_count = 0;
+    for (const auto &entry : fs::directory_iterator(temp_dir))
+    {
+        if (entry.path().string().find(".tmp.") != std::string::npos)
+            ++tmp_count;
+    }
+    EXPECT_EQ(tmp_count, 0);
+    EXPECT_TRUE(fs::exists(dest));
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(AtomicWrite, EmptyDataCreatesEmptyFile) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_atomic_empty";
+    fs::create_directories(temp_dir);
+    auto dest = temp_dir / "empty.bin";
+
+    std::vector<char> data;
+    utils::atomic_write(dest, data);
+
+    ASSERT_TRUE(fs::exists(dest));
+    EXPECT_EQ(fs::file_size(dest), 0u);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(AtomicWrite, ThrowsOnInvalidPath) {
+    std::vector<char> data = {'x'};
+    EXPECT_THROW(utils::atomic_write("/nonexistent/deep/dir/file.bin", data), std::runtime_error);
+}
+
+TEST(AtomicWrite, BinaryDataPreserved) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_atomic_binary";
+    fs::create_directories(temp_dir);
+    auto dest = temp_dir / "binary.bin";
+
+    std::vector<char> data(256);
+    for (int i = 0; i < 256; ++i)
+        data[i] = static_cast<char>(i);
+
+    utils::atomic_write(dest, data);
+
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::vector<char> read_data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(read_data.size(), data.size());
+        EXPECT_EQ(read_data, data);
+        in.close();
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(DirectWrite, CreatesFileWithCorrectContent) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_direct_write";
+    fs::create_directories(temp_dir);
+    auto dest = temp_dir / "output.bin";
+
+    std::vector<char> data = {'H', 'e', 'l', 'l', 'o'};
+    utils::direct_write(dest, data);
+
+    ASSERT_TRUE(fs::exists(dest));
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(contents, "Hello");
+        in.close();
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(DirectWrite, OverwritesExistingFile) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_direct_overwrite";
+    fs::create_directories(temp_dir);
+    auto dest = temp_dir / "output.bin";
+
+    { std::ofstream(dest) << "old content"; }
+
+    std::vector<char> data = {'n', 'e', 'w'};
+    utils::direct_write(dest, data);
+
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(contents, "new");
+        in.close();
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(DirectWrite, CreatesParentDirectoriesIfNeeded) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_direct_nested";
+    fs::create_directories(temp_dir);
+    auto dest = temp_dir / "sub" / "dir" / "output.bin";
+    fs::create_directories(dest.parent_path());
+
+    std::vector<char> data = {'d', 'a', 't', 'a'};
+    utils::direct_write(dest, data);
+
+    ASSERT_TRUE(fs::exists(dest));
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(contents, "data");
+        in.close();
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(DirectWrite, ThrowsOnInvalidPath) {
+    std::vector<char> data = {'x'};
+    EXPECT_THROW(utils::direct_write("/nonexistent/deep/dir/file.bin", data), std::runtime_error);
+}
+
+TEST(DirectWrite, BinaryDataPreserved) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_direct_binary";
+    fs::create_directories(temp_dir);
+    auto dest = temp_dir / "binary.bin";
+
+    std::vector<char> data(256);
+    for (int i = 0; i < 256; ++i)
+        data[i] = static_cast<char>(i);
+
+    utils::direct_write(dest, data);
+
+    {
+        std::ifstream in(dest, std::ios::binary);
+        std::vector<char> read_data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(read_data, data);
+        in.close();
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(DirectWrite, EmptyDataCreatesEmptyFile) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_direct_empty";
+    fs::create_directories(temp_dir);
+    auto dest = temp_dir / "empty.bin";
+
+    std::vector<char> data;
+    utils::direct_write(dest, data);
+
+    ASSERT_TRUE(fs::exists(dest));
+    EXPECT_EQ(fs::file_size(dest), 0u);
+
+    fs::remove_all(temp_dir);
 }
