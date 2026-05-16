@@ -2368,3 +2368,190 @@ TEST(CLI, ModifyEntropyEndToEnd) {
     std::error_code ec;
     fs::remove_all(temp_dir, ec);
 }
+
+TEST(CLI, CheckCommandEndToEnd) {
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_check_e2e";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "content.txt";
+    { std::ofstream(input_file) << "check test content"; }
+    auto torrent_file = temp_dir / "content.torrent";
+
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+    ASSERT_EQ(create_exit, 0);
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " check " + torrent_file.string()
+        + " --path " + temp_dir.string() + " 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_NE(output.find("PASS"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, CheckCommandFailsForMissingFiles) {
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_check_missing";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "content.txt";
+    { std::ofstream(input_file) << "check test content"; }
+    auto torrent_file = temp_dir / "content.torrent";
+
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+    ASSERT_EQ(create_exit, 0);
+
+    fs::remove(input_file);
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " check " + torrent_file.string()
+        + " --path " + temp_dir.string() + " 2>&1", exit_code);
+
+    EXPECT_NE(exit_code, 0) << "Output: " << output;
+    EXPECT_NE(output.find("FAIL"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, CheckCommandJsonOutput) {
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_check_json";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "content.txt";
+    { std::ofstream(input_file) << "json check test"; }
+    auto torrent_file = temp_dir / "content.torrent";
+
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+    ASSERT_EQ(create_exit, 0);
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " check " + torrent_file.string()
+        + " --path " + temp_dir.string() + " --json 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_NE(output.find("\"status\""), std::string::npos);
+    EXPECT_NE(output.find("\"pieces\""), std::string::npos);
+    EXPECT_NE(output.find("\"missing_files\""), std::string::npos);
+    EXPECT_NE(output.find("\"extra_files\""), std::string::npos);
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, CheckCommandHelp) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " check --help 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("--verbose"), std::string::npos);
+    EXPECT_NE(output.find("--json"), std::string::npos);
+    EXPECT_NE(output.find("--path"), std::string::npos);
+}
+
+TEST(CLI, CheckCommandNoArgsShowsHelp) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " check 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("--help"), std::string::npos);
+}
+
+TEST(CLI, CheckCommandMissingTorrent) {
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " check /nonexistent/path.torrent 2>&1", exit_code);
+
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("Error"), std::string::npos);
+}
+
+TEST(CLI, CheckCommandVerboseJsonConflict) {
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " check test.torrent --verbose --json 2>&1", exit_code);
+
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("mutually exclusive"), std::string::npos);
+}
+
+TEST(CLI, CheckCommandDetectsCorruption) {
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_check_corrupt";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "content.txt";
+    { std::ofstream(input_file) << "original content"; }
+    auto torrent_file = temp_dir / "content.torrent";
+
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+    ASSERT_EQ(create_exit, 0);
+
+    { std::ofstream(input_file) << "corrupted data!!"; }
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " check " + torrent_file.string()
+        + " --path " + temp_dir.string() + " 2>&1", exit_code);
+
+    EXPECT_NE(exit_code, 0) << "Output: " << output;
+     EXPECT_NE(output.find("FAIL"), std::string::npos);
+     EXPECT_NE(output.find("Corrupted pieces"), std::string::npos);
+
+     std::error_code ec;
+     fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, CheckCommandVerboseOutput) {
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_check_verbose";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "content.txt";
+    { std::ofstream(input_file) << "verbose check test content here"; }
+    auto torrent_file = temp_dir / "content.torrent";
+
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+    ASSERT_EQ(create_exit, 0);
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " check " + torrent_file.string()
+        + " --path " + temp_dir.string() + " --verbose 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_NE(output.find("PASS"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, CheckCommandDefaultPath) {
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_check_default_path";
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "content.txt";
+    { std::ofstream(input_file) << "default path test content"; }
+    auto torrent_file = temp_dir / "content.torrent";
+
+    int create_exit;
+    exec_command(get_binary_path() + " --path " + input_file.string()
+        + " --output " + torrent_file.string() + " --torrent-version 1 2>&1", create_exit);
+    ASSERT_EQ(create_exit, 0);
+
+    int exit_code;
+    std::string output = exec_command(
+        get_binary_path() + " check " + torrent_file.string() + " 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_NE(output.find("PASS"), std::string::npos);
+
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
