@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include "torrent_inspector.hpp"
 #include "torrent_modifier.hpp"
+#include "torrent_checker.hpp"
 #include "output.hpp"
 
 namespace fs = std::filesystem;
@@ -875,6 +876,99 @@ int handle_modify_command(const std::vector<std::string> &args)
     }
 }
 
+int handle_check_command(const std::vector<std::string> &args)
+{
+    try
+    {
+        int argc = static_cast<int>(args.size()) + 1;
+        std::vector<const char *> argv;
+        argv.push_back("torrent-builder");
+        for (const auto &arg : args)
+        {
+            argv.push_back(arg.c_str());
+        }
+
+        cxxopts::Options check_options("torrent-builder check", "Verify local files against a .torrent file");
+        check_options.add_options()(
+            "h,help", "Show help")(
+            "verbose", "Show per-piece verification progress")(
+            "json", "Output results as JSON")(
+            "path", "Content directory (defaults to torrent file directory)",
+            cxxopts::value<std::string>(), "DIR")(
+            "torrent", "Path to .torrent file",
+            cxxopts::value<std::string>());
+
+        check_options.parse_positional({"torrent"});
+        auto result = check_options.parse(argc, argv.data());
+
+        if (result.count("help") || !result.count("torrent"))
+        {
+            print_info(check_options.help() + "\n");
+            print_info("\nExamples:\n");
+            print_info("  torrent-builder check file.torrent\n");
+            print_info("  torrent-builder check file.torrent --path /data/downloads\n");
+            print_info("  torrent-builder check file.torrent --verbose\n");
+            print_info("  torrent-builder check file.torrent --json\n");
+            return 0;
+        }
+
+        if (result.count("verbose") && result.count("json"))
+        {
+            print_error("Error: --verbose and --json are mutually exclusive\n");
+            return 1;
+        }
+
+        if (result.count("json"))
+        {
+            set_json_mode(true);
+            set_verbosity(Verbosity::QUIET);
+        }
+        else if (result.count("verbose"))
+        {
+            set_verbosity(Verbosity::VERBOSE);
+        }
+
+        std::string torrent_path = result["torrent"].as<std::string>();
+
+        fs::path content_path;
+        if (result.count("path"))
+        {
+            content_path = result["path"].as<std::string>();
+        }
+        else
+        {
+            content_path = fs::path(torrent_path).parent_path();
+        }
+
+        if (!fs::exists(content_path))
+        {
+            log_message("Content path does not exist: " + content_path.string(), LogLevel::ERR);
+            print_error("Error: Content path does not exist: " + content_path.string() + "\n");
+            return 1;
+        }
+
+        TorrentChecker checker(torrent_path);
+        CheckResult check_result = checker.check(content_path, result.count("verbose") > 0);
+
+        if (is_json_mode())
+        {
+            std::cout << TorrentChecker::format_result(check_result, true);
+        }
+        else
+        {
+            print_info(TorrentChecker::format_result(check_result, false));
+        }
+
+        return check_result.passed ? 0 : 1;
+    }
+    catch (const std::exception &e)
+    {
+        log_message("Check error: " + std::string(e.what()), LogLevel::ERR);
+        print_error(std::string("Error: ") + e.what() + "\n");
+        return 1;
+    }
+}
+
 int main(int argc, char *argv[])
 {
     // Check for subcommands
@@ -896,6 +990,16 @@ int main(int argc, char *argv[])
             args.push_back(argv[i]);
         }
         return handle_inspect_command(args);
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "check")
+    {
+        std::vector<std::string> args;
+        for (int i = 2; i < argc; ++i)
+        {
+            args.push_back(argv[i]);
+        }
+        return handle_check_command(args);
     }
 
     try
