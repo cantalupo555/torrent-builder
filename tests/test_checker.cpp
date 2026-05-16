@@ -710,6 +710,9 @@ TEST_F(HybridMultiFileCheckerTest, HybridMultiFileDetectsCorruption)
 
 TEST_F(CheckerTest, SymlinksAreSkippedAsExtraFiles)
 {
+#ifdef _WIN32
+    GTEST_SKIP() << "Symlinks are not supported on Windows";
+#endif
     create_single_file_torrent("test_file.txt", "Hello World");
     create_file(content_dir_ / "real_extra.txt", "extra content");
     fs::create_directory_symlink(content_dir_, content_dir_ / "symlink_dir");
@@ -757,6 +760,9 @@ TEST_F(CheckerTest, FileResultFieldsForMissingFile)
 
 TEST_F(CheckerTest, ReadPieceDataHandlesFileOpenFailure)
 {
+#ifdef _WIN32
+    GTEST_SKIP() << "Unix file permissions are not enforced on Windows";
+#endif
     create_single_file_torrent("test_file.txt", "Hello World");
 
     std::error_code perm_ec;
