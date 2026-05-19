@@ -1,3 +1,4 @@
+#include "portable.hpp"
 #include <gtest/gtest.h>
 #include <fstream>
 #include <filesystem>
@@ -23,7 +24,7 @@ class CheckerTest : public ::testing::Test
 
     void SetUp() override
     {
-        temp_dir_ = fs::temp_directory_path() / ("torrent_checker_test_" + std::to_string(::getpid()));
+        temp_dir_ = fs::temp_directory_path() / ("torrent_checker_test_" + std::to_string(portable_getpid()));
         content_dir_ = temp_dir_ / "content";
         fs::create_directories(content_dir_);
         torrent_path_ = temp_dir_ / "test.torrent";
@@ -401,7 +402,7 @@ class V2CheckerTest : public ::testing::Test
 
     void SetUp() override
     {
-        temp_dir_ = fs::temp_directory_path() / ("torrent_checker_v2_" + std::to_string(::getpid()));
+        temp_dir_ = fs::temp_directory_path() / ("torrent_checker_v2_" + std::to_string(portable_getpid()));
         content_dir_ = temp_dir_ / "content";
         fs::create_directories(content_dir_);
         torrent_path_ = temp_dir_ / "test.torrent";
@@ -541,7 +542,7 @@ class HybridCheckerTest : public ::testing::Test
 
     void SetUp() override
     {
-        temp_dir_ = fs::temp_directory_path() / ("torrent_checker_hybrid_" + std::to_string(::getpid()));
+        temp_dir_ = fs::temp_directory_path() / ("torrent_checker_hybrid_" + std::to_string(portable_getpid()));
         content_dir_ = temp_dir_ / "content";
         fs::create_directories(content_dir_);
         torrent_path_ = temp_dir_ / "test.torrent";
@@ -631,7 +632,7 @@ class HybridMultiFileCheckerTest : public ::testing::Test
 
     void SetUp() override
     {
-        temp_dir_ = fs::temp_directory_path() / ("torrent_checker_hybrid_multi_" + std::to_string(::getpid()));
+        temp_dir_ = fs::temp_directory_path() / ("torrent_checker_hybrid_multi_" + std::to_string(portable_getpid()));
         content_dir_ = temp_dir_ / "content";
         fs::create_directories(content_dir_);
         torrent_path_ = temp_dir_ / "test.torrent";

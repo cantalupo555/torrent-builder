@@ -1,3 +1,4 @@
+#include "portable.hpp"
 #include <gtest/gtest.h>
 #include "terminal.hpp"
 #include <stdexcept>
@@ -243,7 +244,7 @@ protected:
     int pid_ = -1;
 
     void SetUp() override {
-        tmp_file_ = fs::temp_directory_path() / ("cli_interrupt_" + std::to_string(getpid()));
+        tmp_file_ = fs::temp_directory_path() / ("cli_interrupt_" + std::to_string(portable_getpid()));
         std::ofstream f(tmp_file_, std::ios::binary);
         std::vector<char> data(1024 * 1024, 'A');
         f.write(data.data(), data.size());

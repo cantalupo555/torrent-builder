@@ -4,14 +4,18 @@
 #include "utils.hpp"
 #include "terminal.hpp"
 #include "version.hpp"
+#include "preset.hpp"
+#include "batch.hpp"
 #include <iostream>
 #include <vector>
 #include <optional>
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <cmath>
+#include <chrono>
 #include <ranges>
 #include <stdexcept>
+#include <yaml-cpp/exceptions.h>
 #include "torrent_inspector.hpp"
 #include "torrent_modifier.hpp"
 #include "torrent_checker.hpp"
@@ -429,29 +433,46 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
 
     std::string input_path = result["path"].as<std::string>();
 
+    ConfigValues preset_values;
+    if (result.count("preset"))
+    {
+        std::optional<fs::path> preset_file;
+        if (result.count("preset-file")) {
+            preset_file = result["preset-file"].as<std::string>();
+        }
+        PresetLoader loader;
+        auto path = PresetLoader::find_preset_file(preset_file);
+        loader.load(path);
+        preset_values = loader.resolve(result["preset"].as<std::string>());
+        log_message("Applied preset values for: " + result["preset"].as<std::string>(), LogLevel::INFO);
+    }
+
     // Get trackers (before output, needed for auto-naming)
     std::vector<std::string> trackers;
-    bool use_default = result.count("default-trackers") > 0;
-
-    if (use_default)
-    {
-        trackers.insert(trackers.end(), default_trackers.begin(), default_trackers.end());
-    }
-    if (result.count("tracker"))
-    {
-        std::vector<std::string> custom_trackers = result["tracker"].as<std::vector<std::string>>();
-        for (const auto &tracker : custom_trackers)
+    if (!result.count("tracker") && !result.count("default-trackers") && preset_values.trackers) {
+        trackers = *preset_values.trackers;
+    } else {
+        bool use_default = result.count("default-trackers") > 0;
+        if (use_default)
         {
-            if (!utils::is_valid_url(tracker))
-            {
-                throw std::runtime_error("Invalid tracker URL: " + tracker);
-            }
-            if (std::ranges::contains(trackers, tracker))
-            {
-                throw std::runtime_error("Duplicate tracker URL: " + tracker);
-            }
+            trackers.insert(trackers.end(), default_trackers.begin(), default_trackers.end());
         }
-        trackers.insert(trackers.end(), custom_trackers.begin(), custom_trackers.end());
+        if (result.count("tracker"))
+        {
+            std::vector<std::string> custom_trackers = result["tracker"].as<std::vector<std::string>>();
+            for (const auto &tracker : custom_trackers)
+            {
+                if (!utils::is_valid_url(tracker))
+                {
+                    throw std::runtime_error("Invalid tracker URL: " + tracker);
+                }
+                if (std::ranges::contains(trackers, tracker))
+                {
+                    throw std::runtime_error("Duplicate tracker URL: " + tracker);
+                }
+            }
+            trackers.insert(trackers.end(), custom_trackers.begin(), custom_trackers.end());
+        }
     }
 
     // Resolve output path (optional — auto-generate if not provided)
@@ -513,11 +534,16 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
     }
 
     // Get torrent version
-    std::string version = result["torrent-version"].as<std::string>();
+    std::string version_str = "3";
+    if (result.count("torrent-version")) {
+        version_str = result["torrent-version"].as<std::string>();
+    } else if (preset_values.torrent_version) {
+        version_str = std::to_string(*preset_values.torrent_version);
+    }
     TorrentVersion tv = TorrentVersion::V1;
-    if (version == "2")
+    if (version_str == "2")
         tv = TorrentVersion::V2;
-    else if (version == "3")
+    else if (version_str == "3")
         tv = TorrentVersion::HYBRID;
 
     // Get optional comment
@@ -525,6 +551,10 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
     if (result.count("comment"))
     {
         comment = result["comment"].as<std::string>();
+    }
+    else if (preset_values.comment)
+    {
+        comment = preset_values.comment;
     }
 
     // Get optional torrent name
@@ -534,6 +564,10 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
         if (torrent_name->find_first_not_of(" \t\n\r") == std::string::npos) {
             throw std::runtime_error("Torrent name cannot be empty or whitespace-only");
         }
+    }
+    else if (preset_values.name)
+    {
+        torrent_name = preset_values.name;
     }
 
     // Get web seeds
@@ -548,6 +582,10 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
                 throw std::runtime_error("Invalid web seed URL: " + webseed);
             }
         }
+    }
+    else if (preset_values.web_seeds)
+    {
+        web_seeds = *preset_values.web_seeds;
     }
 
     // Get and validate piece size
@@ -576,6 +614,14 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
             throw std::runtime_error("Invalid piece size");
         }
     }
+    else if (preset_values.piece_size && *preset_values.piece_size > 0)
+    {
+        int ps = *preset_values.piece_size;
+        if (std::ranges::contains(allowed_piece_sizes, ps))
+        {
+            piece_size = ps * 1024;
+        }
+    }
 
     // Get creator string
     std::optional<std::string> creator_str = std::nullopt;
@@ -583,9 +629,16 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
     {
         creator_str = "Torrent Builder";
     }
+    else if (preset_values.creator)
+    {
+        creator_str = preset_values.creator;
+    }
 
     // Get creation date flag
     bool include_creation_date = result.count("creation-date") > 0;
+    if (!include_creation_date && preset_values.creation_date) {
+        include_creation_date = *preset_values.creation_date;
+    }
 
     // Get optional source string
     std::optional<std::string> source = std::nullopt;
@@ -597,9 +650,16 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
             source = source_str;
         }
     }
+    else if (preset_values.source)
+    {
+        source = preset_values.source;
+    }
 
     // Get entropy flag
     bool entropy = result.count("entropy") > 0;
+    if (!entropy && preset_values.entropy) {
+        entropy = *preset_values.entropy;
+    }
 
     // Compile glob patterns to regex once at config time. glob_to_regex() escapes
     // all metacharacters so regex_error is unreachable — the catch is defense-in-depth.
@@ -608,6 +668,14 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
     {
         auto patterns = result["exclude"].as<std::vector<std::string>>();
         for (const auto &p : patterns)
+        {
+            try { exclude_regex_compiled.push_back(utils::glob_to_regex(p)); }
+            catch (const std::regex_error &) { throw std::runtime_error("Invalid exclude pattern: " + p); }
+        }
+    }
+    else if (preset_values.exclude_patterns)
+    {
+        for (const auto &p : *preset_values.exclude_patterns)
         {
             try { exclude_regex_compiled.push_back(utils::glob_to_regex(p)); }
             catch (const std::regex_error &) { throw std::runtime_error("Invalid exclude pattern: " + p); }
@@ -624,11 +692,24 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
             catch (const std::regex_error &) { throw std::runtime_error("Invalid include pattern: " + p); }
         }
     }
+    else if (preset_values.include_patterns)
+    {
+        for (const auto &p : *preset_values.include_patterns)
+        {
+            try { include_regex_compiled.push_back(utils::glob_to_regex(p)); }
+            catch (const std::regex_error &) { throw std::runtime_error("Invalid include pattern: " + p); }
+        }
+    }
 
     try
     {
+        bool is_private = result.count("private") > 0;
+        if (!is_private && preset_values.is_private) {
+            is_private = *preset_values.is_private;
+        }
+
         return TorrentConfig(input_path, output_path, trackers, tv,
-                             comment, result.count("private") > 0, web_seeds, piece_size,
+                             comment, is_private, web_seeds, piece_size,
                              creator_str, torrent_name, include_creation_date,
                              source, entropy,
                              std::move(exclude_regex_compiled), std::move(include_regex_compiled)
@@ -969,6 +1050,90 @@ int handle_check_command(const std::vector<std::string> &args)
     }
 }
 
+int handle_batch_command(const std::vector<std::string> &args)
+{
+    try
+    {
+        int argc = static_cast<int>(args.size()) + 1;
+        std::vector<const char *> argv;
+        argv.push_back("torrent-builder");
+        for (const auto &arg : args)
+        {
+            argv.push_back(arg.c_str());
+        }
+
+        cxxopts::Options batch_options("torrent-builder batch", "Batch create torrents from YAML config");
+        batch_options.add_options()
+            ("h,help", "Show help")
+            ("w,workers", "Number of parallel workers", cxxopts::value<int>()->default_value("1"), "N")
+            ("path", "Batch YAML file", cxxopts::value<std::string>(), "FILE");
+
+        batch_options.parse_positional({"path"});
+        auto result = batch_options.parse(argc, argv.data());
+
+        if (result.count("help") || !result.count("path"))
+        {
+            print_info(batch_options.help() + "\n");
+            print_info("Examples:\n");
+            print_info("  torrent-builder batch batch.yaml\n");
+            print_info("  torrent-builder batch batch.yaml --workers 4\n");
+            return 0;
+        }
+
+        set_verbosity(Verbosity::QUIET);
+
+        BatchConfig config = BatchProcessor::parse(result["path"].as<std::string>());
+
+        if (result.count("workers")) {
+            int w = result["workers"].as<int>();
+            if (w >= 1) {
+                config.workers = w;
+            } else {
+                print_error("Warning: Ignored --workers value: must be >= 1, using " + std::to_string(config.workers));
+                log_message("Ignored --workers value: must be >= 1, using " + std::to_string(config.workers), LogLevel::WARNING);
+            }
+        }
+
+        BatchProcessor processor(std::move(config));
+        auto batch_start = std::chrono::steady_clock::now();
+        auto results = processor.run();
+        auto batch_end = std::chrono::steady_clock::now();
+        double batch_elapsed = std::chrono::duration<double>(batch_end - batch_start).count();
+        BatchProcessor::print_summary(results);
+        log_message("Batch completed in " + std::to_string(batch_elapsed) + "s", LogLevel::INFO);
+
+        for (const auto &r : results)
+        {
+            if (!r.success) return 1;
+        }
+        return 0;
+    }
+    catch (const std::filesystem::filesystem_error &e)
+    {
+        log_message(std::string("Batch filesystem error: ") + e.what(), LogLevel::ERR);
+        print_error(std::string("Filesystem error: ") + e.what() + "\n");
+        return 1;
+    }
+    catch (const YAML::Exception &e)
+    {
+        log_message(std::string("Batch YAML error: ") + e.what(), LogLevel::ERR);
+        print_error(std::string("YAML parsing error: ") + e.what() + "\n");
+        return 1;
+    }
+    catch (const std::runtime_error &e)
+    {
+        log_message(std::string("Batch error: ") + e.what(), LogLevel::ERR);
+        print_error(std::string(e.what()) + "\n");
+        return 1;
+    }
+    catch (const std::exception &e)
+    {
+        log_message(std::string("Unexpected batch error: ") + e.what(), LogLevel::ERR);
+        print_error(std::string("An unexpected error occurred: ") + e.what() + "\n");
+        return 1;
+    }
+}
+
 int main(int argc, char *argv[])
 {
     // Check for subcommands
@@ -1000,6 +1165,16 @@ int main(int argc, char *argv[])
             args.push_back(argv[i]);
         }
         return handle_check_command(args);
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "batch")
+    {
+        std::vector<std::string> args;
+        for (int i = 2; i < argc; ++i)
+        {
+            args.push_back(argv[i]);
+        }
+        return handle_batch_command(args);
     }
 
     try
@@ -1035,7 +1210,9 @@ int main(int argc, char *argv[])
             "x,exclude", "Exclude files matching glob pattern (supports *, **, ?)",
              cxxopts::value<std::vector<std::string>>(), "PATTERN")(
             "I,include", "Include only files matching glob pattern (supports *, **, ?)",
-             cxxopts::value<std::vector<std::string>>(), "PATTERN");
+             cxxopts::value<std::vector<std::string>>(), "PATTERN")(
+            "preset", "Apply named preset from presets.yaml", cxxopts::value<std::string>(), "NAME")(
+            "preset-file", "Load presets from specified file", cxxopts::value<std::string>(), "FILE");
 
         options.positional_help("PATH [OUTPUT]");
         options.parse_positional({"path", "output"});

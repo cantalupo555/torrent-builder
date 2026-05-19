@@ -49,6 +49,7 @@ struct TorrentConfig {
     bool entropy;                                 // Randomize info hash per invocation
     std::vector<std::regex> exclude_regex;        // Pre-compiled exclude patterns
     std::vector<std::regex> include_regex;        // Pre-compiled include patterns (overrides exclude)
+    bool silent;                                   // Suppress progress output (batch mode)
 
     /**
      * @brief Construct a torrent configuration with all creation parameters.
@@ -78,13 +79,15 @@ struct TorrentConfig {
                  std::optional<std::string> source = std::nullopt,
                  bool entropy = false,
                  std::vector<std::regex> exclude_re = {},
-                 std::vector<std::regex> include_re = {})
+                 std::vector<std::regex> include_re = {},
+                 bool silent = false)
         : path(p), output(o), trackers(t), version(v),
           comment(c), is_private(priv), web_seeds(ws), piece_size(ps),
           creator(creator), name(name_val), include_creation_date(include_creation_date),
           source(source), entropy(entropy),
           exclude_regex(std::move(exclude_re)),
-          include_regex(std::move(include_re))
+          include_regex(std::move(include_re)),
+          silent(silent)
     {
         // Validate that the provided path exists
         std::error_code ec;
@@ -100,7 +103,7 @@ public:
      * @brief Construct a torrent creator with the given configuration.
      * @param config Fully populated TorrentConfig.
      */
-    explicit TorrentCreator(const TorrentConfig& config);
+    explicit TorrentCreator(TorrentConfig config);
 
     /**
      * @brief Create and save a .torrent file according to the configuration.
