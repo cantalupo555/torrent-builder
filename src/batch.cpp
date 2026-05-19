@@ -72,6 +72,16 @@ TorrentConfig build_torrent_config(const ConfigValues& cv, const fs::path& defau
     fs::path output;
     if (cv.output) {
         output = *cv.output;
+        if (output.is_relative() && !default_output_dir.empty()) {
+            output = default_output_dir / output;
+        }
+        if (!output.parent_path().empty()) {
+            std::error_code ec;
+            fs::create_directories(output.parent_path(), ec);
+            if (ec) {
+                throw std::runtime_error("Failed to create output directory: " + output.parent_path().string() + " (" + ec.message() + ")");
+            }
+        }
     } else {
         auto trackers = cv.trackers.value_or(std::vector<std::string>{});
         fs::path out_dir = default_output_dir.empty() ? fs::current_path() : default_output_dir;
