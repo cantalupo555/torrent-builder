@@ -2505,8 +2505,260 @@ TEST(CLI, CheckCommandDetectsCorruption) {
      EXPECT_NE(output.find("FAIL"), std::string::npos);
      EXPECT_NE(output.find("Corrupted pieces"), std::string::npos);
 
-     std::error_code ec;
-     fs::remove_all(temp_dir, ec);
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(BatchCLI, ShowsHelp) {
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() + " batch --help 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("batch"), std::string::npos);
+}
+
+TEST(BatchCLI, MissingFileReturnsError) {
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() + " batch /nonexistent_batch_file.yaml 2>&1", exit_code);
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("not found"), std::string::npos);
+}
+
+TEST(BatchCLI, InvalidYamlReturnsError) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_test_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+    {
+        std::ofstream f(temp_dir / "batch.yaml");
+        f << "not: valid: yaml: [[[";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() + " batch " + (temp_dir / "batch.yaml").string() + " 2>&1", exit_code);
+    EXPECT_NE(exit_code, 0);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(BatchCLI, ValidBatchCreatesTorrents) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_valid_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "batch.yaml");
+        f << "version: 1\n"
+           << "jobs:\n"
+           << "  - path: \"" << test_file.string() << "\"\n"
+           << "    output: \"" << (temp_dir / "out.torrent").string() << "\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() + " batch " + (temp_dir / "batch.yaml").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_NE(output.find("Succeeded: 1"), std::string::npos);
+    EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, UnknownPresetReturnsError) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_test_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() + " --preset nonexistent --preset-file " +
+        (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("Preset file not found"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, ValidPresetAppliedToTorrent) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_valid_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+           << "presets:\n"
+           << "  mypreset:\n"
+           << "    comment: \"preset test comment\"\n"
+           << "    source: \"PRESET_CLI\"\n"
+           << "    private: true\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
+    EXPECT_NE(output.find("Private: Yes"), std::string::npos);
+    EXPECT_NE(output.find("PRESET_CLI"), std::string::npos);
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.source.has_value());
+    EXPECT_EQ(*meta.source, "PRESET_CLI");
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetTrackersAppliedWhenNoCLIFlags) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_trackers_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+           << "presets:\n"
+           << "  mypreset:\n"
+           << "    trackers:\n"
+           << "      - \"https://tracker.example.com/announce\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_NE(output.find("Trackers: 1"), std::string::npos) << "Output: " << output;
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, CLITrackerOverridesPresetTrackers) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_tracker_override_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+           << "presets:\n"
+           << "  mypreset:\n"
+           << "    trackers:\n"
+           << "      - \"https://preset-tracker.example.com/announce\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -T https://cli-tracker.example.com/announce" +
+        " -p " + test_file.string() +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.trackers.size(), 1u);
+    EXPECT_NE(meta.trackers[0].find("cli-tracker.example.com"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(BatchCLI, WorkersOverride) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_workers_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "batch.yaml");
+        f << "version: 1\n"
+           << "jobs:\n"
+           << "  - path: \"" << test_file.string() << "\"\n"
+           << "    output: \"" << (temp_dir / "out.torrent").string() << "\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() + " batch " + (temp_dir / "batch.yaml").string() +
+        " --workers 2 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_NE(output.find("Succeeded: 1"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(BatchCLI, WorkersZeroShowsWarning) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_w0_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "batch.yaml");
+        f << "version: 1\n"
+           << "jobs:\n"
+           << "  - path: \"" << test_file.string() << "\"\n"
+           << "    output: \"" << (temp_dir / "out.torrent").string() << "\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() + " batch " + (temp_dir / "batch.yaml").string() +
+        " --workers 0 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_NE(output.find("Warning"), std::string::npos) << "Expected warning about --workers 0";
+    EXPECT_NE(output.find("Succeeded: 1"), std::string::npos);
+
+    fs::remove_all(temp_dir);
 }
 
 TEST(CLI, CheckCommandVerboseOutput) {
@@ -2554,4 +2806,376 @@ TEST(CLI, CheckCommandDefaultPath) {
 
     std::error_code ec;
     fs::remove_all(temp_dir, ec);
+}
+
+TEST(PresetCLI, PresetCreatorAppliedToTorrent) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_creator_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+           << "presets:\n"
+           << "  mypreset:\n"
+           << "    creator: \"PresetCreator\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.created_by.has_value());
+    EXPECT_EQ(*meta.created_by, "PresetCreator");
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetNameAppliedToTorrent) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_name_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+           << "presets:\n"
+           << "  mypreset:\n"
+           << "    name: \"CustomName\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -t 1" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.name, "CustomName");
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetEntropyAppliedToTorrent) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_entropy_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+           << "presets:\n"
+           << "  mypreset:\n"
+           << "    entropy: true\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -t 1" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_TRUE(meta.entropy.has_value());
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(BatchCLI, FailedJobReturnsExitCode1) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_fail_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    {
+        std::ofstream f(temp_dir / "batch.yaml");
+        f << "version: 1\n"
+           << "jobs:\n"
+           << "  - path: \"/nonexistent/path/that/does/not/exist\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() + " batch " + (temp_dir / "batch.yaml").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 1) << "Expected exit code 1 for failed batch job. Output: " << output;
+    EXPECT_NE(output.find("Failed: 1"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, UnknownPresetNameWithValidFileReturnsError) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_unknown_name_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    source: \"TEST\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset nonexistent_preset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("Unknown preset"), std::string::npos) << "Output: " << output;
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetPieceSizeAppliedToTorrent) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_piecesize_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    piece_size: 16\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -t 1" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.piece_length, 16 * 1024) << "Piece length should be 16 KB (16384 bytes)";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetCreationDateAppliedToTorrent) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_creationdate_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    creation_date: true\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -t 1" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_TRUE(meta.creation_date.has_value()) << "Creation date should be present when preset sets it to true";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetTorrentVersionAppliedToTorrent) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_version_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    torrent_version: 1\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.info_hash_v1.empty()) << "V1 torrent should have v1 info hash";
+    EXPECT_TRUE(meta.info_hash_v2.empty()) << "V1 torrent should not have v2 info hash";
+    EXPECT_FALSE(meta.is_hybrid) << "V1 torrent should not be hybrid";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetExcludePatternsAppliedToTorrent) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_exclude_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "info.nfo") << "nfo data"; }
+    { std::ofstream(content_dir / "readme.txt") << "text data"; }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    exclude_patterns:\n"
+          << "      - \"*.nfo\"\n"
+          << "      - \"*.txt\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + content_dir.string() +
+        " -t 1" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.files.size(), 1u) << "Should only have movie.mkv (nfo and txt excluded via preset)";
+    EXPECT_NE(meta.files[0].path.find("movie.mkv"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetIncludePatternsAppliedToTorrent) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_include_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "clip.mp4") << "clip content"; }
+    { std::ofstream(content_dir / "readme.txt") << "text data"; }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    include_patterns:\n"
+          << "      - \"*.mkv\"\n"
+          << "      - \"*.mp4\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + content_dir.string() +
+        " -t 1" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.files.size(), 2u) << "Should have 2 files (mkv and mp4 included via preset, txt excluded)";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetInvalidPieceSizeFallsBackToDefault) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_invalid_ps_" + std::to_string(getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    piece_size: 999\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -t 1" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Should succeed with auto-calculated piece size. Output: " << output;
+    EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_NE(meta.piece_length, 999 * 1024) << "Invalid preset piece_size should not be applied";
+    EXPECT_GT(meta.piece_length, 0) << "Auto-calculated piece size should be positive";
+
+    fs::remove_all(temp_dir);
 }
