@@ -25,7 +25,7 @@ enum class LogLevel {
  * @param message  Human-readable description of the event.
  * @param level    Severity level (defaults to INFO).
  *
- * @note Not thread-safe. Callers in multi-threaded contexts must synchronize externally.
+ * @note Thread-safe. Uses an internal mutex for concurrent access.
  */
 void log_message(const std::string& message, LogLevel level = LogLevel::INFO);
 

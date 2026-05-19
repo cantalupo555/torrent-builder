@@ -16,8 +16,8 @@
 #include <system_error>
 
 // Constructor for TorrentCreator
-TorrentCreator::TorrentCreator(const TorrentConfig& config)
-    : config_(config), ses(lt::session_params{}) {
+TorrentCreator::TorrentCreator(TorrentConfig config)
+    : config_(std::move(config)), ses(lt::session_params{}) {
 }
 
 

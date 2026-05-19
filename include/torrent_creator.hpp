@@ -100,7 +100,7 @@ public:
      * @brief Construct a torrent creator with the given configuration.
      * @param config Fully populated TorrentConfig.
      */
-    explicit TorrentCreator(const TorrentConfig& config);
+    explicit TorrentCreator(TorrentConfig config);
 
     /**
      * @brief Create and save a .torrent file according to the configuration.
