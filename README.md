@@ -23,6 +23,8 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 - Auto-naming: output filename generated from tracker domain and content name
 - Collision-safe naming: automatically resolves filename conflicts with `(1)`, `(2)`, etc.
 - Filename truncation with UTF-8 boundary safety (255-byte filesystem limit)
+- YAML-based preset system for per-tracker configuration
+- Batch mode: create multiple torrents in parallel from a YAML config
 - Configurable output directory (auto-created if needed) and tracker index for filename prefix
 
 ## Prerequisites
@@ -98,6 +100,14 @@ Edit metadata of an existing .torrent file in-place without re-hashing file cont
 
 > **Note:** `--output` is optional. When omitted, the output filename is auto-generated from the tracker domain and content name (e.g., `tracker.example.com_myfile.torrent`).
 
+### Batch Mode
+
+```bash
+./torrent_builder batch batch.yaml [--workers N]
+```
+
+Process multiple torrent creation jobs from a YAML config file in parallel. See the [Batch Mode](#batch-mode-1) section below for details.
+
 ## Options
 
 ```
@@ -126,6 +136,8 @@ Edit metadata of an existing .torrent file in-place without re-hashing file cont
        --skip-prefix          Omit tracker domain from auto-generated output filename
       --output-dir DIR       Directory for auto-generated output filename (created if needed)
       --tracker-index N      Index of tracker to use for filename prefix (0-based, default: 0)
+      --preset NAME          Apply named preset from presets.yaml
+      --preset-file FILE     Load presets from specified file (default: searches ./presets.yaml, $XDG_CONFIG_HOME/torrent-builder/presets.yaml, ~/.config/torrent-builder/presets.yaml)
 ```
 
 > **Note:** `--verbose`, `--quiet`, and `--json` are ignored in interactive mode. In CLI mode, `--verbose` and `--quiet` are mutually exclusive, as are `--verbose` and `--json`. The `--json` flag implies `--quiet` and auto-declines any overwrite prompts.
@@ -350,6 +362,79 @@ Modify torrent metadata:
 ./torrent_builder modify file.torrent --output modified.torrent --entropy
 # Write to a new file instead of modifying in-place
 ```
+
+### Preset System
+
+Presets save per-tracker settings in a YAML file. Use `--preset <name>` to apply a preset when creating a torrent.
+
+**Preset file format** (`presets.yaml`):
+```yaml
+version: 1
+default:
+  private: true
+  exclude_patterns: ["*.nfo", "*.txt"]
+
+presets:
+  ptp:
+    source: "PTP"
+    trackers:
+      - "https://ptp.example/announce"
+    exclude_patterns: ["*.nfo", "*.txt", "*.sfv"]
+
+  public:
+    private: false
+    trackers:
+      - "udp://tracker.example/announce"
+```
+
+**Preset file resolution**: `--preset-file` (if given, used directly). Otherwise, search order: `./presets.yaml` → `$XDG_CONFIG_HOME/torrent-builder/presets.yaml` → `~/.config/torrent-builder/presets.yaml`.
+
+**Merge hierarchy**: CLI flags > preset values > `default:` section > built-in defaults.
+
+**Usage:**
+```bash
+# Apply a preset
+./torrent_builder --preset ptp --path /data/file -o file.torrent
+
+# Specify a custom preset file
+./torrent_builder --preset ptp --preset-file /config/presets.yaml --path /data/file -o file.torrent
+
+# Preset values are overridden by CLI flags
+./torrent_builder --preset ptp --path /data/file -o file.torrent --comment "override"
+```
+
+### Batch Mode
+
+Create multiple torrents in parallel from a YAML config file.
+
+**Batch file format** (`batch.yaml`):
+```yaml
+version: 1
+workers: 2
+preset_file: presets.yaml
+output_dir: /torrents/output
+
+jobs:
+  - path: /data/movie1.mkv
+    preset: ptp
+  - path: /data/movie2.mkv
+    output: custom_output.torrent
+    trackers:
+      - "https://tracker.example/announce"
+```
+
+> **Note:** Output paths automatically receive a `.torrent` extension if not already present. `workers: 0` in the YAML config throws an error; `--workers 0` on the CLI is ignored with a warning.
+
+**Usage:**
+```bash
+# Run a batch job
+./torrent_builder batch batch.yaml
+
+# Override worker count
+./torrent_builder batch batch.yaml --workers 4
+```
+
+Each job can optionally reference a preset by name. Jobs run in parallel with `--workers` threads (default: 1). A summary showing success/failure per job is printed at the end.
 
 ## Troubleshooting
 
