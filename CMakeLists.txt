@@ -55,6 +55,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cxxopts)
 
+# yaml-cpp (YAML parsing for presets and batch config)
+find_package(yaml-cpp QUIET)
+if(NOT yaml-cpp_FOUND)
+    FetchContent_Declare(
+        yaml-cpp
+        URL https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-0.9.0.tar.gz
+    )
+    set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(yaml-cpp)
+endif()
+
 # GoogleTest (testing framework)
 FetchContent_Declare(
     googletest
@@ -89,6 +100,23 @@ target_link_libraries(torrent_builder_core PUBLIC
 target_compile_options(torrent_builder_core PRIVATE ${LIBTORRENT_CFLAGS})
 target_link_options(torrent_builder_core PRIVATE ${LIBTORRENT_LDFLAGS})
 
+# ─── Config library (preset + batch, separate from core) ──────
+add_library(torrent_builder_config STATIC
+    src/preset.cpp
+    src/batch.cpp
+)
+
+target_include_directories(torrent_builder_config PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${LIBTORRENT_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
+)
+
+target_link_libraries(torrent_builder_config PUBLIC
+    torrent_builder_core
+    yaml-cpp::yaml-cpp
+)
+
 # ─── CLI executable ──────────────────────────────────────────
 add_executable(torrent_builder
     src/torrent_builder.cpp
@@ -100,6 +128,7 @@ target_include_directories(torrent_builder PRIVATE
 
 target_link_libraries(torrent_builder PRIVATE
     torrent_builder_core
+    torrent_builder_config
     cxxopts::cxxopts
 )
 
@@ -121,6 +150,7 @@ if(TEST_SOURCES)
     target_link_libraries(torrent_builder_tests PRIVATE
         GTest::gtest_main
         torrent_builder_core
+        torrent_builder_config
     )
 
     include(GoogleTest)
