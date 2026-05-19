@@ -1,3 +1,4 @@
+#include "portable.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdio>
@@ -2526,7 +2527,7 @@ TEST(BatchCLI, MissingFileReturnsError) {
 }
 
 TEST(BatchCLI, InvalidYamlReturnsError) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_test_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_test_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
     {
         std::ofstream f(temp_dir / "batch.yaml");
@@ -2542,7 +2543,7 @@ TEST(BatchCLI, InvalidYamlReturnsError) {
 }
 
 TEST(BatchCLI, ValidBatchCreatesTorrents) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_valid_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_valid_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -2556,8 +2557,8 @@ TEST(BatchCLI, ValidBatchCreatesTorrents) {
         std::ofstream f(temp_dir / "batch.yaml");
         f << "version: 1\n"
            << "jobs:\n"
-           << "  - path: \"" << test_file.string() << "\"\n"
-           << "    output: \"" << (temp_dir / "out.torrent").string() << "\"\n";
+           << "  - path: \"" << test_file.generic_string() << "\"\n"
+           << "    output: \"" << (temp_dir / "out.torrent").generic_string() << "\"\n";
     }
 
     int exit_code = -1;
@@ -2571,7 +2572,7 @@ TEST(BatchCLI, ValidBatchCreatesTorrents) {
 }
 
 TEST(PresetCLI, UnknownPresetReturnsError) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_test_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_test_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -2594,7 +2595,7 @@ TEST(PresetCLI, UnknownPresetReturnsError) {
 }
 
 TEST(PresetCLI, ValidPresetAppliedToTorrent) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_valid_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_valid_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -2634,7 +2635,7 @@ TEST(PresetCLI, ValidPresetAppliedToTorrent) {
 }
 
 TEST(PresetCLI, PresetTrackersAppliedWhenNoCLIFlags) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_trackers_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_trackers_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -2666,7 +2667,7 @@ TEST(PresetCLI, PresetTrackersAppliedWhenNoCLIFlags) {
 }
 
 TEST(PresetCLI, CLITrackerOverridesPresetTrackers) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_tracker_override_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_tracker_override_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -2703,7 +2704,7 @@ TEST(PresetCLI, CLITrackerOverridesPresetTrackers) {
 }
 
 TEST(BatchCLI, WorkersOverride) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_workers_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_workers_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -2717,8 +2718,8 @@ TEST(BatchCLI, WorkersOverride) {
         std::ofstream f(temp_dir / "batch.yaml");
         f << "version: 1\n"
            << "jobs:\n"
-           << "  - path: \"" << test_file.string() << "\"\n"
-           << "    output: \"" << (temp_dir / "out.torrent").string() << "\"\n";
+           << "  - path: \"" << test_file.generic_string() << "\"\n"
+           << "    output: \"" << (temp_dir / "out.torrent").generic_string() << "\"\n";
     }
 
     int exit_code = -1;
@@ -2732,7 +2733,7 @@ TEST(BatchCLI, WorkersOverride) {
 }
 
 TEST(BatchCLI, WorkersZeroShowsWarning) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_w0_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_w0_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -2746,8 +2747,8 @@ TEST(BatchCLI, WorkersZeroShowsWarning) {
         std::ofstream f(temp_dir / "batch.yaml");
         f << "version: 1\n"
            << "jobs:\n"
-           << "  - path: \"" << test_file.string() << "\"\n"
-           << "    output: \"" << (temp_dir / "out.torrent").string() << "\"\n";
+           << "  - path: \"" << test_file.generic_string() << "\"\n"
+           << "    output: \"" << (temp_dir / "out.torrent").generic_string() << "\"\n";
     }
 
     int exit_code = -1;
@@ -2809,7 +2810,7 @@ TEST(CLI, CheckCommandDefaultPath) {
 }
 
 TEST(PresetCLI, PresetCreatorAppliedToTorrent) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_creator_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_creator_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -2844,7 +2845,7 @@ TEST(PresetCLI, PresetCreatorAppliedToTorrent) {
 }
 
 TEST(PresetCLI, PresetNameAppliedToTorrent) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_name_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_name_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -2879,7 +2880,7 @@ TEST(PresetCLI, PresetNameAppliedToTorrent) {
 }
 
 TEST(PresetCLI, PresetEntropyAppliedToTorrent) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_entropy_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_entropy_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -2914,7 +2915,7 @@ TEST(PresetCLI, PresetEntropyAppliedToTorrent) {
 }
 
 TEST(BatchCLI, FailedJobReturnsExitCode1) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_fail_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_batch_fail_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     {
@@ -2934,7 +2935,7 @@ TEST(BatchCLI, FailedJobReturnsExitCode1) {
 }
 
 TEST(PresetCLI, UnknownPresetNameWithValidFileReturnsError) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_unknown_name_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_unknown_name_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -2965,7 +2966,7 @@ TEST(PresetCLI, UnknownPresetNameWithValidFileReturnsError) {
 }
 
 TEST(PresetCLI, PresetPieceSizeAppliedToTorrent) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_piecesize_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_piecesize_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -3000,7 +3001,7 @@ TEST(PresetCLI, PresetPieceSizeAppliedToTorrent) {
 }
 
 TEST(PresetCLI, PresetCreationDateAppliedToTorrent) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_creationdate_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_creationdate_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -3035,7 +3036,7 @@ TEST(PresetCLI, PresetCreationDateAppliedToTorrent) {
 }
 
 TEST(PresetCLI, PresetTorrentVersionAppliedToTorrent) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_version_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_version_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";
@@ -3071,7 +3072,7 @@ TEST(PresetCLI, PresetTorrentVersionAppliedToTorrent) {
 }
 
 TEST(PresetCLI, PresetExcludePatternsAppliedToTorrent) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_exclude_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_exclude_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path content_dir = temp_dir / "content";
@@ -3108,7 +3109,7 @@ TEST(PresetCLI, PresetExcludePatternsAppliedToTorrent) {
 }
 
 TEST(PresetCLI, PresetIncludePatternsAppliedToTorrent) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_include_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_include_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path content_dir = temp_dir / "content";
@@ -3144,7 +3145,7 @@ TEST(PresetCLI, PresetIncludePatternsAppliedToTorrent) {
 }
 
 TEST(PresetCLI, PresetInvalidPieceSizeFallsBackToDefault) {
-    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_invalid_ps_" + std::to_string(getpid()));
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_invalid_ps_" + std::to_string(portable_getpid()));
     fs::create_directories(temp_dir);
 
     fs::path test_file = temp_dir / "content.bin";

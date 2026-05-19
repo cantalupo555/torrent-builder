@@ -1,3 +1,4 @@
+#include "portable.hpp"
 #include <gtest/gtest.h>
 #include "batch.hpp"
 #include "preset.hpp"
@@ -12,7 +13,7 @@ protected:
     fs::path temp_dir;
 
     void SetUp() override {
-        temp_dir = fs::temp_directory_path() / ("batch_test_" + std::to_string(::getpid()));
+        temp_dir = fs::temp_directory_path() / ("batch_test_" + std::to_string(portable_getpid()));
         fs::create_directories(temp_dir);
     }
 
@@ -250,8 +251,8 @@ TEST_F(BatchTest, RunSingleJobSuccess) {
     write_file("batch.yaml", R"(
 version: 1
 jobs:
-  - path: ")" + test_file.string() + R"("
-    output: ")" + (temp_dir / "output.torrent").string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "output.torrent").generic_string() + R"("
 )");
 
     auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
@@ -301,8 +302,8 @@ TEST_F(BatchTest, RunWithExcludePatternsEndToEnd) {
     write_file("batch.yaml", R"(
 version: 1
 jobs:
-  - path: ")" + content_dir.string() + R"("
-    output: ")" + (temp_dir / "filtered.torrent").string() + R"("
+  - path: ")" + content_dir.generic_string() + R"("
+    output: ")" + (temp_dir / "filtered.torrent").generic_string() + R"("
     torrent_version: 1
     exclude_patterns: ["*.nfo", "*.txt"]
 )");
@@ -353,12 +354,12 @@ TEST_F(BatchTest, RunMultipleJobsMixedResults) {
 version: 1
 workers: 2
 jobs:
-  - path: ")" + test_file.string() + R"("
-    output: ")" + (temp_dir / "good.torrent").string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "good.torrent").generic_string() + R"("
   - path: "/tmp/nonexistent_file_xyz"
     output: "/tmp/bad.torrent"
-  - path: ")" + test_file.string() + R"("
-    output: ")" + (temp_dir / "good2.torrent").string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "good2.torrent").generic_string() + R"("
 )");
 
     auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
@@ -384,9 +385,9 @@ TEST_F(BatchTest, RunAutoOutputPath) {
 
     write_file("batch.yaml", R"(
 version: 1
-output_dir: ")" + temp_dir.string() + R"("
+output_dir: ")" + temp_dir.generic_string() + R"("
 jobs:
-  - path: ")" + test_file.string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
 )");
 
     auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
@@ -418,10 +419,10 @@ presets:
 
     write_file("batch.yaml", R"(
 version: 1
-preset_file: ")" + (temp_dir / "presets.yaml").string() + R"("
+preset_file: ")" + (temp_dir / "presets.yaml").generic_string() + R"("
 jobs:
-  - path: ")" + test_file.string() + R"("
-    output: ")" + (temp_dir / "preset_out.torrent").string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "preset_out.torrent").generic_string() + R"("
     preset: custom
 )");
 
@@ -451,10 +452,10 @@ presets:
 
     write_file("batch.yaml", R"(
 version: 1
-preset_file: ")" + (temp_dir / "presets.yaml").string() + R"("
+preset_file: ")" + (temp_dir / "presets.yaml").generic_string() + R"("
 jobs:
-  - path: ")" + test_file.string() + R"("
-    output: ")" + (temp_dir / "out.torrent").string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "out.torrent").generic_string() + R"("
     preset: nonexistent_preset
 )");
 
@@ -478,8 +479,8 @@ TEST_F(BatchTest, RunWithoutPresetFileContinues) {
     write_file("batch.yaml", R"(
 version: 1
 jobs:
-  - path: ")" + test_file.string() + R"("
-    output: ")" + (temp_dir / "out.torrent").string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "out.torrent").generic_string() + R"("
 )");
 
     auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
@@ -508,10 +509,10 @@ presets:
 
     write_file("batch.yaml", R"(
 version: 1
-preset_file: ")" + (temp_dir / "presets.yaml").string() + R"("
+preset_file: ")" + (temp_dir / "presets.yaml").generic_string() + R"("
 jobs:
-  - path: ")" + test_file.string() + R"("
-    output: ")" + (temp_dir / "out.torrent").string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "out.torrent").generic_string() + R"("
     preset: bad_piecesize
 )");
 
@@ -552,9 +553,9 @@ TEST_F(BatchTest, RunWithOutputDirAutoCreate) {
 
     write_file("batch.yaml", R"(
 version: 1
-output_dir: ")" + nested_output.string() + R"("
+output_dir: ")" + nested_output.generic_string() + R"("
 jobs:
-  - path: ")" + test_file.string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
 )");
 
     auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
@@ -577,8 +578,8 @@ TEST_F(BatchTest, RunWithHybridVersion) {
     write_file("batch.yaml", R"(
 version: 1
 jobs:
-  - path: ")" + test_file.string() + R"("
-    output: ")" + (temp_dir / "hybrid.torrent").string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "hybrid.torrent").generic_string() + R"("
     torrent_version: 3
 )");
 
@@ -601,8 +602,8 @@ TEST_F(BatchTest, RunWithV1Version) {
     write_file("batch.yaml", R"(
 version: 1
 jobs:
-  - path: ")" + test_file.string() + R"("
-    output: ")" + (temp_dir / "v1.torrent").string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "v1.torrent").generic_string() + R"("
     torrent_version: 1
 )");
 
@@ -625,8 +626,8 @@ TEST_F(BatchTest, RunWithPieceSize) {
     write_file("batch.yaml", R"(
 version: 1
 jobs:
-  - path: ")" + test_file.string() + R"("
-    output: ")" + (temp_dir / "piecesize.torrent").string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "piecesize.torrent").generic_string() + R"("
     piece_size: 16
 )");
 
@@ -649,8 +650,8 @@ TEST_F(BatchTest, RunWithInvalidPieceSizeFails) {
     write_file("batch.yaml", R"(
 version: 1
 jobs:
-  - path: ")" + test_file.string() + R"("
-    output: ")" + (temp_dir / "out.torrent").string() + R"("
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "out.torrent").generic_string() + R"("
     piece_size: 999
 )");
 

@@ -1,3 +1,4 @@
+#include "portable.hpp"
 #include <gtest/gtest.h>
 #include "preset.hpp"
 #include <filesystem>
@@ -6,12 +7,30 @@
 
 namespace fs = std::filesystem;
 
+namespace {
+void portable_setenv(const std::string& key, const std::string& value) {
+#ifdef _WIN32
+    _putenv_s(key.c_str(), value.c_str());
+#else
+    setenv(key.c_str(), value.c_str(), 1);
+#endif
+}
+
+void portable_unsetenv(const std::string& key) {
+#ifdef _WIN32
+    _putenv_s(key.c_str(), "");
+#else
+    unsetenv(key.c_str());
+#endif
+}
+}
+
 class PresetTest : public ::testing::Test {
 protected:
     fs::path temp_dir;
 
     void SetUp() override {
-        temp_dir = fs::temp_directory_path() / ("preset_test_" + std::to_string(::getpid()));
+        temp_dir = fs::temp_directory_path() / ("preset_test_" + std::to_string(portable_getpid()));
         fs::create_directories(temp_dir);
     }
 
@@ -228,20 +247,19 @@ TEST_F(PresetTest, FindPresetFileNoFileThrows) {
     auto old_cwd = fs::current_path();
     auto old_xdg = std::getenv("XDG_CONFIG_HOME");
 
-    fs::path isolated_cwd = temp_dir / ("no_preset_cwd_" + std::to_string(::getpid()));
+    fs::path isolated_cwd = temp_dir / ("no_preset_cwd_" + std::to_string(portable_getpid()));
     fs::create_directories(isolated_cwd);
     fs::current_path(isolated_cwd);
-    setenv("XDG_CONFIG_HOME", (temp_dir / "nonexistent_xdg").string().c_str(), 1);
+    portable_setenv("XDG_CONFIG_HOME", (temp_dir / "nonexistent_xdg").string());
 
     EXPECT_THROW(
         PresetLoader::find_preset_file(std::nullopt),
         std::runtime_error);
 
     fs::current_path(old_cwd);
+    portable_unsetenv("XDG_CONFIG_HOME");
     if (old_xdg && old_xdg[0] != '\0') {
-        setenv("XDG_CONFIG_HOME", old_xdg, 1);
-    } else {
-        unsetenv("XDG_CONFIG_HOME");
+        portable_setenv("XDG_CONFIG_HOME", old_xdg);
     }
 }
 
@@ -324,10 +342,10 @@ TEST_F(PresetTest, FindPresetFileXDGConfigHome) {
     auto old_cwd = fs::current_path();
     auto old_xdg = std::getenv("XDG_CONFIG_HOME");
 
-    fs::path isolated_cwd = temp_dir / ("isolated_cwd_" + std::to_string(::getpid()));
+    fs::path isolated_cwd = temp_dir / ("isolated_cwd_" + std::to_string(portable_getpid()));
     fs::create_directories(isolated_cwd);
     fs::current_path(isolated_cwd);
-    setenv("XDG_CONFIG_HOME", (temp_dir / "xdg_config").string().c_str(), 1);
+    portable_setenv("XDG_CONFIG_HOME", (temp_dir / "xdg_config").string());
 
     try {
         auto path = PresetLoader::find_preset_file(std::nullopt);
@@ -337,10 +355,9 @@ TEST_F(PresetTest, FindPresetFileXDGConfigHome) {
     }
 
     fs::current_path(old_cwd);
+    portable_unsetenv("XDG_CONFIG_HOME");
     if (old_xdg && old_xdg[0] != '\0') {
-        setenv("XDG_CONFIG_HOME", old_xdg, 1);
-    } else {
-        unsetenv("XDG_CONFIG_HOME");
+        portable_setenv("XDG_CONFIG_HOME", old_xdg);
     }
 }
 
@@ -348,28 +365,28 @@ TEST_F(PresetTest, FindPresetFileCwdFound) {
     auto old_cwd = fs::current_path();
     auto old_xdg = std::getenv("XDG_CONFIG_HOME");
 
-    fs::path cwd_dir = temp_dir / ("cwd_preset_" + std::to_string(::getpid()));
+    fs::path cwd_dir = temp_dir / ("cwd_preset_" + std::to_string(portable_getpid()));
     fs::create_directories(cwd_dir);
     {
         std::ofstream f(cwd_dir / "presets.yaml");
         f << "version: 1\npresets: {}\n";
     }
 
-    setenv("XDG_CONFIG_HOME", (temp_dir / "nonexistent_xdg").string().c_str(), 1);
+    portable_setenv("XDG_CONFIG_HOME", (temp_dir / "nonexistent_xdg").string());
     fs::current_path(cwd_dir);
 
     try {
         auto path = PresetLoader::find_preset_file(std::nullopt);
-        EXPECT_EQ(path, cwd_dir / "presets.yaml");
+        auto expected = fs::current_path() / "presets.yaml";
+        EXPECT_EQ(path, expected);
     } catch (...) {
         FAIL() << "Should have found preset in CWD";
     }
 
     fs::current_path(old_cwd);
+    portable_unsetenv("XDG_CONFIG_HOME");
     if (old_xdg && old_xdg[0] != '\0') {
-        setenv("XDG_CONFIG_HOME", old_xdg, 1);
-    } else {
-        unsetenv("XDG_CONFIG_HOME");
+        portable_setenv("XDG_CONFIG_HOME", old_xdg);
     }
 }
 

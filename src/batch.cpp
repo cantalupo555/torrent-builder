@@ -243,6 +243,7 @@ BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& prese
         }
 
         TorrentConfig tc = build_torrent_config(resolved, output_dir);
+        tc.silent = true;
         TorrentCreator creator(std::move(tc));
         creator.create_torrent();
 
@@ -297,7 +298,7 @@ std::vector<BatchResult> BatchProcessor::run()
     }
     log_message("Starting batch execution: " + std::to_string(config_.jobs.size())
         + " jobs, " + std::to_string(actual_workers) + " workers", LogLevel::INFO);
-    std::vector<std::jthread> threads;
+    std::vector<std::thread> threads;
     threads.reserve(actual_workers);
 
     for (int i = 0; i < actual_workers; ++i) {

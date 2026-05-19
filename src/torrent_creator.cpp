@@ -320,6 +320,7 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
 
 // Displays a progress bar
 void TorrentCreator::print_progress_bar(int progress, int total, double speed, double eta, int64_t processed, int64_t total_size) const {
+    if (config_.silent) return;
     print_progress(progress, total, speed, eta, processed, total_size);
 }
 

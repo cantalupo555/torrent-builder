@@ -38,7 +38,7 @@ struct BatchResult {
 
 /** @brief Parses batch YAML files and executes jobs in parallel.
  *
- * Uses a worker-pool pattern with std::jthread. Each worker pulls the next
+ * Uses a worker-pool pattern with std::thread. Each worker pulls the next
  * available job index via an atomic counter, executes it, and stores the result.
  *
  * Thread oversubscription note: each worker internally spawns hashing threads

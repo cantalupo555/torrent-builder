@@ -6,7 +6,7 @@
  * The file is opened and closed on each call to ensure entries are flushed
  * even if the process terminates unexpectedly (e.g., std::exit).
  *
- * Thread safety: Thread-safe. Uses an internal mutex and localtime_r.
+ * Thread safety: Thread-safe. Uses an internal mutex and platform-safe localtime.
  */
 
 #include "logger.hpp"
@@ -15,6 +15,16 @@
 #include <iomanip>
 #include <ctime>
 #include <mutex>
+
+namespace {
+void portable_localtime(const time_t* timer, tm* result) {
+#ifdef _WIN32
+    localtime_s(result, timer);
+#else
+    localtime_r(timer, result);
+#endif
+}
+}
 
 void log_message(const std::string& message, LogLevel level) {
     static std::mutex log_mutex;
@@ -33,7 +43,7 @@ void log_message(const std::string& message, LogLevel level) {
     std::ofstream logfile("torrent_builder.log", std::ios_base::app);
 
     struct tm tm_buf;
-    localtime_r(&now_time_t, &tm_buf);
+    portable_localtime(&now_time_t, &tm_buf);
 
     logfile << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S")
             << " [" << level_str << "] - " << message << "\n";
