@@ -6,6 +6,7 @@
 #include "version.hpp"
 #include "preset.hpp"
 #include "batch.hpp"
+#include "tracker_rules.hpp"
 #include <iostream>
 #include <vector>
 #include <optional>
@@ -708,6 +709,70 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
             is_private = *preset_values.is_private;
         }
 
+        TrackerRulesDatabase rules_db;
+        std::optional<fs::path> rules_file;
+        if (result.count("rules-file")) {
+            rules_file = result["rules-file"].as<std::string>();
+        }
+
+        bool rules_loaded = false;
+        try {
+            auto rules_path = TrackerRulesDatabase::find_rules_file(rules_file);
+            rules_db.load(rules_path);
+            rules_loaded = true;
+        } catch (const std::runtime_error& e) {
+            if (rules_file) {
+                throw;
+            }
+        }
+
+        if (rules_loaded && !trackers.empty()) {
+            auto matched_rule = rules_db.find_matching_rule(trackers);
+            if (matched_rule) {
+                if (matched_rule->source && !source) {
+                    source = *matched_rule->source;
+                    log_message("Tracker rule '" + matched_rule->name + "': auto-set source to '" + *source + "'", LogLevel::INFO);
+                }
+
+                if (matched_rule->max_piece_length || matched_rule->max_torrent_size || !matched_rule->piece_length_overrides.empty()) {
+                    int64_t total_size = 0;
+                    try {
+                        if (fs::is_directory(input_path)) {
+                            for (const auto& entry : fs::recursive_directory_iterator(input_path)) {
+                                if (entry.is_regular_file()) total_size += entry.file_size();
+                            }
+                        } else {
+                            total_size = fs::file_size(input_path);
+                        }
+                    } catch (const fs::filesystem_error& e) {
+                        log_message("Could not compute content size for rules enforcement: " + std::string(e.what()), LogLevel::WARNING);
+                    }
+
+                    std::optional<int> current_kb;
+                    if (piece_size) current_kb = *piece_size / 1024;
+
+                    auto enforcement = rules_db.enforce(*matched_rule, total_size, current_kb);
+
+                    if (enforcement.adjusted && enforcement.adjusted_piece_length) {
+                        if (!result.count("piece-size")) {
+                            piece_size = *enforcement.adjusted_piece_length * 1024;
+                            print_verbose("Tracker rule '" + matched_rule->name + "': piece size adjusted to "
+                                + std::to_string(*enforcement.adjusted_piece_length) + " KB\n");
+                        } else {
+                            log_message("Tracker rule '" + matched_rule->name + "': user-specified piece size ("
+                                + std::to_string(*current_kb) + " KB) exceeds max_piece_length ("
+                                + std::to_string(*matched_rule->max_piece_length / 1024) + " KB)", LogLevel::WARNING);
+                        }
+                    }
+
+                    if (enforcement.constraint_violation) {
+                        print_info("WARNING: " + enforcement.violation_message + "\n");
+                        log_message(enforcement.violation_message, LogLevel::WARNING);
+                    }
+                }
+            }
+        }
+
         return TorrentConfig(input_path, output_path, trackers, tv,
                              comment, is_private, web_seeds, piece_size,
                              creator_str, torrent_name, include_creation_date,
@@ -1212,7 +1277,8 @@ int main(int argc, char *argv[])
             "I,include", "Include only files matching glob pattern (supports *, **, ?)",
              cxxopts::value<std::vector<std::string>>(), "PATTERN")(
             "preset", "Apply named preset from presets.yaml", cxxopts::value<std::string>(), "NAME")(
-            "preset-file", "Load presets from specified file", cxxopts::value<std::string>(), "FILE");
+            "preset-file", "Load presets from specified file", cxxopts::value<std::string>(), "FILE")(
+            "rules-file", "Load tracker rules from specified file", cxxopts::value<std::string>(), "FILE");
 
         options.positional_help("PATH [OUTPUT]");
         options.parse_positional({"path", "output"});

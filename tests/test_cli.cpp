@@ -3180,3 +3180,215 @@ TEST(PresetCLI, PresetInvalidPieceSizeFallsBackToDefault) {
 
     fs::remove_all(temp_dir);
 }
+
+TEST(RulesCLI, RulesFileAutoSetSource) {
+    auto temp_dir = fs::temp_directory_path() / ("rules_cli_source_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "rules.yaml");
+        f << "version: 1\n"
+          << "trackers:\n"
+          << "  ptp:\n"
+          << "    domain: \"passthepopcorn.me\"\n"
+          << "    source: \"PTP\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --rules-file " + (temp_dir / "rules.yaml").string() +
+        " -p " + test_file.string() +
+        " --tracker https://passthepopcorn.me/announce" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Should succeed with rules applied. Output: " << output;
+    EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_TRUE(meta.source.has_value()) << "Source should be auto-set from tracker rule";
+    if (meta.source) {
+        EXPECT_EQ(*meta.source, "PTP");
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(RulesCLI, RulesFilePieceSizeAdjustment) {
+    auto temp_dir = fs::temp_directory_path() / ("rules_cli_piece_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "rules.yaml");
+        f << "version: 1\n"
+          << "trackers:\n"
+          << "  ptp:\n"
+          << "    domain: \"passthepopcorn.me\"\n"
+          << "    source: \"PTP\"\n"
+          << "    piece_length_overrides:\n"
+          << "      - size_below: 1073741824\n"
+          << "        piece_length: 32\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --rules-file " + (temp_dir / "rules.yaml").string() +
+        " -p " + test_file.string() +
+        " --tracker https://passthepopcorn.me/announce" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Should succeed with adjusted piece size. Output: " << output;
+    EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.piece_length, 32 * 1024) << "Piece length should be adjusted to 32 KB by rule override";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(RulesCLI, RulesFileNotFoundFails) {
+    auto temp_dir = fs::temp_directory_path() / ("rules_cli_notfound_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --rules-file " + (temp_dir / "nonexistent.yaml").string() +
+        " -p " + test_file.string() +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_NE(exit_code, 0) << "Should fail when explicit rules file not found";
+    EXPECT_NE(output.find("not found"), std::string::npos) << "Error should mention file not found";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(RulesCLI, NoRulesFileSucceedsSilently) {
+    auto temp_dir = fs::temp_directory_path() / ("rules_cli_norules_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " -p " + test_file.string() +
+        " --tracker https://example.com/announce" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Should succeed without rules file (no rules is fine)";
+    EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(RulesCLI, UserPieceSizeOverridesRule) {
+    auto temp_dir = fs::temp_directory_path() / ("rules_cli_useroverride_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "rules.yaml");
+        f << "version: 1\n"
+          << "trackers:\n"
+          << "  ptp:\n"
+          << "    domain: \"passthepopcorn.me\"\n"
+          << "    source: \"PTP\"\n"
+          << "    max_piece_length: 524288\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --rules-file " + (temp_dir / "rules.yaml").string() +
+        " -p " + test_file.string() +
+        " --tracker https://passthepopcorn.me/announce" +
+        " -s 1024" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Should succeed even if user piece size violates rule";
+    EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(RulesCLI, PresetAndRulesPrecedence) {
+    auto temp_dir = fs::temp_directory_path() / ("rules_cli_precedence_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'Y');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  ptp_preset:\n"
+          << "    source: \"PRESET_SRC\"\n"
+          << "    piece_size: 2048\n";
+    }
+
+    {
+        std::ofstream f(temp_dir / "rules.yaml");
+        f << "version: 1\n"
+          << "trackers:\n"
+          << "  ptp:\n"
+          << "    domain: \"passthepopcorn.me\"\n"
+          << "    source: \"RULE_SRC\"\n"
+          << "    max_piece_length: 4194304\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --preset-file " + (temp_dir / "presets.yaml").string() +
+        " --rules-file " + (temp_dir / "rules.yaml").string() +
+        " --preset ptp_preset" +
+        " -p " + test_file.string() +
+        " --tracker https://passthepopcorn.me/announce" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.source.has_value());
+    EXPECT_EQ(*meta.source, "PRESET_SRC") << "Preset source should win over rule source";
+    EXPECT_EQ(meta.piece_length, 2048 * 1024) << "Preset piece_size (2048 KB) should be preserved when within rule limits";
+
+    fs::remove_all(temp_dir);
+}
