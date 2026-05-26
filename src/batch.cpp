@@ -183,6 +183,10 @@ BatchConfig BatchProcessor::parse(const fs::path& yaml_path)
         config.preset_file = root["preset_file"].as<std::string>();
     }
 
+    if (root["rules_file"]) {
+        config.rules_file = root["rules_file"].as<std::string>();
+    }
+
     if (root["output_dir"]) {
         config.output_dir = root["output_dir"].as<std::string>();
     }
@@ -221,7 +225,7 @@ BatchConfig BatchProcessor::parse(const fs::path& yaml_path)
     return config;
 }
 
-BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& presets)
+BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& presets, const TrackerRulesDatabase& rules)
 {
     const BatchJob& job = config_.jobs[job_index];
     BatchResult result;
@@ -245,6 +249,56 @@ BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& prese
         }
         if (!resolved.output && job.output) {
             resolved.output = *job.output;
+        }
+
+        auto trackers = resolved.trackers.value_or(std::vector<std::string>{});
+        if (!trackers.empty()) {
+            auto matched_rule = rules.find_matching_rule(trackers);
+            if (matched_rule) {
+                if (matched_rule->source && !resolved.source) {
+                    resolved.source = *matched_rule->source;
+                    log_message("Job " + std::to_string(job_index + 1) + ": rule '"
+                        + matched_rule->name + "' auto-set source to '" + *resolved.source + "'", LogLevel::INFO);
+                }
+
+                if (matched_rule->max_piece_length || matched_rule->max_torrent_size || !matched_rule->piece_length_overrides.empty()) {
+                    int64_t total_size = 0;
+                    try {
+                        fs::path content_path(*resolved.path);
+                        if (fs::is_directory(content_path)) {
+                            for (const auto& entry : fs::recursive_directory_iterator(content_path)) {
+                                if (entry.is_regular_file()) total_size += entry.file_size();
+                            }
+                        } else {
+                            total_size = fs::file_size(content_path);
+                        }
+                    } catch (const fs::filesystem_error& e) {
+                        log_message("Job " + std::to_string(job_index + 1) + ": could not compute content size: " + std::string(e.what()), LogLevel::WARNING);
+                    }
+
+                    std::optional<int> current_kb;
+                    if (resolved.piece_size && *resolved.piece_size > 0) {
+                        current_kb = *resolved.piece_size;
+                    }
+
+                    auto enforcement = rules.enforce(*matched_rule, total_size, current_kb);
+
+                    if (enforcement.adjusted && enforcement.adjusted_piece_length) {
+                        if (job.values.piece_size) {
+                            log_message("Job " + std::to_string(job_index + 1) + ": rule '"
+                                + matched_rule->name + "': user-specified piece size ("
+                                + std::to_string(*current_kb) + " KB) exceeds max_piece_length ("
+                                + std::to_string(*matched_rule->max_piece_length / 1024) + " KB)", LogLevel::WARNING);
+                        } else {
+                            resolved.piece_size = *enforcement.adjusted_piece_length;
+                        }
+                    }
+
+                    if (enforcement.constraint_violation) {
+                        log_message("Job " + std::to_string(job_index + 1) + ": " + enforcement.violation_message, LogLevel::WARNING);
+                    }
+                }
+            }
         }
 
         fs::path output_dir;
@@ -278,6 +332,14 @@ std::vector<BatchResult> BatchProcessor::run()
         log_message("Preset file not available: " + std::string(e.what()), LogLevel::WARNING);
     }
 
+    TrackerRulesDatabase rules;
+    try {
+        auto rules_path = TrackerRulesDatabase::find_rules_file(config_.rules_file);
+        rules.load(rules_path);
+    } catch (const std::runtime_error& e) {
+        log_message("Rules file not available: " + std::string(e.what()), LogLevel::WARNING);
+    }
+
     std::vector<BatchResult> results(config_.jobs.size());
     std::atomic<int> next_job{0};
 
@@ -289,7 +351,7 @@ std::vector<BatchResult> BatchProcessor::run()
             log_message("Job " + std::to_string(idx + 1) + " started: "
                 + sanitize_for_terminal(config_.jobs[idx].path), LogLevel::INFO);
 
-            results[idx] = execute_job(idx, presets);
+            results[idx] = execute_job(idx, presets, rules);
 
             if (results[idx].success) {
                 log_message("Job " + std::to_string(idx + 1) + " completed ("

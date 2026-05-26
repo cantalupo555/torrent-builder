@@ -2,6 +2,7 @@
 #define BATCH_HPP
 
 #include "preset.hpp"
+#include "tracker_rules.hpp"
 #include "torrent_creator.hpp"
 #include <string>
 #include <vector>
@@ -23,6 +24,7 @@ struct BatchJob {
 struct BatchConfig {
     int workers = 1;                       ///< Number of parallel workers (default: 1)
     std::optional<fs::path> preset_file;   ///< Shared preset file for all jobs
+    std::optional<fs::path> rules_file;    ///< Shared tracker rules file for all jobs
     std::optional<fs::path> output_dir;    ///< Default output directory
     std::vector<BatchJob> jobs;            ///< Ordered list of jobs to execute
 };
@@ -64,7 +66,7 @@ public:
 private:
     BatchConfig config_;
 
-    BatchResult execute_job(int job_index, const PresetLoader& presets);
+    BatchResult execute_job(int job_index, const PresetLoader& presets, const TrackerRulesDatabase& rules);
 };
 
 #endif
