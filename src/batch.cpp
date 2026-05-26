@@ -284,11 +284,16 @@ BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& prese
                     auto enforcement = rules.enforce(*matched_rule, total_size, current_kb);
 
                     if (enforcement.adjusted && enforcement.adjusted_piece_length) {
-                        if (job.values.piece_size) {
+                        if (current_kb) {
+                            std::string limit_info;
+                            if (matched_rule->max_piece_length) {
+                                limit_info = "max_piece_length (" + std::to_string(*matched_rule->max_piece_length / 1024) + " KB)";
+                            } else {
+                                limit_info = "rule constraint";
+                            }
                             log_message("Job " + std::to_string(job_index + 1) + ": rule '"
                                 + matched_rule->name + "': user-specified piece size ("
-                                + std::to_string(*current_kb) + " KB) exceeds max_piece_length ("
-                                + std::to_string(*matched_rule->max_piece_length / 1024) + " KB)", LogLevel::WARNING);
+                                + std::to_string(*current_kb) + " KB) adjusted by " + limit_info, LogLevel::WARNING);
                         } else {
                             resolved.piece_size = *enforcement.adjusted_piece_length;
                         }
@@ -298,6 +303,8 @@ BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& prese
                         log_message("Job " + std::to_string(job_index + 1) + ": " + enforcement.violation_message, LogLevel::WARNING);
                     }
                 }
+            } else {
+                log_message("Job " + std::to_string(job_index + 1) + ": no matching rule found for configured trackers", LogLevel::INFO);
             }
         }
 

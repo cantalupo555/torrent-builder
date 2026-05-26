@@ -82,8 +82,15 @@ public:
     /** @brief Whether the rules file contained a "default" section. */
     bool has_default_rules() const { return default_rules_.has_value(); }
 
-    /** @brief Access the default rules section. */
-    const TrackerRule& default_rules() const { return *default_rules_; }
+    /** @brief Access the default rules section.
+     * @throws std::runtime_error if no default section exists.
+     */
+    const TrackerRule& default_rules() const {
+        if (!default_rules_) {
+            throw std::runtime_error("No default rules section loaded");
+        }
+        return *default_rules_;
+    }
 
     /** @brief Access all tracker-specific rules. */
     const std::vector<TrackerRule>& trackers() const { return trackers_; }

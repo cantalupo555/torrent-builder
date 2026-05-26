@@ -12,6 +12,12 @@ static constexpr std::uintmax_t max_yaml_size = 1 * 1024 * 1024;
 
 PieceLengthOverride parse_override(const YAML::Node& node)
 {
+    if (!node["size_below"]) {
+        throw std::runtime_error("Missing 'size_below' in piece_length_overrides entry");
+    }
+    if (!node["piece_length"]) {
+        throw std::runtime_error("Missing 'piece_length' in piece_length_overrides entry");
+    }
     PieceLengthOverride ov;
     ov.size_below = node["size_below"].as<int64_t>();
     ov.piece_length_kb = node["piece_length"].as<int>();
@@ -69,23 +75,29 @@ fs::path TrackerRulesDatabase::find_rules_file(const std::optional<fs::path>& ex
     }
 
     const char* xdg_config = std::getenv("XDG_CONFIG_HOME");
-    fs::path config_dir;
     if (xdg_config && xdg_config[0] != '\0') {
-        config_dir = fs::path(xdg_config) / "torrent-builder" / "rules.yaml";
-    } else {
-        const char* home = std::getenv("HOME");
-        if (home) {
-            config_dir = fs::path(home) / ".config" / "torrent-builder" / "rules.yaml";
+        fs::path xdg_path = fs::path(xdg_config) / "torrent-builder" / "rules.yaml";
+        if (fs::exists(xdg_path)) {
+            return xdg_path;
         }
     }
 
-    if (!config_dir.empty() && fs::exists(config_dir)) {
-        return config_dir;
+    const char* home = std::getenv("HOME");
+    if (home) {
+        fs::path home_path = fs::path(home) / ".config" / "torrent-builder" / "rules.yaml";
+        if (fs::exists(home_path)) {
+            return home_path;
+        }
     }
 
-    throw std::runtime_error("No rules file found. Searched: ./rules.yaml"
-        + (config_dir.empty() ? std::string() : ", " + config_dir.string())
-        + ". Use --rules-file to specify a path.");
+    std::string searched = "./rules.yaml";
+    if (xdg_config && xdg_config[0] != '\0') {
+        searched += ", " + (fs::path(xdg_config) / "torrent-builder" / "rules.yaml").string();
+    }
+    if (home) {
+        searched += ", " + (fs::path(home) / ".config" / "torrent-builder" / "rules.yaml").string();
+    }
+    throw std::runtime_error("No rules file found. Searched: " + searched + ". Use --rules-file to specify a path.");
 }
 
 void TrackerRulesDatabase::load(const fs::path& path)
@@ -174,16 +186,18 @@ RulesEnforcementResult TrackerRulesDatabase::enforce(
         effective_kb = (it != allowed.end()) ? *it : allowed.back();
     }
 
-    for (const auto& ov : rule.piece_length_overrides) {
-        if (total_size < ov.size_below) {
-            if (std::ranges::contains(allowed, ov.piece_length_kb)) {
-                if (effective_kb != ov.piece_length_kb) {
-                    result.adjusted = true;
-                    result.original_piece_length = current_piece_length_kb.value_or(effective_kb);
-                    effective_kb = ov.piece_length_kb;
+    if (total_size > 0) {
+        for (const auto& ov : rule.piece_length_overrides) {
+            if (total_size < ov.size_below) {
+                if (std::ranges::contains(allowed, ov.piece_length_kb)) {
+                    if (effective_kb != ov.piece_length_kb) {
+                        result.adjusted = true;
+                        result.original_piece_length = current_piece_length_kb.value_or(effective_kb);
+                        effective_kb = ov.piece_length_kb;
+                    }
                 }
+                break;
             }
-            break;
         }
     }
 
@@ -192,14 +206,23 @@ RulesEnforcementResult TrackerRulesDatabase::enforce(
         if (effective_kb > max_kb) {
             result.adjusted = true;
             result.original_piece_length = current_piece_length_kb.value_or(effective_kb);
-            effective_kb = max_kb;
 
-            auto it = std::lower_bound(allowed.begin(), allowed.end(), effective_kb);
-            if (it != allowed.end() && *it > effective_kb) {
-                if (it != allowed.begin()) --it;
-            }
-            if (it != allowed.end()) {
+            auto it = std::lower_bound(allowed.begin(), allowed.end(), max_kb);
+            if (it != allowed.end() && *it <= max_kb) {
                 effective_kb = *it;
+            } else if (it != allowed.begin()) {
+                --it;
+                effective_kb = *it;
+            } else {
+                effective_kb = allowed.front();
+            }
+
+            if (effective_kb > max_kb) {
+                result.constraint_violation = true;
+                result.violation_message = "Tracker '" + rule.name + "' requires max_piece_length <= "
+                    + format_bytes(*rule.max_piece_length) + ". Smallest allowed piece size ("
+                    + std::to_string(effective_kb) + " KB = " + format_bytes(effective_kb * 1024)
+                    + ") exceeds the cap.";
             }
         }
     }

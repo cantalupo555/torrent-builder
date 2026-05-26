@@ -724,6 +724,7 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
             if (rules_file) {
                 throw;
             }
+            log_message("No tracker rules file found, skipping rules enforcement", LogLevel::INFO);
         }
 
         if (rules_loaded && !trackers.empty()) {
@@ -754,22 +755,29 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
                     auto enforcement = rules_db.enforce(*matched_rule, total_size, current_kb);
 
                     if (enforcement.adjusted && enforcement.adjusted_piece_length) {
-                        if (!result.count("piece-size")) {
+                        if (current_kb) {
+                            std::string limit_info;
+                            if (matched_rule->max_piece_length) {
+                                limit_info = "max_piece_length (" + std::to_string(*matched_rule->max_piece_length / 1024) + " KB)";
+                            } else {
+                                limit_info = "rule constraint";
+                            }
+                            log_message("Tracker rule '" + matched_rule->name + "': user-specified piece size ("
+                                + std::to_string(*current_kb) + " KB) adjusted by " + limit_info, LogLevel::WARNING);
+                        } else {
                             piece_size = *enforcement.adjusted_piece_length * 1024;
                             print_verbose("Tracker rule '" + matched_rule->name + "': piece size adjusted to "
                                 + std::to_string(*enforcement.adjusted_piece_length) + " KB\n");
-                        } else {
-                            log_message("Tracker rule '" + matched_rule->name + "': user-specified piece size ("
-                                + std::to_string(*current_kb) + " KB) exceeds max_piece_length ("
-                                + std::to_string(*matched_rule->max_piece_length / 1024) + " KB)", LogLevel::WARNING);
                         }
                     }
 
                     if (enforcement.constraint_violation) {
                         print_info("WARNING: " + enforcement.violation_message + "\n");
                         log_message(enforcement.violation_message, LogLevel::WARNING);
-                    }
                 }
+            } else {
+                log_message("No matching tracker rule found for provided trackers", LogLevel::INFO);
+            }
             }
         }
 

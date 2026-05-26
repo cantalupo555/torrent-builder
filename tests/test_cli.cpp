@@ -3339,6 +3339,10 @@ TEST(RulesCLI, UserPieceSizeOverridesRule) {
     EXPECT_EQ(exit_code, 0) << "Should succeed even if user piece size violates rule";
     EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
 
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.piece_length, 1024 * 1024) << "User-specified piece size (1024 KB) should be preserved";
+
     fs::remove_all(temp_dir);
 }
 
@@ -3389,6 +3393,45 @@ TEST(RulesCLI, PresetAndRulesPrecedence) {
     ASSERT_TRUE(meta.source.has_value());
     EXPECT_EQ(*meta.source, "PRESET_SRC") << "Preset source should win over rule source";
     EXPECT_EQ(meta.piece_length, 2048 * 1024) << "Preset piece_size (2048 KB) should be preserved when within rule limits";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(RulesCLI, CliSourceFlagOverridesRule) {
+    auto temp_dir = fs::temp_directory_path() / ("rules_cli_source_flag_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "rules.yaml");
+        f << "version: 1\n"
+          << "trackers:\n"
+          << "  ptp:\n"
+          << "    domain: \"passthepopcorn.me\"\n"
+          << "    source: \"RULE_SRC\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --rules-file " + (temp_dir / "rules.yaml").string() +
+        " -p " + test_file.string() +
+        " --tracker https://passthepopcorn.me/announce" +
+        " --source CLI_SRC" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Should succeed. Output: " << output;
+    EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.source.has_value()) << "Source should be set";
+    EXPECT_EQ(*meta.source, "CLI_SRC") << "CLI --source should win over rule source";
 
     fs::remove_all(temp_dir);
 }

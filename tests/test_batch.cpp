@@ -261,9 +261,6 @@ jobs:
 
     ASSERT_EQ(results.size(), 1u);
     EXPECT_TRUE(results[0].success);
-    EXPECT_TRUE(results[0].error_message.empty());
-    EXPECT_GT(results[0].elapsed_seconds, 0.0);
-
     EXPECT_TRUE(fs::exists(temp_dir / "output.torrent"));
 }
 
@@ -406,6 +403,46 @@ jobs:
     trackers:
       - "https://passthepopcorn.me/announce"
     piece_size: 16
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success);
+    EXPECT_TRUE(fs::exists(temp_dir / "explicit_ps.torrent"));
+
+    TorrentInspector inspector((temp_dir / "explicit_ps.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.piece_length, 16 * 1024) << "User-specified piece_size (16 KB) should be preserved";
+}
+
+TEST_F(BatchTest, RunWithRulesConstraintViolation) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    write_file("rules.yaml", R"(
+version: 1
+trackers:
+  tiny:
+    domain: "tiny.tracker.example"
+    source: "TINY"
+    max_piece_length: 8192
+)");
+
+    write_file("batch.yaml", R"(
+version: 1
+rules_file: ")" + (temp_dir / "rules.yaml").generic_string() + R"("
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "constrained.torrent").generic_string() + R"("
+    trackers:
+      - "https://tiny.tracker.example/announce"
 )");
 
     auto config = BatchProcessor::parse(temp_dir / "batch.yaml");

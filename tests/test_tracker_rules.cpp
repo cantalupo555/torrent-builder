@@ -396,3 +396,64 @@ trackers:
     ASSERT_TRUE(rule.has_value());
     EXPECT_EQ(rule->name, "ptp");
 }
+
+TEST_F(TrackerRulesTest, MaxPieceLengthBelowSmallestAllowed) {
+    TrackerRule rule;
+    rule.name = "ptp";
+    rule.max_piece_length = 8192;
+
+    TrackerRulesDatabase db;
+    auto result = db.enforce(rule, 1024 * 1024 * 1024, 1024);
+
+    EXPECT_TRUE(result.adjusted);
+    EXPECT_TRUE(result.constraint_violation);
+    EXPECT_NE(result.violation_message.find("ptp"), std::string::npos);
+}
+
+TEST_F(TrackerRulesTest, ParseOverrideMissingSizeBelowThrows) {
+    write_file("rules.yaml", R"(
+version: 1
+trackers:
+  ptp:
+    domain: "passthepopcorn.me"
+    piece_length_overrides:
+      - piece_length: 512
+)");
+
+    TrackerRulesDatabase db;
+    EXPECT_THROW(db.load(temp_dir / "rules.yaml"), std::runtime_error);
+}
+
+TEST_F(TrackerRulesTest, ParseOverrideMissingPieceLengthThrows) {
+    write_file("rules.yaml", R"(
+version: 1
+trackers:
+  ptp:
+    domain: "passthepopcorn.me"
+    piece_length_overrides:
+      - size_below: 1073741824
+)");
+
+    TrackerRulesDatabase db;
+    EXPECT_THROW(db.load(temp_dir / "rules.yaml"), std::runtime_error);
+}
+
+TEST_F(TrackerRulesTest, DefaultRulesAccessorThrowsWhenEmpty) {
+    TrackerRulesDatabase db;
+    EXPECT_THROW(db.default_rules(), std::runtime_error);
+}
+
+TEST_F(TrackerRulesTest, OverridesNotAppliedWhenTotalSizeZero) {
+    TrackerRule rule;
+    rule.name = "ptp";
+    PieceLengthOverride ov;
+    ov.size_below = 1073741824;
+    ov.piece_length_kb = 256;
+    rule.piece_length_overrides.push_back(ov);
+
+    TrackerRulesDatabase db;
+    auto result = db.enforce(rule, 0, 1024);
+
+    EXPECT_FALSE(result.adjusted);
+    EXPECT_EQ(result.adjusted_piece_length, std::nullopt);
+}
