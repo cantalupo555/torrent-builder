@@ -104,6 +104,7 @@ target_link_options(torrent_builder_core PRIVATE ${LIBTORRENT_LDFLAGS})
 add_library(torrent_builder_config STATIC
     src/preset.cpp
     src/batch.cpp
+    src/tracker_rules.cpp
 )
 
 target_include_directories(torrent_builder_config PUBLIC

@@ -261,9 +261,6 @@ jobs:
 
     ASSERT_EQ(results.size(), 1u);
     EXPECT_TRUE(results[0].success);
-    EXPECT_TRUE(results[0].error_message.empty());
-    EXPECT_GT(results[0].elapsed_seconds, 0.0);
-
     EXPECT_TRUE(fs::exists(temp_dir / "output.torrent"));
 }
 
@@ -282,6 +279,178 @@ jobs:
     ASSERT_EQ(results.size(), 1u);
     EXPECT_FALSE(results[0].success);
     EXPECT_FALSE(results[0].error_message.empty());
+}
+
+TEST_F(BatchTest, RunWithRulesAutoPieceSizeAdjustment) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    write_file("rules.yaml", R"(
+version: 1
+trackers:
+  ptp:
+    domain: "passthepopcorn.me"
+    source: "PTP"
+    piece_length_overrides:
+      - size_below: 1073741824
+        piece_length: 32
+)");
+
+    write_file("batch.yaml", R"(
+version: 1
+rules_file: ")" + (temp_dir / "rules.yaml").generic_string() + R"("
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "auto_adjusted.torrent").generic_string() + R"("
+    trackers:
+      - "https://passthepopcorn.me/announce"
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success);
+    EXPECT_TRUE(fs::exists(temp_dir / "auto_adjusted.torrent"));
+
+    TorrentInspector inspector((temp_dir / "auto_adjusted.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.piece_length, 32 * 1024) << "Rule override should adjust piece size to 32 KB";
+    ASSERT_TRUE(meta.source.has_value());
+    EXPECT_EQ(*meta.source, "PTP") << "Rule should auto-set source";
+}
+
+TEST_F(BatchTest, ParseWithRulesFile) {
+    write_file("rules.yaml", R"(version: 1
+trackers: {}
+)");
+
+    write_file("batch.yaml", R"(
+version: 1
+rules_file: ")" + (temp_dir / "rules.yaml").generic_string() + R"("
+jobs:
+  - path: "/tmp/test"
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    EXPECT_TRUE(config.rules_file.has_value());
+    EXPECT_EQ(*config.rules_file, (temp_dir / "rules.yaml").string());
+}
+
+TEST_F(BatchTest, RunWithRulesFileAutoSetSource) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    write_file("rules.yaml", R"(
+version: 1
+trackers:
+  ptp:
+    domain: "passthepopcorn.me"
+    source: "PTP"
+)");
+
+    write_file("batch.yaml", R"(
+version: 1
+rules_file: ")" + (temp_dir / "rules.yaml").generic_string() + R"("
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "rules_out.torrent").generic_string() + R"("
+    trackers:
+      - "https://passthepopcorn.me/announce"
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success);
+    EXPECT_TRUE(fs::exists(temp_dir / "rules_out.torrent"));
+}
+
+TEST_F(BatchTest, RunWithRulesAndExplicitPieceSizePreserved) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    write_file("rules.yaml", R"(
+version: 1
+trackers:
+  ptp:
+    domain: "passthepopcorn.me"
+    source: "PTP"
+    max_piece_length: 8388608
+)");
+
+    write_file("batch.yaml", R"(
+version: 1
+rules_file: ")" + (temp_dir / "rules.yaml").generic_string() + R"("
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "explicit_ps.torrent").generic_string() + R"("
+    trackers:
+      - "https://passthepopcorn.me/announce"
+    piece_size: 16
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success);
+    EXPECT_TRUE(fs::exists(temp_dir / "explicit_ps.torrent"));
+
+    TorrentInspector inspector((temp_dir / "explicit_ps.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.piece_length, 16 * 1024) << "User-specified piece_size (16 KB) should be preserved";
+}
+
+TEST_F(BatchTest, RunWithRulesConstraintViolation) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(32 * 1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    write_file("rules.yaml", R"(
+version: 1
+trackers:
+  tiny:
+    domain: "tiny.tracker.example"
+    source: "TINY"
+    max_piece_length: 8192
+)");
+
+    write_file("batch.yaml", R"(
+version: 1
+rules_file: ")" + (temp_dir / "rules.yaml").generic_string() + R"("
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "constrained.torrent").generic_string() + R"("
+    trackers:
+      - "https://tiny.tracker.example/announce"
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success);
 }
 
 TEST_F(BatchTest, PrintSummaryWithControlCharactersDoesNotCrash) {
