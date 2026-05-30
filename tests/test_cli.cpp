@@ -3435,3 +3435,89 @@ TEST(RulesCLI, CliSourceFlagOverridesRule) {
 
     fs::remove_all(temp_dir);
 }
+
+TEST(CLI, FailOnSeasonWarningIncompletePack) {
+    auto temp_dir = fs::temp_directory_path() / ("cli_season_incomplete_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path season_dir = temp_dir / "Show.Name.S01";
+    fs::create_directories(season_dir);
+    {
+        std::ofstream f(season_dir / "Show.Name.S01E01.mkv", std::ios::binary);
+        std::vector<char> data(1024, 'A');
+        f.write(data.data(), data.size());
+    }
+    {
+        std::ofstream f(season_dir / "Show.Name.S01E03.mkv", std::ios::binary);
+        std::vector<char> data(1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --path " + season_dir.string() +
+        " --output " + (temp_dir / "season.torrent").string() +
+        " --fail-on-season-warning 2>&1", exit_code);
+
+    EXPECT_NE(exit_code, 0) << "Should fail on incomplete season pack. Output: " << output;
+    EXPECT_NE(output.find("E02"), std::string::npos) << "Should mention missing episode. Output: " << output;
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, FailOnSeasonWarningCompletePackSucceeds) {
+    auto temp_dir = fs::temp_directory_path() / ("cli_season_complete_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path season_dir = temp_dir / "Show.Name.S01";
+    fs::create_directories(season_dir);
+    for (int i = 1; i <= 3; ++i) {
+        auto ep = season_dir / ("Show.Name.S01E0" + std::to_string(i) + ".mkv");
+        std::ofstream f(ep, std::ios::binary);
+        std::vector<char> data(1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --path " + season_dir.string() +
+        " --output " + (temp_dir / "season.torrent").string() +
+        " --fail-on-season-warning 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Should succeed on complete season pack. Output: " << output;
+    EXPECT_TRUE(fs::exists(temp_dir / "season.torrent")) << "Torrent should be created";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, NoFailOnSeasonWarningIncompletePackSucceeds) {
+    auto temp_dir = fs::temp_directory_path() / ("cli_season_nofail_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path season_dir = temp_dir / "Show.Name.S01";
+    fs::create_directories(season_dir);
+    {
+        std::ofstream f(season_dir / "Show.Name.S01E01.mkv", std::ios::binary);
+        std::vector<char> data(1024, 'A');
+        f.write(data.data(), data.size());
+    }
+    {
+        std::ofstream f(season_dir / "Show.Name.S01E03.mkv", std::ios::binary);
+        std::vector<char> data(1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --path " + season_dir.string() +
+        " --output " + (temp_dir / "season.torrent").string() +
+        " 2>&1", exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Should succeed without --fail-on-season-warning. Output: " << output;
+    EXPECT_TRUE(fs::exists(temp_dir / "season.torrent")) << "Torrent should be created";
+
+    fs::remove_all(temp_dir);
+}

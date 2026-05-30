@@ -20,6 +20,7 @@
 #include "torrent_inspector.hpp"
 #include "torrent_modifier.hpp"
 #include "torrent_checker.hpp"
+#include "season_pack.hpp"
 #include "output.hpp"
 
 namespace fs = std::filesystem;
@@ -1286,7 +1287,8 @@ int main(int argc, char *argv[])
              cxxopts::value<std::vector<std::string>>(), "PATTERN")(
             "preset", "Apply named preset from presets.yaml", cxxopts::value<std::string>(), "NAME")(
             "preset-file", "Load presets from specified file", cxxopts::value<std::string>(), "FILE")(
-            "rules-file", "Load tracker rules from specified file", cxxopts::value<std::string>(), "FILE");
+            "rules-file", "Load tracker rules from specified file", cxxopts::value<std::string>(), "FILE")(
+            "fail-on-season-warning", "Fail if a TV season pack has missing episodes");
 
         options.positional_help("PATH [OUTPUT]");
         options.parse_positional({"path", "output"});
@@ -1376,6 +1378,12 @@ int main(int argc, char *argv[])
                     print_info("Operation cancelled.\n");
                 }
                 return 1;
+            }
+            auto season_error = season_pack::evaluate_season_warning(
+                config_opt->path, result.count("fail-on-season-warning") > 0);
+            if (season_error)
+            {
+                throw std::runtime_error(*season_error);
             }
             TorrentCreator creator(*config_opt);
             creator.create_torrent();

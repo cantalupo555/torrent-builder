@@ -4,6 +4,7 @@
 #include "output.hpp"
 #include "utils.hpp"
 #include "constants.hpp"
+#include "season_pack.hpp"
 #include <yaml-cpp/yaml.h>
 #include <thread>
 #include <atomic>
@@ -215,6 +216,10 @@ BatchConfig BatchProcessor::parse(const fs::path& yaml_path)
             job.preset = job_node["preset"].as<std::string>();
         }
 
+        if (job_node["fail_on_season_warning"]) {
+            job.fail_on_season_warning = job_node["fail_on_season_warning"].as<bool>();
+        }
+
         job.path = *job.values.path;
         config.jobs.push_back(std::move(job));
     }
@@ -314,6 +319,14 @@ BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& prese
         }
 
         TorrentConfig tc = build_torrent_config(resolved, output_dir);
+
+        auto season_error = season_pack::evaluate_season_warning(
+            tc.path, job.fail_on_season_warning, job_index);
+        if (season_error)
+        {
+            throw std::runtime_error(*season_error);
+        }
+
         tc.silent = true;
         TorrentCreator creator(std::move(tc));
         creator.create_torrent();
