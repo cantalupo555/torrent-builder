@@ -815,6 +815,9 @@ jobs:
 }
 
 TEST_F(BatchTest, RunWithPieceSize) {
+#ifdef __MINGW32__
+    GTEST_SKIP() << "Skipped on MinGW due to known SegFault in libtorrent hashing";
+#endif
     fs::path test_file = temp_dir / "testfile.bin";
     {
         std::ofstream f(test_file, std::ios::binary);
