@@ -84,6 +84,7 @@ add_library(torrent_builder_core STATIC
     src/utils.cpp
     src/terminal.cpp
     src/output.cpp
+    src/season_pack.cpp
 )
 
 target_include_directories(torrent_builder_core PUBLIC

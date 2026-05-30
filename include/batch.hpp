@@ -17,6 +17,7 @@ struct BatchJob {
     std::string path;                      ///< Input file or directory
     std::optional<std::string> output;     ///< Output .torrent path (auto-generated if empty)
     std::optional<std::string> preset;     ///< Preset name to apply
+    bool fail_on_season_warning = false;   ///< Fail if TV season pack has missing episodes
     ConfigValues values;                   ///< Per-job config overrides
 };
 

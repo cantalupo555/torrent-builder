@@ -26,6 +26,7 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 - YAML-based preset system for per-tracker configuration
 - Batch mode: create multiple torrents in parallel from a YAML config
 - Configurable output directory (auto-created if needed) and tracker index for filename prefix
+- Season pack detection: warn or fail on incomplete TV season packs (missing episodes)
 
 ## Prerequisites
 
@@ -134,10 +135,11 @@ Process multiple torrent creation jobs from a YAML config file in parallel. See 
   -x, --exclude arg          Exclude files matching glob pattern (can be used multiple times)
   -I, --include arg          Include only files matching glob pattern (can be used multiple times)
        --skip-prefix          Omit tracker domain from auto-generated output filename
-      --output-dir DIR       Directory for auto-generated output filename (created if needed)
-      --tracker-index N      Index of tracker to use for filename prefix (0-based, default: 0)
-      --preset NAME          Apply named preset from presets.yaml
-      --preset-file FILE     Load presets from specified file (default: searches ./presets.yaml, $XDG_CONFIG_HOME/torrent-builder/presets.yaml, ~/.config/torrent-builder/presets.yaml)
+       --output-dir DIR       Directory for auto-generated output filename (created if needed)
+       --tracker-index N      Index of tracker to use for filename prefix (0-based, default: 0)
+       --preset NAME          Apply named preset from presets.yaml
+       --preset-file FILE     Load presets from specified file (default: searches ./presets.yaml, $XDG_CONFIG_HOME/torrent-builder/presets.yaml, ~/.config/torrent-builder/presets.yaml)
+       --fail-on-season-warning  Fail if a TV season pack has missing episodes
 ```
 
 > **Note:** `--verbose`, `--quiet`, and `--json` are ignored in interactive mode. In CLI mode, `--verbose` and `--quiet` are mutually exclusive, as are `--verbose` and `--json`. The `--json` flag implies `--quiet` and auto-declines any overwrite prompts.
@@ -273,6 +275,17 @@ Cross-seeding (unique info hash per tracker):
 
 ./torrent_builder --path /data/file --output unique.torrent \
   -e --tracker "https://tracker.example/announce"
+```
+
+Season pack detection:
+```bash
+# Fail if the directory is an incomplete season pack (missing episodes)
+./torrent_builder --path /data/Show.Name.S01 --output season.torrent \
+  --fail-on-season-warning
+# Error: Season 1 pack has missing episodes (E03) in: Show.Name.S01
+
+# Without the flag, the torrent is created normally
+./torrent_builder --path /data/Show.Name.S01 --output season.torrent
 ```
 
 Create a torrent with default trackers and custom trackers:
@@ -421,6 +434,8 @@ jobs:
     output: custom_output.torrent
     trackers:
       - "https://tracker.example/announce"
+  - path: /data/Show.Name.S01
+    fail_on_season_warning: true
 ```
 
 > **Note:** Output paths automatically receive a `.torrent` extension if not already present. `workers: 0` in the YAML config throws an error; `--workers 0` on the CLI is ignored with a warning.
