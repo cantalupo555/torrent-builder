@@ -27,6 +27,7 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 - Batch mode: create multiple torrents in parallel from a YAML config
 - Configurable output directory (auto-created if needed) and tracker index for filename prefix
 - Season pack detection: warn or fail on incomplete TV season packs (missing episodes)
+- Self-update: check for and install the latest version from GitHub Releases
 
 ## Prerequisites
 
@@ -41,17 +42,17 @@ The **Torrent Builder** is a command-line tool for creating torrent files, offer
 
 Ubuntu/Debian
 ```
-sudo apt install build-essential cmake libtorrent-rasterbar-dev pkg-config
+sudo apt install build-essential cmake libtorrent-rasterbar-dev pkg-config libssl-dev
 ```
 
 Fedora
 ```
-sudo dnf install gcc-c++ cmake rb_libtorrent-devel
+sudo dnf install gcc-c++ cmake rb_libtorrent-devel openssl-devel
 ```
 
 ### macOS
 ```
-brew install cmake libtorrent-rasterbar
+brew install cmake libtorrent-rasterbar openssl@3
 ```
 
 ## Installation
@@ -108,6 +109,39 @@ Edit metadata of an existing .torrent file in-place without re-hashing file cont
 ```
 
 Process multiple torrent creation jobs from a YAML config file in parallel. See the [Batch Mode](#batch-mode-1) section below for details.
+
+### Update
+
+```bash
+./torrent_builder update [options]
+```
+
+Check for newer versions and update the binary in-place from GitHub Releases.
+
+> **Note:** Requires `curl` to be installed and available on the system PATH. On macOS, `unzip` is also required.
+
+**Options:**
+```
+  -h, --help    Show help and usage
+  --check       Only check for available updates (no download)
+  --yes         Skip confirmation prompt
+  --rollback    Restore previous version from backup
+```
+
+**Examples:**
+```bash
+# Check and install the latest version
+./torrent_builder update
+
+# Only check if an update is available
+./torrent_builder update --check
+
+# Update without confirmation prompt (useful for scripts)
+./torrent_builder update --yes
+
+# Restore the previous version after an update
+./torrent_builder update --rollback
+```
 
 ## Options
 

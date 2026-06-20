@@ -216,7 +216,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libtorrent-rasterbar-dev pkg-config git
+          sudo apt-get install -y build-essential cmake libtorrent-rasterbar-dev pkg-config git libssl-dev
 
       - name: Build
         run: |
@@ -311,6 +311,7 @@ jobs:
             ${{ matrix.prefix }}-cmake
             ${{ matrix.prefix }}-libtorrent-rasterbar
             ${{ matrix.prefix }}-pkg-config
+            ${{ matrix.prefix }}-openssl
 
       - name: Build
         shell: msys2 {0}
@@ -348,12 +349,12 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
-        run: brew install boost cmake libtorrent-rasterbar pkg-config
+        run: brew install boost cmake libtorrent-rasterbar pkg-config openssl@3
 
       - name: Build
         run: |
           mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DTORRENT_BUILDER_VERSION=${{ steps.version.outputs.VERSION }}
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DTORRENT_BUILDER_VERSION=${{ steps.version.outputs.VERSION }} -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
           cmake --build . --parallel
 
       - name: Rename and package
@@ -379,6 +380,12 @@ jobs:
 
       - name: List artifacts
         run: ls -la bin/
+
+      - name: Generate SHA-256 checksums
+        run: |
+          cd bin
+          sha256sum torrent_builder_* > checksums.txt
+          cat checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
