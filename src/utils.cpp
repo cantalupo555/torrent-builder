@@ -770,4 +770,104 @@ void atomic_write(const std::filesystem::path &dest, const std::vector<char> &da
 #endif
 }
 
+Version parse_version(const std::string &version_str)
+{
+    Version v;
+    std::string cleaned = version_str;
+
+    if (cleaned.starts_with('v') || cleaned.starts_with('V'))
+    {
+        cleaned = cleaned.substr(1);
+    }
+
+    auto dash_pos = cleaned.find('-');
+    if (dash_pos != std::string::npos)
+    {
+        v.prerelease = cleaned.substr(dash_pos + 1);
+        cleaned = cleaned.substr(0, dash_pos);
+    }
+
+    if (cleaned.empty() || cleaned == "dev")
+    {
+        return v;
+    }
+
+    auto parts = split(cleaned, '.');
+    if (!parts.empty())
+    {
+        try { v.major = std::stoi(parts[0]); } catch (...) {}
+    }
+    if (parts.size() > 1)
+    {
+        try { v.minor = std::stoi(parts[1]); } catch (...) {}
+    }
+    if (parts.size() > 2)
+    {
+        try { v.patch = std::stoi(parts[2]); } catch (...) {}
+    }
+    return v;
+}
+
+namespace {
+
+int compare_prerelease_identifiers(const std::string &a, const std::string &b)
+{
+    auto split_dots = [](const std::string &s) {
+        std::vector<std::string> out;
+        size_t start = 0;
+        for (size_t i = 0; i <= s.size(); ++i)
+        {
+            if (i == s.size() || s[i] == '.')
+            {
+                out.push_back(s.substr(start, i - start));
+                start = i + 1;
+            }
+        }
+        return out;
+    };
+
+    if (a.empty() && b.empty()) return 0;
+    if (a.empty()) return 1;
+    if (b.empty()) return -1;
+
+    auto pa = split_dots(a);
+    auto pb = split_dots(b);
+    size_t n = std::min(pa.size(), pb.size());
+    for (size_t i = 0; i < n; ++i)
+    {
+        bool a_num = !pa[i].empty() && std::all_of(pa[i].begin(), pa[i].end(), [](unsigned char c) { return std::isdigit(c); });
+        bool b_num = !pb[i].empty() && std::all_of(pb[i].begin(), pb[i].end(), [](unsigned char c) { return std::isdigit(c); });
+
+        if (a_num && b_num)
+        {
+            long ai = std::stol(pa[i]);
+            long bi = std::stol(pb[i]);
+            if (ai != bi) return ai < bi ? -1 : 1;
+        }
+        else if (a_num != b_num)
+        {
+            return a_num ? -1 : 1;
+        }
+        else
+        {
+            if (pa[i] != pb[i]) return pa[i] < pb[i] ? -1 : 1;
+        }
+    }
+    if (pa.size() != pb.size()) return pa.size() < pb.size() ? -1 : 1;
+    return 0;
+}
+
+} // namespace
+
+int compare_versions(const std::string &v1, const std::string &v2)
+{
+    auto a = parse_version(v1);
+    auto b = parse_version(v2);
+
+    if (a.major != b.major) return a.major < b.major ? -1 : 1;
+    if (a.minor != b.minor) return a.minor < b.minor ? -1 : 1;
+    if (a.patch != b.patch) return a.patch < b.patch ? -1 : 1;
+    return compare_prerelease_identifiers(a.prerelease, b.prerelease);
+}
+
 } // namespace utils
