@@ -157,16 +157,23 @@ if(TEST_SOURCES)
 
     target_compile_definitions(torrent_builder_tests PRIVATE
         BINARY_PATH="${CMAKE_BINARY_DIR}/torrent_builder"
+        TORRENT_BUILDER_EXCLUDE_MAIN
     )
 
     target_include_directories(torrent_builder_tests PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
 
     target_link_libraries(torrent_builder_tests PRIVATE
         GTest::gtest_main
         torrent_builder_core
         torrent_builder_config
+        cxxopts::cxxopts
+    )
+
+    target_sources(torrent_builder_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/torrent_builder.cpp
     )
 
     include(GoogleTest)
