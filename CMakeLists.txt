@@ -25,6 +25,9 @@ else()
     add_compile_options(-O2)
 endif()
 
+# Find OpenSSL (required for SHA-256 computation)
+find_package(OpenSSL REQUIRED)
+
 # Find Boost (required by libtorrent headers)
 find_package(Boost REQUIRED)
 
@@ -74,6 +77,13 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+# nlohmann/json (JSON parsing for update command)
+FetchContent_Declare(
+    nlohmann_json
+    URL https://github.com/nlohmann/json/archive/refs/tags/v3.11.3.tar.gz
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
 # ─── Core library ────────────────────────────────────────────
 add_library(torrent_builder_core STATIC
     src/torrent_creator.cpp
@@ -85,10 +95,12 @@ add_library(torrent_builder_core STATIC
     src/terminal.cpp
     src/output.cpp
     src/season_pack.cpp
+    src/updater.cpp
 )
 
 target_include_directories(torrent_builder_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}
     ${LIBTORRENT_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
 )
@@ -96,6 +108,8 @@ target_include_directories(torrent_builder_core PUBLIC
 target_link_libraries(torrent_builder_core PUBLIC
     ${LIBTORRENT_LIBRARIES}
     ${LIBTORRENT_LDFLAGS}
+    nlohmann_json::nlohmann_json
+    OpenSSL::Crypto
 )
 
 target_compile_options(torrent_builder_core PRIVATE ${LIBTORRENT_CFLAGS})
