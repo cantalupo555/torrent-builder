@@ -68,6 +68,11 @@ cmake --build .
 ```
 For an optimized Release build: `cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build .`.
 
+On macOS, pass the OpenSSL path to CMake since `openssl@3` is keg-only:
+```
+cmake .. -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
+```
+
 **Note**: The executable will be generated at `build/torrent_builder`. For debugging, use `-DCMAKE_BUILD_TYPE=Debug`. If pkg-config fails, check your installation in Prerequisites.
 
 **Versioning**: When building from a git tag (e.g., `v0.2.0`), the version is automatically detected. Otherwise, the version defaults to `dev`. You can override with `-DTORRENT_BUILDER_VERSION=x.y.z` during cmake configuration. Use `./torrent_builder --version` to check.
@@ -116,15 +121,17 @@ Process multiple torrent creation jobs from a YAML config file in parallel. See 
 ./torrent_builder update [options]
 ```
 
-Check for newer versions and update the binary in-place from GitHub Releases.
+Check for newer versions and update the binary in-place from GitHub Releases. Downloads are verified against SHA-256 checksums published in each release's `checksums.txt`.
 
 > **Note:** Requires `curl` to be installed and available on the system PATH. On macOS, `unzip` is also required.
+
+> **Tip:** If you hit GitHub API rate limits, set the `GITHUB_TOKEN` environment variable with a personal access token to use authenticated requests.
 
 **Options:**
 ```
   -h, --help    Show help and usage
   --check       Only check for available updates (no download)
-  --yes         Skip confirmation prompt
+  -y, --yes     Skip confirmation prompt
   --rollback    Restore previous version from backup
 ```
 

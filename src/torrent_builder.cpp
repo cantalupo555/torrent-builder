@@ -13,6 +13,7 @@
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <cmath>
+#include <random>
 #include <chrono>
 #include <ranges>
 #include <stdexcept>
@@ -1263,26 +1264,38 @@ int handle_update_command(const std::vector<std::string> &args)
             print_info("Rolling back to previous version...\n");
             log_message("User initiated rollback", LogLevel::INFO);
 
-            if (!prompt_yes_no("Restore previous version?"))
+            if (!result.count("yes") && !prompt_yes_no("Restore previous version?"))
             {
                 print_info("Rollback cancelled.\n");
                 log_message("Rollback cancelled by user", LogLevel::INFO);
                 return 0;
             }
 
-            if (Updater::perform_rollback(exe_path))
+            UpdateResult rollback_result = Updater::perform_rollback(exe_path);
+            if (rollback_result == UpdateResult::Success)
             {
                 print_info("Successfully rolled back to previous version.\n");
                 log_message("Rollback completed successfully", LogLevel::INFO);
-                return 0;
             }
-            return 1;
+            else
+            {
+                print_info("Rollback scheduled: previous version will be restored when this command exits.\n");
+                log_message("Rollback scheduled via async helper", LogLevel::INFO);
+            }
+            return 0;
         }
 
         print_info("Checking for updates...\n");
         log_message("Checking for updates (current: " + std::string(Updater::get_current_version()) + ")", LogLevel::INFO);
 
         auto latest = Updater::fetch_latest_release();
+
+        if (latest.version.empty())
+        {
+            print_error("Error: Could not determine the latest release version.\n");
+            log_message("Latest release has empty version tag", LogLevel::ERR);
+            return 1;
+        }
 
         std::string current = Updater::get_current_version();
         int cmp = utils::compare_versions(current, latest.version);
@@ -1311,6 +1324,52 @@ int handle_update_command(const std::vector<std::string> &args)
         if (!latest.changelog.empty())
         {
             std::string changelog = latest.changelog;
+            std::string sanitized;
+            sanitized.reserve(changelog.size());
+            for (size_t i = 0; i < changelog.size(); ++i)
+            {
+                unsigned char c = static_cast<unsigned char>(changelog[i]);
+                if (c == '\x1b')
+                {
+                    if (i + 1 >= changelog.size())
+                        continue;
+                    char next = changelog[i + 1];
+                    if (next == '[')
+                    {
+                        size_t j = i + 2;
+                        while (j < changelog.size() &&
+                               (std::isdigit(static_cast<unsigned char>(changelog[j])) || changelog[j] == ';'))
+                            j++;
+                        if (j < changelog.size() && changelog[j] >= 0x40 && changelog[j] <= 0x7E)
+                        {
+                            i = j;
+                            continue;
+                        }
+                    }
+                    else if (next == ']')
+                    {
+                        size_t j = i + 2;
+                        while (j < changelog.size())
+                        {
+                            if (changelog[j] == '\x07') { i = j; break; }
+                            if (changelog[j] == '\x1b' && j + 1 < changelog.size() && changelog[j + 1] == '\\') { i = j + 1; break; }
+                            j++;
+                        }
+                        if (j >= changelog.size())
+                            i = changelog.size() - 1;
+                        continue;
+                    }
+                    else
+                    {
+                        ++i;
+                        continue;
+                    }
+                }
+                if (c < 0x20 && c != '\t' && c != '\n')
+                    continue;
+                sanitized += static_cast<char>(c);
+            }
+            changelog = sanitized;
             if (changelog.size() > 500)
             {
                 size_t cut = 500;
@@ -1360,7 +1419,8 @@ int handle_update_command(const std::vector<std::string> &args)
 #elif defined(__APPLE__)
         ext = ".zip";
 #endif
-        download_path = (temp_dir / ("torrent_builder_update" + ext)).string();
+        std::random_device rd;
+        download_path = (temp_dir / ("tb_update_" + std::to_string(rd()) + ext)).string();
 
         print_info("Downloading " + latest.version + "...\n");
         log_message("Downloading update " + latest.version + " from: " + *asset_url, LogLevel::INFO);

@@ -3,6 +3,7 @@
 #include "logger.hpp"
 #include <regex>
 #include <cctype>
+#include <climits>
 #include <algorithm>
 #include <format>
 #include <sstream>
@@ -840,8 +841,9 @@ int compare_prerelease_identifiers(const std::string &a, const std::string &b)
 
         if (a_num && b_num)
         {
-            long ai = std::stol(pa[i]);
-            long bi = std::stol(pb[i]);
+            long ai = 0, bi = 0;
+            try { ai = std::stol(pa[i]); } catch (...) { log_message("Prerelease identifier overflow, clamped to LONG_MAX: " + pa[i], LogLevel::WARNING); ai = LONG_MAX; }
+            try { bi = std::stol(pb[i]); } catch (...) { log_message("Prerelease identifier overflow, clamped to LONG_MAX: " + pb[i], LogLevel::WARNING); bi = LONG_MAX; }
             if (ai != bi) return ai < bi ? -1 : 1;
         }
         else if (a_num != b_num)

@@ -132,10 +132,11 @@ public:
     /**
      * @brief Roll back to the previous version (.old backup).
      * @param current_binary_path Path to the currently running binary.
-     * @return true on success.
+     * @return UpdateResult::Success on synchronous completion,
+     *         UpdateResult::PendingRestart when an async helper is scheduled (Windows).
      * @throws std::runtime_error if no backup exists or swap fails.
      */
-    static bool perform_rollback(const std::string &current_binary_path);
+    static UpdateResult perform_rollback(const std::string &current_binary_path);
 
     /**
      * @brief Locate the curl executable on the system.
@@ -183,7 +184,7 @@ public:
 
     /**
      * @brief Get the path to the currently running executable.
-     * @return Absolute path to the executable.
+     * @return Absolute path to the executable, or "torrent_builder" as fallback.
      */
     static std::string get_exe_path();
 
@@ -213,9 +214,17 @@ public:
     /**
      * @brief Validate that a file starts with a known binary format magic signature.
      * @param filepath Path to the file to validate.
-     * @return true if the file starts with ELF, Mach-O, or PE magic bytes.
+     * @return true if the file starts with ELF, Mach-O, PE, or ZIP (macOS) magic bytes.
      */
     static bool is_valid_binary(const std::string &filepath);
+
+    /**
+     * @brief Verify a downloaded file exists, is non-empty, and matches expected size.
+     * @param path Path to the downloaded file.
+     * @param expected_size Expected size in bytes (0 to skip size check).
+     * @return true if file is valid, false otherwise.
+     */
+    static bool verify_downloaded_file(const std::string &path, int64_t expected_size);
 
     /**
      * @brief Build the command string used to launch a batch script asynchronously on Windows.

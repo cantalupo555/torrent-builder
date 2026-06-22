@@ -226,6 +226,14 @@ TEST_F(CompareVersionsTest, PreReleaseIdentifierOrdering)
     EXPECT_LT(utils::compare_versions("1.0.0-1", "1.0.0-alpha"), 0);
 }
 
+TEST_F(CompareVersionsTest, PreReleaseNumericOverflow)
+{
+    std::string huge = "1.0.0-" + std::string(30, '9');
+    std::string huge2 = "1.0.0-" + std::string(30, '9');
+    EXPECT_EQ(utils::compare_versions(huge, huge2), 0);
+    EXPECT_GT(utils::compare_versions(huge, "1.0.0-999999"), 0);
+}
+
 class PlatformInfoTest : public ::testing::Test
 {
 };
@@ -411,6 +419,20 @@ TEST_F(FindMatchingAssetFromJsonTest, NoMatchFromParsedJson)
     EXPECT_FALSE(result.has_value());
 }
 
+TEST_F(FindMatchingAssetFromJsonTest, SkipsAssetWithEmptyUrl)
+{
+    nlohmann::json j = R"({
+        "assets": [
+            {"name": "torrent_builder_2.0.0_linux_amd64", "browser_download_url": ""},
+            {"name": "torrent_builder_2.0.0_linux_amd64", "browser_download_url": "https://example.com/valid"}
+        ]
+    })"_json;
+    PlatformInfo platform{"linux", "amd64"};
+    auto result = Updater::find_matching_asset_from_json(j, platform);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "https://example.com/valid");
+}
+
 class LookupChecksumTest : public ::testing::Test
 {
 };
@@ -443,6 +465,14 @@ TEST_F(LookupChecksumTest, EmptyContentReturnsNullopt)
 {
     auto result = Updater::lookup_checksum("", "any_file");
     EXPECT_FALSE(result.has_value());
+}
+
+TEST_F(LookupChecksumTest, HandlesBsdStarFormat)
+{
+    std::string checksums = "abc123def456 *torrent_builder_1.0.0_linux_amd64\n";
+    auto result = Updater::lookup_checksum(checksums, "torrent_builder_1.0.0_linux_amd64");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "abc123def456");
 }
 
 class MockedUpdaterTest : public ::testing::Test
@@ -486,6 +516,16 @@ protected:
 
 class FetchLatestReleaseTest : public MockedUpdaterTest
 {
+protected:
+    void TearDown() override
+    {
+        MockedUpdaterTest::TearDown();
+#ifdef _WIN32
+        _putenv_s("GITHUB_TOKEN", "");
+#else
+        unsetenv("GITHUB_TOKEN");
+#endif
+    }
 };
 
 TEST_F(FetchLatestReleaseTest, ReturnsValidRelease)
@@ -518,7 +558,7 @@ TEST_F(FetchLatestReleaseTest, TagWithoutVPrefix)
 
 TEST_F(FetchLatestReleaseTest, RateLimitResponse)
 {
-    setup_curl_mock(R"({"message": "API rate limit exceeded for user", "status": "403"})");
+    setup_curl_mock(R"({"message": "API rate limit exceeded for user", "documentation_url": "https://docs.github.com/rest/overview/resources-in-the-rest-api#rate-limiting"})");
 
     EXPECT_THROW(
         { auto r = Updater::fetch_latest_release(); },
@@ -573,6 +613,63 @@ TEST_F(FetchLatestReleaseTest, CurlNetworkError)
     catch (const std::runtime_error &e)
     {
         EXPECT_NE(std::string(e.what()).find("Failed to fetch release info"), std::string::npos);
+    }
+}
+
+TEST_F(FetchLatestReleaseTest, SendsGithubTokenHeader)
+{
+    auto captured_args = std::make_shared<std::vector<std::string>>();
+    Updater::set_curl_executor_for_testing(
+        [captured_args](const std::string &, const std::vector<std::string> &args) -> std::string
+        {
+            *captured_args = args;
+            return make_release_json("v2.0.0");
+        });
+
+#ifdef _WIN32
+    _putenv_s("GITHUB_TOKEN", "test_token_123");
+#else
+    setenv("GITHUB_TOKEN", "test_token_123", 1);
+#endif
+
+    Updater::fetch_latest_release();
+
+    Updater::reset_test_overrides();
+
+    bool found_auth = false;
+    for (size_t i = 0; i < captured_args->size(); ++i)
+    {
+        if ((*captured_args)[i] == "Authorization: Bearer test_token_123")
+        {
+            found_auth = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found_auth);
+}
+
+TEST_F(FetchLatestReleaseTest, NoAuthHeaderWithoutToken)
+{
+    auto captured_args = std::make_shared<std::vector<std::string>>();
+    Updater::set_curl_executor_for_testing(
+        [captured_args](const std::string &, const std::vector<std::string> &args) -> std::string
+        {
+            *captured_args = args;
+            return make_release_json("v2.0.0");
+        });
+
+#ifdef _WIN32
+    _putenv_s("GITHUB_TOKEN", "");
+#else
+    unsetenv("GITHUB_TOKEN");
+#endif
+
+    Updater::fetch_latest_release();
+    Updater::reset_test_overrides();
+
+    for (const auto &arg : *captured_args)
+    {
+        EXPECT_EQ(arg.find("Authorization"), std::string::npos);
     }
 }
 
@@ -664,6 +761,58 @@ TEST_F(DownloadAssetTest, MockReceivesExpectedSize)
 TEST_F(DownloadAssetTest, RejectsNonHttpsUrl)
 {
     EXPECT_FALSE(Updater::download_asset("file:///nonexistent/path/that/does/not/exist", "/tmp/tb_test_dl"));
+}
+
+class VerifyDownloadedFileTest : public ::testing::Test
+{
+protected:
+    fs::path temp_file;
+
+    void SetUp() override
+    {
+        temp_file = fs::temp_directory_path() / "tb_verify_test";
+    }
+
+    void TearDown() override
+    {
+        fs::remove(temp_file);
+    }
+
+    void write_file(const std::string &content)
+    {
+        std::ofstream f(temp_file, std::ios::binary);
+        f << content;
+    }
+};
+
+TEST_F(VerifyDownloadedFileTest, AcceptsCorrectSize)
+{
+    write_file(std::string(100, 'X'));
+    EXPECT_TRUE(Updater::verify_downloaded_file(temp_file.string(), 100));
+}
+
+TEST_F(VerifyDownloadedFileTest, RejectsSizeMismatch)
+{
+    write_file(std::string(50, 'X'));
+    EXPECT_FALSE(Updater::verify_downloaded_file(temp_file.string(), 100));
+}
+
+TEST_F(VerifyDownloadedFileTest, AcceptsAnySizeWhenExpectedIsZero)
+{
+    write_file("small");
+    EXPECT_TRUE(Updater::verify_downloaded_file(temp_file.string(), 0));
+}
+
+TEST_F(VerifyDownloadedFileTest, RejectsEmptyFile)
+{
+    write_file("");
+    EXPECT_FALSE(Updater::verify_downloaded_file(temp_file.string(), 0));
+}
+
+TEST_F(VerifyDownloadedFileTest, RejectsMissingFile)
+{
+    fs::remove(temp_file);
+    EXPECT_FALSE(Updater::verify_downloaded_file(temp_file.string(), 0));
 }
 
 class GetExePathTest : public MockedUpdaterTest
@@ -792,7 +941,7 @@ TEST_F(PerformRollbackTest, RestoresOldVersion)
     write_file("current_bin", "new version");
     write_file("current_bin.old", "old version");
 
-    EXPECT_TRUE(Updater::perform_rollback(current));
+    EXPECT_EQ(Updater::perform_rollback(current), UpdateResult::Success);
     EXPECT_FALSE(fs::exists(temp_dir / "current_bin.old"));
     EXPECT_EQ(read_file("current_bin"), "old version");
 }
@@ -895,6 +1044,20 @@ TEST_F(VerifyChecksumMatchTest, ReturnsTrueForUpperCaseHash)
 
     const std::string expected_hash =
         "6AE8A75555209FD6C44157C0AED8016E763FF435A19CF186F76863140143FF72";
+
+    EXPECT_TRUE(Updater::verify_checksum(filepath, expected_hash));
+}
+
+TEST_F(VerifyChecksumMatchTest, HandlesMultiChunkInput)
+{
+    std::string filepath = (temp_dir / "test_large").string();
+    {
+        std::ofstream f(filepath, std::ios::binary);
+        f << std::string(10000, 'A');
+    }
+
+    const std::string expected_hash =
+        "85757d9ef5868bb53472a6be8d81d1e3c398546b69b107141ad336053c40cb54";
 
     EXPECT_TRUE(Updater::verify_checksum(filepath, expected_hash));
 }
@@ -1053,6 +1216,23 @@ TEST_F(FetchChecksumsTest, JsonOverloadReturnsNulloptWhenNoChecksumsAsset)
     EXPECT_FALSE(result.has_value());
 }
 
+TEST_F(FetchChecksumsTest, JsonOverloadReturnsNulloptOnCurlFailure)
+{
+    nlohmann::json j = nlohmann::json::parse(make_release_json("v1.0.0", "", {
+        {"checksums.txt", "https://example.com/checksums.txt"},
+        {"torrent_builder_1.0.0_linux_amd64", "https://example.com/binary"}
+    }));
+
+    Updater::set_curl_executor_for_testing(
+        [](const std::string &url, const std::vector<std::string> &) -> std::string
+        {
+            throw std::runtime_error("Connection refused");
+        });
+
+    auto result = Updater::fetch_checksums(j);
+    EXPECT_FALSE(result.has_value());
+}
+
 int handle_update_command(const std::vector<std::string> &args);
 
 class HandleUpdateCommandTest : public MockedUpdaterTest
@@ -1062,6 +1242,7 @@ protected:
     std::streambuf *old_cerr_ = nullptr;
     std::ostringstream captured_out_;
     std::ostringstream captured_err_;
+    std::vector<fs::path> cleanup_paths_;
 
     void SetUp() override
     {
@@ -1074,6 +1255,8 @@ protected:
         std::cout.rdbuf(old_cout_);
         std::cerr.rdbuf(old_cerr_);
         Updater::reset_test_overrides();
+        for (const auto &p : cleanup_paths_)
+            fs::remove_all(p);
     }
 
     static std::string release_with_version(const std::string &version)
@@ -1114,6 +1297,16 @@ TEST_F(HandleUpdateCommandTest, HelpReturnsZero)
     EXPECT_NE(captured_out_.str().find("update"), std::string::npos);
 }
 
+TEST_F(HandleUpdateCommandTest, RejectsEmptyVersionTag)
+{
+    nlohmann::json j;
+    j["assets"] = nlohmann::json::array();
+    setup_curl_mock(j.dump());
+
+    EXPECT_EQ(handle_update_command({"--check"}), 1);
+    EXPECT_NE(captured_err_.str().find("latest release version"), std::string::npos);
+}
+
 TEST_F(HandleUpdateCommandTest, CheckShowsUpdateAvailable)
 {
     Updater::set_current_version_for_testing("0.5.0");
@@ -1122,6 +1315,34 @@ TEST_F(HandleUpdateCommandTest, CheckShowsUpdateAvailable)
     EXPECT_EQ(handle_update_command({"--check"}), 0);
     EXPECT_NE(captured_out_.str().find("2.0.0"), std::string::npos);
     EXPECT_NE(captured_out_.str().find("Update available"), std::string::npos);
+}
+
+TEST_F(HandleUpdateCommandTest, ChangelogStripsAnsiEscapes)
+{
+    Updater::set_current_version_for_testing("0.1.0");
+    std::string body = "\x1b[1;31;40mBold red\x1b[0m and \x1b[2Jclear and \x1b[Hhome";
+    setup_curl_mock(make_release_json("v2.0.0", body, {
+        {"torrent_builder_2.0.0_linux_amd64", "https://example.com/binary"}
+    }));
+
+    handle_update_command({"--check"});
+    EXPECT_EQ(captured_out_.str().find('\x1b'), std::string::npos);
+    EXPECT_NE(captured_out_.str().find("Bold red"), std::string::npos);
+    EXPECT_NE(captured_out_.str().find("clear"), std::string::npos);
+}
+
+TEST_F(HandleUpdateCommandTest, ChangelogStripsOscAndCharsetEscapes)
+{
+    Updater::set_current_version_for_testing("0.1.0");
+    std::string body = "\x1b]0;Title\x07OSC and \x1b(Bcharset\x1b[31mred\x1b[0m";
+    setup_curl_mock(make_release_json("v2.0.0", body, {
+        {"torrent_builder_2.0.0_linux_amd64", "https://example.com/binary"}
+    }));
+
+    handle_update_command({"--check"});
+    EXPECT_EQ(captured_out_.str().find('\x1b'), std::string::npos);
+    EXPECT_EQ(captured_out_.str().find("]0;Title"), std::string::npos);
+    EXPECT_NE(captured_out_.str().find("red"), std::string::npos);
 }
 
 TEST_F(HandleUpdateCommandTest, CheckShowsAlreadyUpToDate)
@@ -1158,6 +1379,7 @@ TEST_F(HandleUpdateCommandTest, YesFlagSkipsPrompt)
 
     fs::path temp = fs::temp_directory_path() / "tb_handle_update_test";
     fs::create_directories(temp);
+    cleanup_paths_.push_back(temp);
     std::string fake_bin = (temp / "current").string();
     std::string old_bin = fake_bin + ".old";
     {
@@ -1183,7 +1405,6 @@ TEST_F(HandleUpdateCommandTest, YesFlagSkipsPrompt)
     int rc = handle_update_command({"--yes"});
 
     Updater::reset_test_overrides();
-    fs::remove_all(temp);
 
     EXPECT_EQ(rc, 0);
 }
@@ -1208,6 +1429,7 @@ TEST_F(HandleUpdateCommandTest, RollbackSuccess)
 {
     fs::path temp = fs::temp_directory_path() / "tb_rollback_cmd_test";
     fs::create_directories(temp);
+    cleanup_paths_.push_back(temp);
     std::string fake_bin = (temp / "current").string();
     std::string old_bin = fake_bin + ".old";
 
@@ -1227,8 +1449,6 @@ TEST_F(HandleUpdateCommandTest, RollbackSuccess)
 
     std::cin.rdbuf(old_cin);
 
-    fs::remove_all(temp);
-
     EXPECT_EQ(rc, 0);
 }
 
@@ -1236,6 +1456,7 @@ TEST_F(HandleUpdateCommandTest, RollbackCancelled)
 {
     fs::path temp = fs::temp_directory_path() / "tb_rollback_cancel_test";
     fs::create_directories(temp);
+    cleanup_paths_.push_back(temp);
     std::string fake_bin = (temp / "current").string();
     std::string old_bin = fake_bin + ".old";
 
@@ -1255,8 +1476,6 @@ TEST_F(HandleUpdateCommandTest, RollbackCancelled)
 
     EXPECT_EQ(rc, 0);
     EXPECT_NE(captured_out_.str().find("cancelled"), std::string::npos);
-
-    fs::remove_all(temp);
 }
 
 TEST_F(HandleUpdateCommandTest, RollbackNoOldFileReturnsOne)
@@ -1271,6 +1490,35 @@ TEST_F(HandleUpdateCommandTest, RollbackNoOldFileReturnsOne)
     std::cin.rdbuf(old_cin);
 
     EXPECT_EQ(rc, 1);
+}
+
+TEST_F(HandleUpdateCommandTest, RollbackYesFlagSkipsPrompt)
+{
+    fs::path temp = fs::temp_directory_path() / "tb_rollback_yes_test";
+    fs::create_directories(temp);
+    cleanup_paths_.push_back(temp);
+    std::string fake_bin = (temp / "current").string();
+    std::string old_bin = fake_bin + ".old";
+
+    {
+        std::ofstream(fake_bin) << "new binary";
+        std::ofstream(old_bin) << "old binary";
+    }
+    fs::permissions(fake_bin, fs::perms::owner_all);
+    fs::permissions(old_bin, fs::perms::owner_all);
+
+    Updater::set_exe_path_provider_for_testing([fake_bin]() { return fake_bin; });
+
+    std::istringstream empty_input("");
+    auto *old_cin = std::cin.rdbuf(empty_input.rdbuf());
+
+    int rc = handle_update_command({"--rollback", "--yes"});
+
+    std::cin.rdbuf(old_cin);
+
+    EXPECT_EQ(rc, 0);
+    EXPECT_NE(captured_out_.str().find("rolled back"), std::string::npos);
+    EXPECT_TRUE(fs::exists(fake_bin));
 }
 
 TEST_F(HandleUpdateCommandTest, NoMatchingPlatformReturnsOne)
@@ -1322,6 +1570,7 @@ TEST_F(HandleUpdateCommandTest, ChecksumVerificationSuccess)
 
     fs::path temp = fs::temp_directory_path() / "tb_checksum_verify_test";
     fs::create_directories(temp);
+    cleanup_paths_.push_back(temp);
     std::string fake_bin = (temp / "current").string();
     {
         std::ofstream(fake_bin) << "old binary";
@@ -1347,7 +1596,6 @@ TEST_F(HandleUpdateCommandTest, ChecksumVerificationSuccess)
     int rc = handle_update_command({"--yes"});
 
     Updater::reset_test_overrides();
-    fs::remove_all(temp);
 
     EXPECT_EQ(rc, 0);
     EXPECT_NE(captured_out_.str().find("Checksum verified"), std::string::npos);
@@ -1380,6 +1628,7 @@ TEST_F(HandleUpdateCommandTest, ChecksumMismatchReturnsOne)
 
     fs::path temp = fs::temp_directory_path() / "tb_checksum_mismatch_test";
     fs::create_directories(temp);
+    cleanup_paths_.push_back(temp);
     std::string fake_bin = (temp / "current").string();
     {
         std::ofstream(fake_bin) << "old binary";
@@ -1398,7 +1647,6 @@ TEST_F(HandleUpdateCommandTest, ChecksumMismatchReturnsOne)
     int rc = handle_update_command({"--yes"});
 
     Updater::reset_test_overrides();
-    fs::remove_all(temp);
 
     EXPECT_EQ(rc, 1);
     EXPECT_NE(captured_err_.str().find("Checksum verification failed"), std::string::npos);
@@ -1459,6 +1707,7 @@ TEST_F(HandleUpdateCommandTest, ProceedsWithoutChecksumsWhenAbsentFromRelease)
 
     fs::path temp = fs::temp_directory_path() / "tb_no_checksums_test";
     fs::create_directories(temp);
+    cleanup_paths_.push_back(temp);
     std::string fake_bin = (temp / "current").string();
     {
         std::ofstream(fake_bin) << "old binary";
@@ -1483,7 +1732,6 @@ TEST_F(HandleUpdateCommandTest, ProceedsWithoutChecksumsWhenAbsentFromRelease)
     int rc = handle_update_command({"--yes"});
 
     Updater::reset_test_overrides();
-    fs::remove_all(temp);
 
     EXPECT_EQ(rc, 0);
     EXPECT_NE(captured_out_.str().find("Successfully updated"), std::string::npos);
@@ -1516,6 +1764,7 @@ TEST_F(HandleUpdateCommandTest, ProceedsWithoutChecksumWhenAssetNotListed)
 
     fs::path temp = fs::temp_directory_path() / "tb_no_asset_checksum_test";
     fs::create_directories(temp);
+    cleanup_paths_.push_back(temp);
     std::string fake_bin = (temp / "current").string();
     {
         std::ofstream(fake_bin) << "old binary";
@@ -1540,10 +1789,47 @@ TEST_F(HandleUpdateCommandTest, ProceedsWithoutChecksumWhenAssetNotListed)
     int rc = handle_update_command({"--yes"});
 
     Updater::reset_test_overrides();
-    fs::remove_all(temp);
 
     EXPECT_EQ(rc, 0);
     EXPECT_NE(captured_out_.str().find("Successfully updated"), std::string::npos);
+}
+
+TEST_F(HandleUpdateCommandTest, RejectsInvalidBinaryWithoutChecksum)
+{
+    Updater::set_current_version_for_testing("0.1.0");
+
+    std::string asset_name = asset_name_for_version("2.0.0");
+
+    nlohmann::json j;
+    j["tag_name"] = "v2.0.0";
+    j["body"] = "Test release";
+    j["assets"] = nlohmann::json::array();
+    j["assets"].push_back({{"name", asset_name},
+                           {"browser_download_url", "https://github.com/user/repo/releases/download/v2.0.0/" + asset_name}});
+
+    Updater::set_curl_executor_for_testing(
+        [j](const std::string &, const std::vector<std::string> &) -> std::string
+        {
+            return j.dump();
+        });
+
+    Updater::set_exe_path_provider_for_testing([]() { return "/nonexistent/binary"; });
+
+    Updater::set_binary_validator_for_testing([](const std::string &) { return false; });
+
+    Updater::set_file_downloader_for_testing(
+        [](const std::string &, const std::string &dest_path, int64_t) -> bool
+        {
+            std::ofstream(dest_path) << "not a valid binary";
+            return true;
+        });
+
+    int rc = handle_update_command({"--yes"});
+
+    Updater::reset_test_overrides();
+
+    EXPECT_EQ(rc, 1);
+    EXPECT_NE(captured_err_.str().find("not a valid binary"), std::string::npos);
 }
 
 class IsValidBinaryTest : public ::testing::Test
@@ -1611,6 +1897,21 @@ TEST_F(IsValidBinaryTest, RejectsNonBinary)
     EXPECT_FALSE(Updater::is_valid_binary(path.string()));
     fs::remove(path);
 }
+
+#ifdef __APPLE__
+TEST_F(IsValidBinaryTest, RecognizesZipMagic)
+{
+    auto path = fs::temp_directory_path() / "test_zip_file";
+    {
+        std::ofstream f(path, std::ios::binary);
+        unsigned char zip_magic[] = {0x50, 0x4b, 0x03, 0x04};
+        f.write(reinterpret_cast<const char *>(zip_magic), 4);
+        f << "fake zip content";
+    }
+    EXPECT_TRUE(Updater::is_valid_binary(path.string()));
+    fs::remove(path);
+}
+#endif
 
 TEST_F(IsValidBinaryTest, RejectsMissingFile)
 {

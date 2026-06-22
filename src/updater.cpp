@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <fstream>
 #include <vector>
 #include <openssl/evp.h>
@@ -154,7 +155,17 @@ nlohmann::json fetch_release_json()
     std::string response;
     try
     {
-        response = Updater::execute_curl(url, {"-H", "Accept: application/vnd.github+json"});
+        std::vector<std::string> args = {"-H", "Accept: application/vnd.github+json"};
+        if (const char *tok = std::getenv("GITHUB_TOKEN"))
+        {
+            if (tok[0] != '\0')
+            {
+                args.push_back("-H");
+                args.push_back(std::string("Authorization: Bearer ") + tok);
+                log_message("Using GITHUB_TOKEN for authenticated API request", LogLevel::INFO);
+            }
+        }
+        response = Updater::execute_curl(url, args);
     }
     catch (const std::exception &e)
     {
@@ -175,7 +186,7 @@ nlohmann::json fetch_release_json()
         throw std::runtime_error("Failed to parse GitHub API response");
     }
 
-    if (j.contains("message") && j.contains("status"))
+    if (j.contains("message") && !j.contains("tag_name"))
     {
         std::string msg = j["message"].get<std::string>();
         if (msg.find("rate limit") != std::string::npos)
@@ -294,7 +305,13 @@ std::string Updater::get_exe_path()
             }
         }
         if (!result.empty())
+        {
+            std::error_code ec;
+            fs::path canonical_path = fs::canonical(result, ec);
+            if (!ec)
+                return canonical_path.string();
             return result;
+        }
 #endif
     }
     catch (const fs::filesystem_error &)
@@ -361,6 +378,7 @@ std::string Updater::find_curl_executable()
         }
     }
 
+    log_message("curl not found in common paths, falling back to PATH lookup", LogLevel::WARNING);
     g_curl_path_cache = "curl";
     return "curl";
 }
@@ -412,6 +430,12 @@ bool Updater::is_valid_binary(const std::string &filepath)
     if (magic[0] == 'M' && magic[1] == 'Z')
         return true;
 
+#ifdef __APPLE__
+    static constexpr unsigned char ZIP_MAGIC[] = {0x50, 0x4b, 0x03, 0x04};
+    if (memcmp(magic, ZIP_MAGIC, 4) == 0)
+        return true;
+#endif
+
     uint32_t m = static_cast<unsigned char>(magic[0])
         | (static_cast<unsigned char>(magic[1]) << 8)
         | (static_cast<unsigned char>(magic[2]) << 16)
@@ -440,7 +464,7 @@ std::string Updater::execute_curl(const std::string &url, const std::vector<std:
     }
 
     std::string curl_path = find_curl_executable();
-    std::string cmd = escape_shell_arg(curl_path) + " -s -L --proto =https";
+    std::string cmd = escape_shell_arg(curl_path) + " -s -S -L --connect-timeout 30 --max-time 300 --proto =https";
 
     for (const auto &arg : extra_args)
     {
@@ -540,7 +564,9 @@ std::optional<std::string> Updater::find_matching_asset_from_json(const nlohmann
         std::string name = asset.value("name", "");
         if (ends_with(name, suffix))
         {
-            return asset.value("browser_download_url", "");
+            std::string url = asset.value("browser_download_url", "");
+            if (!url.empty())
+                return url;
         }
     }
 
@@ -638,7 +664,7 @@ bool Updater::download_asset(const std::string &url, const std::string &dest_pat
     }
 
     std::string curl_path = find_curl_executable();
-    std::string cmd = escape_shell_arg(curl_path) + " -s -L --fail --proto =https -o " + escape_shell_arg(dest_path);
+    std::string cmd = escape_shell_arg(curl_path) + " -s -S -L --fail --connect-timeout 30 --max-time 300 --proto =https -o " + escape_shell_arg(dest_path);
 
     if (expected_size > 0)
     {
@@ -660,7 +686,33 @@ bool Updater::download_asset(const std::string &url, const std::string &dest_pat
         return false;
     }
 
-    return fs::exists(dest_path) && fs::file_size(dest_path) > 0;
+    return verify_downloaded_file(dest_path, expected_size);
+}
+
+bool Updater::verify_downloaded_file(const std::string &path, int64_t expected_size)
+{
+    std::error_code ec;
+    auto size = fs::file_size(path, ec);
+    if (ec)
+    {
+        log_message("Downloaded file is missing or inaccessible: " + path + " (" + ec.message() + ")", LogLevel::ERR);
+        return false;
+    }
+    if (size == 0)
+    {
+        log_message("Downloaded file is empty: " + path, LogLevel::ERR);
+        return false;
+    }
+
+    if (expected_size > 0 && static_cast<int64_t>(size) != expected_size)
+    {
+        log_message("Downloaded file size mismatch: expected " + std::to_string(expected_size) +
+                        " got " + std::to_string(size),
+                    LogLevel::ERR);
+        return false;
+    }
+
+    return true;
 }
 
 bool Updater::verify_checksum(const std::string &filepath, const std::string &expected_hash)
@@ -737,16 +789,12 @@ UpdateResult Updater::perform_update(const std::string &new_binary_path, const s
         throw std::runtime_error("New binary not found: " + new_path);
     }
 
-    if (fs::exists(old_path))
+    try
     {
-        try
-        {
-            fs::remove(old_path);
-        }
-        catch (const fs::filesystem_error &)
-        {
-            print_error("Warning: Could not remove previous backup file: " + old_path + "\n");
-        }
+        fs::remove(old_path);
+    }
+    catch (const fs::filesystem_error &)
+    {
     }
 
 #ifdef __APPLE__
@@ -765,8 +813,23 @@ UpdateResult Updater::perform_update(const std::string &new_binary_path, const s
     }
 #endif
 
+    auto cleanup_macos_temp = [&]() {
+#ifdef __APPLE__
+        try
+        {
+            fs::path td = fs::path(current_binary_path).parent_path() / ".torrent_builder_update";
+            if (fs::exists(td))
+                fs::remove_all(td);
+        }
+        catch (const fs::filesystem_error &)
+        {
+        }
+#endif
+    };
+
     if (!make_executable(new_path))
     {
+        cleanup_macos_temp();
         throw std::runtime_error("Failed to set executable permissions on new binary");
     }
 
@@ -776,11 +839,14 @@ UpdateResult Updater::perform_update(const std::string &new_binary_path, const s
         fs::rename(current_binary_path, old_path);
         fs::rename(new_path, current_binary_path);
     }
-    catch (const fs::filesystem_error &)
+    catch (const fs::filesystem_error &e)
     {
+        log_message("Direct rename failed on Windows, falling back to batch script: " + std::string(e.what()), LogLevel::WARNING);
         std::string esc_current = escape_batch_path(current_binary_path);
         std::string esc_old = escape_batch_path(old_path);
         std::string esc_new = escape_batch_path(new_path);
+
+        bool step1_done = fs::exists(old_path) && !fs::exists(current_binary_path);
 
         std::string script_path = current_binary_path + ".update.bat";
         {
@@ -790,9 +856,28 @@ UpdateResult Updater::perform_update(const std::string &new_binary_path, const s
                 throw std::runtime_error("Failed to create update script");
             }
             script << "@echo off\n";
+            script << "set tries=0\n";
             script << "timeout /t 2 /nobreak >nul\n";
-            script << "move /y \"" << esc_current << "\" \"" << esc_old << "\"\n";
-            script << "move /y \"" << esc_new << "\" \"" << esc_current << "\"\n";
+            if (!step1_done)
+            {
+                script << ":retry_old\n";
+                script << "move /y \"" << esc_current << "\" \"" << esc_old << "\" >nul 2>&1\n";
+                script << "if not errorlevel 1 goto step2\n";
+                script << "set /a tries+=1\n";
+                script << "if %tries% geq 30 goto done\n";
+                script << "timeout /t 1 /nobreak >nul\n";
+                script << "goto retry_old\n";
+            }
+            script << ":step2\n";
+            script << "set tries=0\n";
+            script << ":retry_new\n";
+            script << "move /y \"" << esc_new << "\" \"" << esc_current << "\" >nul 2>&1\n";
+            script << "if not errorlevel 1 goto done\n";
+            script << "set /a tries+=1\n";
+            script << "if %tries% geq 30 goto done\n";
+            script << "timeout /t 1 /nobreak >nul\n";
+            script << "goto retry_new\n";
+            script << ":done\n";
             script << "del \"%~f0\"\n";
         }
 
@@ -815,6 +900,7 @@ UpdateResult Updater::perform_update(const std::string &new_binary_path, const s
     }
     catch (const fs::filesystem_error &e)
     {
+        cleanup_macos_temp();
         throw std::runtime_error("Failed to backup current binary: " + std::string(e.what()));
     }
 
@@ -833,7 +919,8 @@ UpdateResult Updater::perform_update(const std::string &new_binary_path, const s
                                                current_binary_path, new_path,
                                                std::make_error_code(std::errc::operation_not_permitted));
                 }
-                fs::remove(new_path);
+                std::error_code remove_ec;
+                fs::remove(new_path, remove_ec);
             }
             else
             {
@@ -843,17 +930,7 @@ UpdateResult Updater::perform_update(const std::string &new_binary_path, const s
     }
     catch (const fs::filesystem_error &e)
     {
-#ifdef __APPLE__
-        try
-        {
-            fs::path temp_dir = fs::path(current_binary_path).parent_path() / ".torrent_builder_update";
-            if (fs::exists(temp_dir))
-                fs::remove_all(temp_dir);
-        }
-        catch (const fs::filesystem_error &)
-        {
-        }
-#endif
+        cleanup_macos_temp();
         try
         {
             fs::rename(old_path, current_binary_path);
@@ -869,24 +946,12 @@ UpdateResult Updater::perform_update(const std::string &new_binary_path, const s
     }
 #endif
 
-#ifdef __APPLE__
-    try
-    {
-        fs::path temp_dir = fs::path(current_binary_path).parent_path() / ".torrent_builder_update";
-        if (fs::exists(temp_dir))
-        {
-            fs::remove_all(temp_dir);
-        }
-    }
-    catch (const fs::filesystem_error &)
-    {
-    }
-#endif
+    cleanup_macos_temp();
 
     return UpdateResult::Success;
 }
 
-bool Updater::perform_rollback(const std::string &current_binary_path)
+UpdateResult Updater::perform_rollback(const std::string &current_binary_path)
 {
     log_message("Starting rollback for: " + current_binary_path, LogLevel::INFO);
     std::string old_path = get_old_binary_path(current_binary_path);
@@ -900,10 +965,11 @@ bool Updater::perform_rollback(const std::string &current_binary_path)
     try
     {
         fs::rename(old_path, current_binary_path);
-        return true;
+        return UpdateResult::Success;
     }
-    catch (const fs::filesystem_error &)
+    catch (const fs::filesystem_error &e)
     {
+        log_message("Direct rename failed on Windows rollback, falling back to batch script: " + std::string(e.what()), LogLevel::WARNING);
     }
 
     std::string esc_current = escape_batch_path(current_binary_path);
@@ -917,8 +983,16 @@ bool Updater::perform_rollback(const std::string &current_binary_path)
             throw std::runtime_error("Failed to create rollback script");
         }
         script << "@echo off\n";
+        script << "set tries=0\n";
         script << "timeout /t 2 /nobreak >nul\n";
-        script << "move /y \"" << esc_old << "\" \"" << esc_current << "\"\n";
+        script << ":retry\n";
+        script << "move /y \"" << esc_old << "\" \"" << esc_current << "\" >nul 2>&1\n";
+        script << "if not errorlevel 1 goto done\n";
+        script << "set /a tries+=1\n";
+        script << "if %tries% geq 30 goto done\n";
+        script << "timeout /t 1 /nobreak >nul\n";
+        script << "goto retry\n";
+        script << ":done\n";
         script << "del \"%~f0\"\n";
     }
 
@@ -931,6 +1005,8 @@ bool Updater::perform_rollback(const std::string &current_binary_path)
         fs::remove(script_path);
         throw std::runtime_error("Failed to launch rollback script");
     }
+    log_message("Rollback scheduled via batch script: " + script_path, LogLevel::INFO);
+    return UpdateResult::PendingRestart;
 #else
     std::string temp_path = current_binary_path + ".rbtmp";
     try
@@ -952,7 +1028,7 @@ bool Updater::perform_rollback(const std::string &current_binary_path)
         catch (const fs::filesystem_error &restore_err)
         {
             log_message("Rollback restore also failed: " + std::string(restore_err.what()) +
-                        " — binary may be missing at " + current_binary_path, LogLevel::ERR);
+                        " — binary may be missing at " + current_binary_path + ", backup at " + temp_path, LogLevel::ERR);
         }
         throw std::runtime_error("Rollback failed: " + std::string(e.what()));
     }
@@ -966,5 +1042,5 @@ bool Updater::perform_rollback(const std::string &current_binary_path)
     }
 #endif
 
-    return true;
+    return UpdateResult::Success;
 }
