@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libboost-dev libtorrent-rasterbar-dev pkg-config
+          sudo apt-get install -y build-essential cmake libboost-dev libtorrent-rasterbar-dev pkg-config libssl-dev
 
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
@@ -67,6 +67,8 @@ jobs:
         with:
           msystem: ${{ matrix.msystem }}
           update: false
+          retry: true
+          retry-delay: 30
           install: >-
             git
             base-devel
@@ -74,6 +76,7 @@ jobs:
             ${{ matrix.prefix }}-cmake
             ${{ matrix.prefix }}-libtorrent-rasterbar
             ${{ matrix.prefix }}-pkg-config
+            ${{ matrix.prefix }}-openssl
 
       - name: Configure
         shell: msys2 {0}
@@ -103,10 +106,10 @@ jobs:
           persist-credentials: false
 
       - name: Install dependencies
-        run: brew install boost cmake libtorrent-rasterbar pkg-config
+        run: brew install boost cmake libtorrent-rasterbar pkg-config openssl@3
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
 
       - name: Build
         run: cmake --build build --parallel

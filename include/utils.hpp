@@ -274,6 +274,33 @@ void direct_write(const std::filesystem::path &dest, const std::vector<char> &da
  */
 void atomic_write(const std::filesystem::path &dest, const std::vector<char> &data);
 
+/**
+ * @brief Semver version components.
+ */
+struct Version {
+    int major = 0;
+    int minor = 0;
+    int patch = 0;
+    std::string prerelease;
+
+    bool is_prerelease() const { return !prerelease.empty(); }
+};
+
+/**
+ * @brief Parse a semver string into a Version struct.
+ * @param version_str Version string, optionally prefixed with 'v'/'V' or suffixed with '-...'.
+ * @return Parsed Version with major/minor/patch; defaults to 0 on missing or invalid parts.
+ */
+Version parse_version(const std::string &version_str);
+
+/**
+ * @brief Compare two semver strings.
+ * @param v1 First version string.
+ * @param v2 Second version string.
+ * @return -1 if v1 < v2, 0 if equal, 1 if v1 > v2.
+ */
+int compare_versions(const std::string &v1, const std::string &v2);
+
 } // namespace utils
 
 #endif

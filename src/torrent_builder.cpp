@@ -13,15 +13,20 @@
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <cmath>
+#include <random>
 #include <chrono>
 #include <ranges>
 #include <stdexcept>
 #include <yaml-cpp/exceptions.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 #include "torrent_inspector.hpp"
 #include "torrent_modifier.hpp"
 #include "torrent_checker.hpp"
 #include "season_pack.hpp"
 #include "output.hpp"
+#include "updater.hpp"
 
 namespace fs = std::filesystem;
 
@@ -1208,6 +1213,297 @@ int handle_batch_command(const std::vector<std::string> &args)
     }
 }
 
+/**
+ * @brief Handle the 'update' subcommand — check for, download, and install newer versions.
+ *
+ * Flags:
+ *   -h,--help   Show help and usage.
+ *   --check     Only check for available updates (no download).
+ *   --yes       Skip confirmation prompt.
+ *   --rollback  Restore previous version from .old backup.
+ *
+ * Returns 0 on success or user cancellation, 1 on error.
+ */
+int handle_update_command(const std::vector<std::string> &args)
+{
+    std::string download_path;
+    try
+    {
+        int argc = static_cast<int>(args.size()) + 1;
+        std::vector<const char *> argv;
+        argv.push_back("torrent-builder");
+        for (const auto &arg : args)
+        {
+            argv.push_back(arg.c_str());
+        }
+
+        cxxopts::Options update_options("torrent-builder update", "Update to the latest version");
+        update_options.add_options()
+            ("h,help", "Show help")
+            ("y,yes", "Skip confirmation prompt")
+            ("check", "Only check for updates (do not download)")
+            ("rollback", "Restore previous version");
+
+        auto result = update_options.parse(argc, argv.data());
+
+        if (result.count("help"))
+        {
+            print_info(update_options.help() + "\n");
+            print_info("\nExamples:\n");
+            print_info("  torrent-builder update\n");
+            print_info("  torrent-builder update --check\n");
+            print_info("  torrent-builder update --yes\n");
+            print_info("  torrent-builder update --rollback\n");
+            return 0;
+        }
+
+        if (result.count("rollback"))
+        {
+            std::string exe_path = Updater::get_exe_path();
+
+            print_info("Rolling back to previous version...\n");
+            log_message("User initiated rollback", LogLevel::INFO);
+
+            if (!result.count("yes") && !prompt_yes_no("Restore previous version?"))
+            {
+                print_info("Rollback cancelled.\n");
+                log_message("Rollback cancelled by user", LogLevel::INFO);
+                return 0;
+            }
+
+            UpdateResult rollback_result = Updater::perform_rollback(exe_path);
+            if (rollback_result == UpdateResult::Success)
+            {
+                print_info("Successfully rolled back to previous version.\n");
+                log_message("Rollback completed successfully", LogLevel::INFO);
+            }
+            else
+            {
+                print_info("Rollback scheduled: previous version will be restored when this command exits.\n");
+                log_message("Rollback scheduled via async helper", LogLevel::INFO);
+            }
+            return 0;
+        }
+
+        print_info("Checking for updates...\n");
+        log_message("Checking for updates (current: " + std::string(Updater::get_current_version()) + ")", LogLevel::INFO);
+
+        auto latest = Updater::fetch_latest_release();
+
+        if (latest.version.empty())
+        {
+            print_error("Error: Could not determine the latest release version.\n");
+            log_message("Latest release has empty version tag", LogLevel::ERR);
+            return 1;
+        }
+
+        std::string current = Updater::get_current_version();
+        int cmp = utils::compare_versions(current, latest.version);
+
+        bool is_dev = current.find("dev") != std::string::npos;
+
+        if (cmp >= 0 && !is_dev)
+        {
+            print_info("Already up to date: " + current + "\n");
+            log_message("Already up to date: " + current, LogLevel::INFO);
+            return 0;
+        }
+
+        if (cmp > 0 && is_dev)
+        {
+            print_info("Current dev version (" + current + ") is newer than latest release (" + latest.version + ").\n");
+            log_message("Dev build ahead of latest release: " + current + " > " + latest.version, LogLevel::INFO);
+            return 0;
+        }
+
+        log_message("Update available: " + current + " -> " + latest.version, LogLevel::INFO);
+
+        print_info("Current version:  " + current + "\n");
+        print_info("Latest version:   " + latest.version + "\n");
+
+        if (!latest.changelog.empty())
+        {
+            std::string changelog = latest.changelog;
+            std::string sanitized;
+            sanitized.reserve(changelog.size());
+            for (size_t i = 0; i < changelog.size(); ++i)
+            {
+                unsigned char c = static_cast<unsigned char>(changelog[i]);
+                if (c == '\x1b')
+                {
+                    if (i + 1 >= changelog.size())
+                        continue;
+                    char next = changelog[i + 1];
+                    if (next == '[')
+                    {
+                        size_t j = i + 2;
+                        while (j < changelog.size() &&
+                               (std::isdigit(static_cast<unsigned char>(changelog[j])) || changelog[j] == ';'))
+                            j++;
+                        if (j < changelog.size() && changelog[j] >= 0x40 && changelog[j] <= 0x7E)
+                        {
+                            i = j;
+                            continue;
+                        }
+                    }
+                    else if (next == ']')
+                    {
+                        size_t j = i + 2;
+                        while (j < changelog.size())
+                        {
+                            if (changelog[j] == '\x07') { i = j; break; }
+                            if (changelog[j] == '\x1b' && j + 1 < changelog.size() && changelog[j + 1] == '\\') { i = j + 1; break; }
+                            j++;
+                        }
+                        if (j >= changelog.size())
+                            i = changelog.size() - 1;
+                        continue;
+                    }
+                    else
+                    {
+                        ++i;
+                        continue;
+                    }
+                }
+                if (c < 0x20 && c != '\t' && c != '\n')
+                    continue;
+                sanitized += static_cast<char>(c);
+            }
+            changelog = sanitized;
+            if (changelog.size() > 500)
+            {
+                size_t cut = 500;
+                while (cut > 0 && (static_cast<unsigned char>(changelog[cut]) & 0xC0) == 0x80)
+                    --cut;
+                changelog = changelog.substr(0, cut) + "...";
+            }
+            print_info("\nChangelog:\n" + changelog + "\n\n");
+        }
+
+        if (result.count("check"))
+        {
+            print_info("Update available. Run 'torrent-builder update' to install.\n");
+            log_message("Check-only mode: update available (" + latest.version + ")", LogLevel::INFO);
+            return 0;
+        }
+
+        auto platform = Updater::get_platform_info();
+        print_info("Platform: " + platform.os + "/" + platform.arch + "\n");
+
+        auto asset_url = Updater::find_matching_asset_from_json(latest.release_json, platform);
+        if (!asset_url)
+        {
+            log_message("No matching asset for " + platform.os + "/" + platform.arch, LogLevel::ERR);
+            print_error("Error: No matching binary found for " + platform.os + "/" + platform.arch + "\n");
+            return 1;
+        }
+
+        latest.asset_size = Updater::get_asset_size(latest.release_json, *asset_url);
+
+        if (!result.count("yes"))
+        {
+            if (!prompt_yes_no("Download and install version " + latest.version + "?"))
+            {
+                print_info("Update cancelled.\n");
+                log_message("Update cancelled by user for version " + latest.version, LogLevel::INFO);
+                return 0;
+            }
+        }
+
+        std::string exe_path = Updater::get_exe_path();
+
+        fs::path temp_dir = fs::temp_directory_path();
+        std::string ext = "";
+#ifdef _WIN32
+        ext = ".exe";
+#elif defined(__APPLE__)
+        ext = ".zip";
+#endif
+        std::random_device rd;
+        download_path = (temp_dir / ("tb_update_" + std::to_string(rd()) + ext)).string();
+
+        print_info("Downloading " + latest.version + "...\n");
+        log_message("Downloading update " + latest.version + " from: " + *asset_url, LogLevel::INFO);
+
+        if (!Updater::download_asset(*asset_url, download_path, latest.asset_size))
+        {
+            log_message("Download failed for: " + *asset_url, LogLevel::ERR);
+            print_error("Error: Failed to download update.\n");
+            try { fs::remove(download_path); } catch (...) {}
+            return 1;
+        }
+
+        auto checksums = Updater::fetch_checksums(latest.release_json);
+        bool has_checksum = false;
+        if (checksums)
+        {
+            std::string asset_name = fs::path(*asset_url).filename().string();
+            auto expected_hash = Updater::lookup_checksum(*checksums, asset_name);
+            if (expected_hash)
+            {
+                has_checksum = true;
+                print_info("Verifying checksum...\n");
+                log_message("Verifying checksum for: " + download_path, LogLevel::INFO);
+                if (!Updater::verify_checksum(download_path, *expected_hash))
+                {
+                    log_message("Checksum verification failed for: " + download_path, LogLevel::ERR);
+                    print_error("Error: Checksum verification failed. Download may be corrupted.\n");
+                    try { fs::remove(download_path); } catch (...) {}
+                    return 1;
+                }
+                print_info("Checksum verified.\n");
+            }
+            else
+            {
+                log_message("No checksum found for asset: " + asset_name, LogLevel::WARNING);
+            }
+        }
+        else
+        {
+            log_message("No checksums.txt found in release, skipping verification", LogLevel::WARNING);
+        }
+
+        if (!has_checksum)
+        {
+            if (!Updater::is_valid_binary(download_path))
+            {
+                log_message("Downloaded file is not a valid binary: " + download_path, LogLevel::ERR);
+                print_error("Error: Downloaded file is not a valid binary. The download may be corrupted.\n");
+                try { fs::remove(download_path); } catch (...) {}
+                return 1;
+            }
+            log_message("No checksum available, validated binary format instead", LogLevel::WARNING);
+        }
+
+        print_info("Installing update...\n");
+        log_message("Installing update from: " + download_path + " to: " + exe_path, LogLevel::INFO);
+
+        UpdateResult update_result = Updater::perform_update(download_path, exe_path);
+
+        if (update_result == UpdateResult::Success)
+        {
+            try { fs::remove(download_path); } catch (...) {}
+            print_info("Successfully updated to version " + latest.version + "!\n");
+            log_message("Successfully updated to version " + latest.version, LogLevel::INFO);
+        }
+        else
+        {
+            print_info("Update scheduled: version " + latest.version +
+                           " will be installed when this command exits.\n");
+            log_message("Update scheduled via async helper for version " + latest.version, LogLevel::INFO);
+        }
+        return 0;
+    }
+    catch (const std::exception &e)
+    {
+        log_message("Update error: " + std::string(e.what()), LogLevel::ERR);
+        print_error(std::string("Error: ") + e.what() + "\n");
+        try { fs::remove(download_path); } catch (...) {}
+        return 1;
+    }
+}
+
+#ifndef TORRENT_BUILDER_EXCLUDE_MAIN
 int main(int argc, char *argv[])
 {
     // Check for subcommands
@@ -1249,6 +1545,16 @@ int main(int argc, char *argv[])
             args.push_back(argv[i]);
         }
         return handle_batch_command(args);
+    }
+
+    if (argc >= 2 && std::string(argv[1]) == "update")
+    {
+        std::vector<std::string> args;
+        for (int i = 2; i < argc; ++i)
+        {
+            args.push_back(argv[i]);
+        }
+        return handle_update_command(args);
     }
 
     try
@@ -1436,3 +1742,4 @@ int main(int argc, char *argv[])
 
     return 0;
 }
+#endif
