@@ -8,6 +8,7 @@
 #include <regex>
 #include <filesystem>
 #include <fstream>
+#include <ctime>
 #include "torrent_inspector.hpp"
 
 namespace {
@@ -3521,3 +3522,104 @@ TEST(CLI, NoFailOnSeasonWarningIncompletePackSucceeds) {
 
     fs::remove_all(temp_dir);
 }
+
+// ─── Startup update check disable flags (issue #59) ───
+// These run the real binary but ONLY exercise the disable paths, which skip
+// network entirely. They verify no update notice leaks to stderr and no state
+// file is written when the check is disabled. POSIX-only (env-var command
+// prefix + XDG/HOME semantics).
+
+#ifndef _WIN32
+static std::filesystem::path make_isolated_home()
+{
+    std::filesystem::path home =
+        std::filesystem::temp_directory_path() / ("tb_upd_home_" + std::to_string(std::time(nullptr)));
+    std::filesystem::remove_all(home);
+    std::filesystem::create_directories(home);
+    return home;
+}
+
+static std::string make_input_file(const std::filesystem::path &dir)
+{
+    std::filesystem::path p = dir / "input.bin";
+    std::ofstream f(p, std::ios::binary);
+    std::vector<char> data(1024, 'X');
+    f.write(data.data(), data.size());
+    return p.string();
+}
+
+TEST(CLI, NoUpdateCheckFlagSuppressesNotice)
+{
+    namespace fs = std::filesystem;
+    fs::path home = make_isolated_home();
+    std::string input = make_input_file(home);
+    std::string out = (home / "out.torrent").string();
+
+    // XDG_CONFIG_HOME pointed at the isolated home so the state file, if
+    // written, would land here. --no-update-check must skip the check entirely.
+    std::string cmd = "XDG_CONFIG_HOME=" + home.string() + " " +
+                      get_binary_path() +
+                      " --no-update-check --path " + input +
+                      " --output " + out + " 2>&1";
+    int exit_code = -1;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_EQ(output.find("Update available"), std::string::npos)
+        << "No update notice expected with --no-update-check";
+    EXPECT_EQ(output.find("Newer release"), std::string::npos)
+        << "No update notice expected with --no-update-check";
+    // State file must NOT be created when the check is disabled.
+    EXPECT_FALSE(fs::exists(home / "torrent-builder" / "update_check.state"));
+
+    fs::remove_all(home);
+}
+
+TEST(CLI, NoUpdateCheckEnvSuppressesNotice)
+{
+    namespace fs = std::filesystem;
+    fs::path home = make_isolated_home();
+    std::string input = make_input_file(home);
+    std::string out = (home / "out.torrent").string();
+
+    std::string cmd = "XDG_CONFIG_HOME=" + home.string() +
+                      " TB_NO_UPDATE_CHECK=1 " + get_binary_path() +
+                      " --path " + input + " --output " + out + " 2>&1";
+    int exit_code = -1;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_EQ(output.find("Update available"), std::string::npos)
+        << "No update notice expected with TB_NO_UPDATE_CHECK=1";
+    EXPECT_EQ(output.find("Newer release"), std::string::npos)
+        << "No update notice expected with TB_NO_UPDATE_CHECK=1";
+    EXPECT_FALSE(fs::exists(home / "torrent-builder" / "update_check.state"));
+
+    fs::remove_all(home);
+}
+
+TEST(CLI, QuietSuppressesUpdateCheck)
+{
+    namespace fs = std::filesystem;
+    fs::path home = make_isolated_home();
+    std::string input = make_input_file(home);
+    std::string out = (home / "out.torrent").string();
+
+    // --quiet must suppress the check (and the notice). No state file written.
+    std::string cmd = "XDG_CONFIG_HOME=" + home.string() + " " +
+                      get_binary_path() +
+                      " --quiet --path " + input +
+                      " --output " + out + " 2>&1";
+    int exit_code = -1;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_EQ(output.find("Update available"), std::string::npos)
+        << "No update notice expected under --quiet";
+    EXPECT_EQ(output.find("Newer release"), std::string::npos)
+        << "No update notice expected under --quiet";
+    EXPECT_FALSE(fs::exists(home / "torrent-builder" / "update_check.state"));
+
+    fs::remove_all(home);
+}
+#endif

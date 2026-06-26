@@ -8,6 +8,8 @@
 #include <nlohmann/json.hpp>
 #include <filesystem>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #ifdef __APPLE__
 #include <openssl/evp.h>
@@ -2036,5 +2038,300 @@ TEST_F(PerformUpdateFailureTest, RollbackRestoresOriginalOnSecondRenameFailure)
     std::string content;
     std::getline(f, content);
     EXPECT_EQ(content, "original content");
+#endif
+}
+
+// ─────────────────────────────────────────────────────────────
+// Startup update check (issue #59)
+// ─────────────────────────────────────────────────────────────
+
+class CheckForUpdateTest : public ::testing::Test
+{
+protected:
+    void TearDown() override { Updater::reset_test_overrides(); }
+
+    // Returns a curl executor that serves a fixed GitHub release JSON.
+    Updater::CurlExecutor make_release_executor(const std::string &tag)
+    {
+        return [tag](const std::string & /*url*/, const std::vector<std::string> & /*args*/) {
+            return std::string("{\"tag_name\":\"") + tag +
+                   "\",\"body\":\"release notes\",\"assets\":[]}";
+        };
+    }
+};
+
+TEST_F(CheckForUpdateTest, ReturnsInfoWhenNewer)
+{
+    Updater::set_current_version_for_testing("1.0.0");
+    Updater::set_curl_executor_for_testing(make_release_executor("v1.4.2"));
+
+    auto r = Updater::check_for_update();
+    EXPECT_TRUE(r.fetch_succeeded);
+    ASSERT_TRUE(r.info.has_value());
+    EXPECT_EQ(r.info->version, "1.4.2");
+}
+
+TEST_F(CheckForUpdateTest, ReturnsNulloptWhenUpToDate)
+{
+    Updater::set_current_version_for_testing("1.4.2");
+    Updater::set_curl_executor_for_testing(make_release_executor("v1.4.2"));
+
+    auto r = Updater::check_for_update();
+    EXPECT_TRUE(r.fetch_succeeded);   // fetched OK, just no newer version
+    EXPECT_FALSE(r.info.has_value());
+}
+
+TEST_F(CheckForUpdateTest, ReturnsNulloptWhenCurrentNewer)
+{
+    Updater::set_current_version_for_testing("2.0.0");
+    Updater::set_curl_executor_for_testing(make_release_executor("v1.4.2"));
+
+    auto r = Updater::check_for_update();
+    EXPECT_TRUE(r.fetch_succeeded);
+    EXPECT_FALSE(r.info.has_value());
+}
+
+TEST_F(CheckForUpdateTest, ReturnsLatestForDevBuild)
+{
+    // dev builds always compare as older than any release → always report latest
+    Updater::set_current_version_for_testing("dev (a3f9c21)");
+    Updater::set_curl_executor_for_testing(make_release_executor("v1.4.2"));
+
+    auto r = Updater::check_for_update();
+    EXPECT_TRUE(r.fetch_succeeded);
+    ASSERT_TRUE(r.info.has_value());
+    EXPECT_EQ(r.info->version, "1.4.2");
+}
+
+TEST_F(CheckForUpdateTest, ReturnsLatestForPlainDevVersion)
+{
+    Updater::set_current_version_for_testing("dev");
+    Updater::set_curl_executor_for_testing(make_release_executor("v0.1.0"));
+
+    auto r = Updater::check_for_update();
+    EXPECT_TRUE(r.fetch_succeeded);
+    ASSERT_TRUE(r.info.has_value());
+    EXPECT_EQ(r.info->version, "0.1.0");
+}
+
+TEST_F(CheckForUpdateTest, FetchFailsWhenOffline)
+{
+    Updater::set_current_version_for_testing("1.0.0");
+    Updater::set_curl_executor_for_testing(
+        [](const std::string &, const std::vector<std::string> &) -> std::string {
+            throw std::runtime_error("connection refused");
+        });
+
+    auto r = Updater::check_for_update();
+    EXPECT_FALSE(r.fetch_succeeded);  // offline → must NOT be recorded as success
+    EXPECT_FALSE(r.info.has_value());
+}
+
+TEST_F(CheckForUpdateTest, ReturnsNulloptOnEmptyVersion)
+{
+    Updater::set_current_version_for_testing("1.0.0");
+    Updater::set_curl_executor_for_testing(
+        [](const std::string &, const std::vector<std::string> &) {
+            return std::string("{\"tag_name\":\"\",\"body\":\"\",\"assets\":[]}");
+        });
+
+    auto r = Updater::check_for_update();
+    EXPECT_TRUE(r.fetch_succeeded);
+    EXPECT_FALSE(r.info.has_value());
+}
+
+TEST_F(CheckForUpdateTest, FetchFailsOnRateLimit)
+{
+    Updater::set_current_version_for_testing("1.0.0");
+    Updater::set_curl_executor_for_testing(
+        [](const std::string &, const std::vector<std::string> &) {
+            return std::string("{\"message\":\"API rate limit exceeded\"}");
+        });
+
+    auto r = Updater::check_for_update();
+    EXPECT_FALSE(r.fetch_succeeded);  // rate-limit error → fetch did not succeed
+    EXPECT_FALSE(r.info.has_value());
+}
+
+TEST_F(CheckForUpdateTest, DoesNotThrowOnNetworkError)
+{
+    Updater::set_current_version_for_testing("1.0.0");
+    Updater::set_curl_executor_for_testing(
+        [](const std::string &, const std::vector<std::string> &) -> std::string {
+            throw std::runtime_error("boom");
+        });
+
+    EXPECT_NO_THROW({ (void)Updater::check_for_update(); });
+}
+
+// ─── Throttle / state file ───
+
+class UpdateCheckThrottleTest : public ::testing::Test
+{
+protected:
+    fs::path temp_dir_;
+
+    void SetUp() override
+    {
+        temp_dir_ = fs::temp_directory_path() / ("tb_throttle_" + std::to_string(std::time(nullptr)));
+        fs::create_directories(temp_dir_);
+        Updater::set_update_check_state_path_for_testing(
+            (temp_dir_ / "update_check.state").string());
+    }
+
+    void TearDown() override
+    {
+        Updater::reset_test_overrides();
+        std::error_code ec;
+        fs::remove_all(temp_dir_, ec);
+    }
+
+    void write_state(long long epoch)
+    {
+        std::ofstream out(temp_dir_ / "update_check.state", std::ios::trunc);
+        ASSERT_TRUE(out) << "could not write state file";
+        out << "last_check=" << epoch << "\n";
+    }
+};
+
+TEST_F(UpdateCheckThrottleTest, StatePathIsOverridden)
+{
+    std::string p = Updater::get_update_check_state_path();
+    EXPECT_EQ(p, (temp_dir_ / "update_check.state").string());
+}
+
+TEST_F(UpdateCheckThrottleTest, TrueOnFirstRun)
+{
+    EXPECT_TRUE(Updater::should_check_for_updates(24));
+}
+
+TEST_F(UpdateCheckThrottleTest, FalseWithinInterval)
+{
+    write_state(static_cast<long long>(std::time(nullptr)));
+    EXPECT_FALSE(Updater::should_check_for_updates(24));
+}
+
+TEST_F(UpdateCheckThrottleTest, TrueAfterInterval)
+{
+    long long now = static_cast<long long>(std::time(nullptr));
+    write_state(now - 25 * 3600);
+    EXPECT_TRUE(Updater::should_check_for_updates(24));
+}
+
+TEST_F(UpdateCheckThrottleTest, TrueOnCorruptFile)
+{
+    {
+        std::ofstream out(temp_dir_ / "update_check.state", std::ios::trunc);
+        out << "garbage content that is not a timestamp\n";
+    }
+    EXPECT_TRUE(Updater::should_check_for_updates(24));
+}
+
+TEST_F(UpdateCheckThrottleTest, RecordPersistsTimestamp)
+{
+    ASSERT_TRUE(Updater::should_check_for_updates(24));
+    Updater::record_update_check();
+    EXPECT_FALSE(Updater::should_check_for_updates(24));
+}
+
+TEST_F(UpdateCheckThrottleTest, RecordIsAtomic)
+{
+    Updater::record_update_check();
+    // No leftover temp file after a successful record — scan for any
+    // update_check.state.tmp.* sibling (the suffix is randomised).
+    bool found_tmp = false;
+    for (const auto &entry : fs::directory_iterator(temp_dir_))
+    {
+        if (entry.path().filename().string().starts_with("update_check.state.tmp"))
+        {
+            found_tmp = true;
+            break;
+        }
+    }
+    EXPECT_FALSE(found_tmp);
+    EXPECT_TRUE(fs::exists(temp_dir_ / "update_check.state"));
+}
+
+TEST_F(UpdateCheckThrottleTest, EmptyPathMeansAlwaysCheck)
+{
+    // Empty override string simulates an unresolvable home directory → state
+    // path is "". should_check must return true (treated as "never checked")
+    // and record must be a silent no-op (no file created, no real path touched).
+    Updater::set_update_check_state_path_for_testing(std::string{""});
+    EXPECT_TRUE(Updater::should_check_for_updates());
+    Updater::record_update_check();
+    EXPECT_FALSE(fs::exists(temp_dir_ / "update_check.state"));
+}
+
+// ─── Platform state-path resolution (real env vars, override cleared) ───
+
+class UpdateCheckStatePathTest : public ::testing::Test
+{
+protected:
+    void TearDown() override { Updater::reset_test_overrides(); }
+};
+
+TEST_F(UpdateCheckStatePathTest, LinuxXdgConfigHomeUsed)
+{
+#ifndef __linux__
+    GTEST_SKIP() << "Linux-only path test";
+#else
+    Updater::set_update_check_state_path_for_testing(std::nullopt);
+    fs::path tmp = fs::temp_directory_path() / ("tb_xdg_" + std::to_string(std::time(nullptr)));
+    fs::create_directories(tmp);
+
+    char prev_xdg[4096] = {0};
+    bool had_xdg = (std::getenv("XDG_CONFIG_HOME") != nullptr);
+    if (had_xdg)
+    {
+        std::strncpy(prev_xdg, std::getenv("XDG_CONFIG_HOME"), sizeof(prev_xdg) - 1);
+    }
+    ::setenv("XDG_CONFIG_HOME", tmp.c_str(), 1);
+
+    std::string path = Updater::get_update_check_state_path();
+    EXPECT_EQ(path, (tmp / "torrent-builder" / "update_check.state").string());
+
+    if (had_xdg)
+        ::setenv("XDG_CONFIG_HOME", prev_xdg, 1);
+    else
+        ::unsetenv("XDG_CONFIG_HOME");
+
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+#endif
+}
+
+TEST_F(UpdateCheckStatePathTest, LinuxHomeFallbackUsed)
+{
+#ifndef __linux__
+    GTEST_SKIP() << "Linux-only path test";
+#else
+    Updater::set_update_check_state_path_for_testing(std::nullopt);
+    fs::path tmp = fs::temp_directory_path() / ("tb_home_" + std::to_string(std::time(nullptr)));
+    fs::create_directories(tmp);
+
+    // Clear XDG so HOME fallback engages
+    char prev_xdg[4096] = {0};
+    bool had_xdg = (std::getenv("XDG_CONFIG_HOME") != nullptr);
+    if (had_xdg)
+        std::strncpy(prev_xdg, std::getenv("XDG_CONFIG_HOME"), sizeof(prev_xdg) - 1);
+    ::unsetenv("XDG_CONFIG_HOME");
+
+    char prev_home[4096] = {0};
+    bool had_home = (std::getenv("HOME") != nullptr);
+    if (had_home)
+        std::strncpy(prev_home, std::getenv("HOME"), sizeof(prev_home) - 1);
+    ::setenv("HOME", tmp.c_str(), 1);
+
+    std::string path = Updater::get_update_check_state_path();
+    EXPECT_EQ(path, (tmp / ".config" / "torrent-builder" / "update_check.state").string());
+
+    if (had_home)
+        ::setenv("HOME", prev_home, 1);
+    if (had_xdg)
+        ::setenv("XDG_CONFIG_HOME", prev_xdg, 1);
+
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
 #endif
 }

@@ -17,6 +17,7 @@
 #include <chrono>
 #include <ranges>
 #include <stdexcept>
+#include <cstdlib>
 #include <yaml-cpp/exceptions.h>
 #ifndef _WIN32
 #include <unistd.h>
@@ -1504,6 +1505,68 @@ int handle_update_command(const std::vector<std::string> &args)
 }
 
 #ifndef TORRENT_BUILDER_EXCLUDE_MAIN
+
+/**
+ * @brief Best-effort update check run once on startup (default flow only).
+ *
+ * Honors the disable switches (TB_NO_UPDATE_CHECK env var / --no-update-check
+ * flag), the 24h throttle, and is suppressed under --quiet/--json. Prints an
+ * update notification to stderr (never stdout, so --json output is safe) when
+ * a newer version exists. Never throws and never crashes on network errors.
+ */
+static void maybe_check_for_updates_on_startup(const cxxopts::ParseResult &result)
+{
+    try
+    {
+        if (result.count("no-update-check"))
+            return;
+
+        if (const char *e = std::getenv("TB_NO_UPDATE_CHECK"))
+        {
+            if (e[0] == '1' || e[0] == 't' || e[0] == 'T')
+                return;
+        }
+
+        if (result.count("quiet") || result.count("json"))
+            return;
+
+        if (!Updater::should_check_for_updates(24))
+            return;
+
+        auto check = Updater::check_for_update();
+        // Persist the throttle timestamp ONLY when the network round-trip
+        // actually completed — including when the build is already up-to-date
+        // (the common case), so the throttle works for it. When the fetch
+        // failed (offline / curl missing / rate limit) we do NOT record, so the
+        // next run retries sooner instead of waiting out the full interval.
+        if (check.fetch_succeeded)
+            Updater::record_update_check();
+
+        if (!check.info)
+            return;
+
+        std::string current = Updater::get_current_version();
+        bool is_dev = (current == "dev" ||
+                       (current.size() >= 5 && current.compare(0, 5, "dev (") == 0));
+        if (is_dev)
+        {
+            // Informational only: do NOT suggest `update`, which would replace
+            // this locally-compiled binary with a prebuilt release artifact.
+            std::cerr << "\n*** Newer release available: v" << check.info->version
+                      << " (you are running a dev build: " << current << ") ***\n";
+        }
+        else
+        {
+            std::cerr << "\n*** Update available: v" << check.info->version
+                      << " — run `torrent_builder update` ***\n";
+        }
+    }
+    catch (const std::exception &e)
+    {
+        log_message(std::string("Startup update check error: ") + e.what(), LogLevel::WARNING);
+    }
+}
+
 int main(int argc, char *argv[])
 {
     // Check for subcommands
@@ -1594,7 +1657,8 @@ int main(int argc, char *argv[])
             "preset", "Apply named preset from presets.yaml", cxxopts::value<std::string>(), "NAME")(
             "preset-file", "Load presets from specified file", cxxopts::value<std::string>(), "FILE")(
             "rules-file", "Load tracker rules from specified file", cxxopts::value<std::string>(), "FILE")(
-            "fail-on-season-warning", "Fail if a TV season pack has missing episodes");
+            "fail-on-season-warning", "Fail if a TV season pack has missing episodes")(
+            "no-update-check", "Skip automatic update check on startup");
 
         options.positional_help("PATH [OUTPUT]");
         options.parse_positional({"path", "output"});
@@ -1667,6 +1731,8 @@ int main(int argc, char *argv[])
         // Run in interactive or command-line mode based on arguments
         if (result.count("interactive"))
         {
+            // Best-effort update check (default flow only; subcommands skip main()).
+            maybe_check_for_updates_on_startup(result);
             auto config = get_interactive_config();
             TorrentCreator creator(config);
             creator.create_torrent();
@@ -1691,6 +1757,9 @@ int main(int argc, char *argv[])
             {
                 throw std::runtime_error(*season_error);
             }
+            // Best-effort update check — runs only after args are validated so
+            // the notice never appears before an error message.
+            maybe_check_for_updates_on_startup(result);
             TorrentCreator creator(*config_opt);
             creator.create_torrent();
             if (is_json_mode()) {
