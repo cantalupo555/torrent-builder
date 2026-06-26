@@ -32,6 +32,21 @@ struct UpdateInfo
 };
 
 /**
+ * @brief Outcome of check_for_update().
+ *
+ * info            - has a value when a newer release is available (or the
+ *                   current build is a dev build, which always compares older).
+ * fetch_succeeded - true when the network round-trip completed (even if no
+ *                   update was found); false on offline/parse/rate-limit errors.
+ *                   Callers should only record the throttle timestamp when true.
+ */
+struct UpdateCheckResult
+{
+    std::optional<UpdateInfo> info;
+    bool fetch_succeeded = false;
+};
+
+/**
  * @brief Detected OS and CPU architecture for asset matching.
  */
 struct PlatformInfo
@@ -77,6 +92,73 @@ public:
      * @throws std::runtime_error on network/parse errors or API rate limits.
      */
     static UpdateInfo fetch_latest_release();
+
+    /**
+     * @brief Fetch the latest release information with custom curl timeouts.
+     *
+     * Used by the startup update check, which needs short timeouts so it never
+     * noticeably blocks the user. curl honors the last occurrence of a timeout
+     * flag, so the supplied values override the defaults (30s/300s) baked into
+     * execute_curl() for this call only.
+     *
+     * @param connect_timeout_s connect timeout in seconds (curl --connect-timeout).
+     * @param max_time_s        overall request timeout in seconds (curl --max-time).
+     * @return UpdateInfo with version, changelog, and release JSON.
+     * @throws std::runtime_error on network/parse errors or API rate limits.
+     */
+    static UpdateInfo fetch_latest_release(int connect_timeout_s, int max_time_s);
+
+    /**
+     * @brief Perform a best-effort update check (used on startup).
+     *
+     * Fetches the latest release (with short timeouts) and compares it against
+     * the current version. The returned UpdateCheckResult.info has a value when
+     * a newer version exists, or when the current build is a dev build (dev
+     * builds always compare as older than any release). fetch_succeeded is true
+     * when the network round-trip completed (regardless of whether an update
+     * was found) — callers should only persist the throttle timestamp when this
+     * is true, so offline failures are retried sooner. This NEVER throws and
+     * never crashes the app on offline.
+     *
+     * @param connect_timeout_s connect timeout in seconds (default 3).
+     * @param max_time_s        overall request timeout in seconds (default 8).
+     * @return UpdateCheckResult with optional UpdateInfo and a fetch_succeeded flag.
+     */
+    static UpdateCheckResult check_for_update(int connect_timeout_s = 3, int max_time_s = 8);
+
+    /**
+     * @brief Resolve the per-OS path to the update-check state file.
+     *
+     * Linux:   $XDG_CONFIG_HOME/torrent-builder/update_check.state
+     *          (fallback ~/.config/torrent-builder/update_check.state)
+     * macOS:   ~/Library/Application Support/torrent-builder/update_check.state
+     * Windows: %LOCALAPPDATA%\torrent-builder\update_check.state
+     *
+     * @return Absolute path, or empty string if no home/config dir is resolvable.
+     */
+    static std::string get_update_check_state_path();
+
+    /**
+     * @brief Decide whether a network update check should run now.
+     *
+     * Reads the last_check timestamp from the state file. Returns true when
+     * more than @p interval_h hours have elapsed (or the file is missing /
+     * corrupt / unreadable, treated as "never checked").
+     *
+     * @param interval_h minimum hours between checks (default 24).
+     * @return true if a check should be performed now.
+     */
+    static bool should_check_for_updates(int interval_h = 24);
+
+    /**
+     * @brief Persist the current time as the last-check timestamp.
+     *
+     * Writes atomically (temp file + rename). Should be called after any
+     * successful (non-throwing) network round-trip — including when the build
+     * is already up-to-date — so the throttle works for the common case.
+     * No-op when get_update_check_state_path() returns empty.
+     */
+    static void record_update_check();
 
     /**
      * @brief Find the matching platform asset URL from a JSON string.
@@ -201,6 +283,8 @@ public:
     static void set_current_version_for_testing(const std::string &version);
     /** @brief Override binary validation for testing. */
     static void set_binary_validator_for_testing(BinaryValidator validator);
+    /** @brief Override the update-check state file path for testing (empty optional = real path). */
+    static void set_update_check_state_path_for_testing(std::optional<std::string> path);
     /** @brief Reset all test overrides to defaults. */
     static void reset_test_overrides();
 

@@ -17,6 +17,8 @@
 #include <fstream>
 #include <vector>
 #include <openssl/evp.h>
+#include <ctime>
+#include <random>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -39,6 +41,7 @@ Updater::ExePathProvider g_exe_path_provider;
 Updater::BinaryValidator g_binary_validator;
 std::string g_current_version_override;
 std::optional<std::string> g_curl_path_cache;
+std::optional<std::string> g_state_path_override;
 
 std::string escape_batch_path(const std::string &path)
 {
@@ -148,7 +151,7 @@ std::string compute_sha256(const std::string &filepath)
     return hash;
 }
 
-nlohmann::json fetch_release_json()
+nlohmann::json fetch_release_json(const std::vector<std::string> &extra_args = {})
 {
     std::string url = "https://api.github.com/repos/cantalupo555/torrent-builder/releases/latest";
 
@@ -165,6 +168,8 @@ nlohmann::json fetch_release_json()
                 log_message("Using GITHUB_TOKEN for authenticated API request", LogLevel::INFO);
             }
         }
+        for (const auto &a : extra_args)
+            args.push_back(a);
         response = Updater::execute_curl(url, args);
     }
     catch (const std::exception &e)
@@ -232,6 +237,11 @@ void Updater::set_binary_validator_for_testing(BinaryValidator validator)
     g_binary_validator = std::move(validator);
 }
 
+void Updater::set_update_check_state_path_for_testing(std::optional<std::string> path)
+{
+    g_state_path_override = std::move(path);
+}
+
 void Updater::reset_test_overrides()
 {
     g_curl_executor = nullptr;
@@ -240,6 +250,7 @@ void Updater::reset_test_overrides()
     g_binary_validator = nullptr;
     g_current_version_override.clear();
     g_curl_path_cache.reset();
+    g_state_path_override.reset();
 }
 
 PlatformInfo Updater::get_platform_info()
@@ -516,7 +527,15 @@ std::string Updater::execute_curl(const std::string &url, const std::vector<std:
 
 UpdateInfo Updater::fetch_latest_release()
 {
-    nlohmann::json j = fetch_release_json();
+    return fetch_latest_release(30, 300);
+}
+
+UpdateInfo Updater::fetch_latest_release(int connect_timeout_s, int max_time_s)
+{
+    std::vector<std::string> timeout_args = {
+        "--connect-timeout", std::to_string(connect_timeout_s),
+        "--max-time", std::to_string(max_time_s)};
+    nlohmann::json j = fetch_release_json(timeout_args);
 
     UpdateInfo info;
     info.version = j.value("tag_name", "");
@@ -529,6 +548,150 @@ UpdateInfo Updater::fetch_latest_release()
     info.release_json = j;
 
     return info;
+}
+
+UpdateCheckResult Updater::check_for_update(int connect_timeout_s, int max_time_s)
+{
+    UpdateCheckResult result;
+    try
+    {
+        auto latest = fetch_latest_release(connect_timeout_s, max_time_s);
+        result.fetch_succeeded = true;
+
+        if (latest.version.empty())
+            return result;
+
+        std::string current = get_current_version();
+        bool is_dev = (current == "dev" ||
+                       (current.size() >= 5 && current.compare(0, 5, "dev (") == 0));
+
+        if (is_dev || utils::compare_versions(current, latest.version) < 0)
+            result.info = latest;
+    }
+    catch (const std::exception &e)
+    {
+        log_message(std::string("Startup update check failed: ") + e.what(), LogLevel::WARNING);
+    }
+    return result;
+}
+
+std::string Updater::get_update_check_state_path()
+{
+    if (g_state_path_override.has_value())
+        return *g_state_path_override;
+
+    fs::path dir;
+
+#ifdef _WIN32
+    if (const char *local = std::getenv("LOCALAPPDATA"))
+    {
+        if (local[0] != '\0')
+            dir = fs::path(local) / "torrent-builder";
+    }
+#elif defined(__APPLE__)
+    if (const char *home = std::getenv("HOME"))
+    {
+        if (home[0] != '\0')
+            dir = fs::path(home) / "Library" / "Application Support" / "torrent-builder";
+    }
+#else
+    if (const char *xdg = std::getenv("XDG_CONFIG_HOME"))
+    {
+        if (xdg[0] != '\0' && xdg[0] == '/')
+            dir = fs::path(xdg) / "torrent-builder";
+    }
+    if (dir.empty())
+    {
+        if (const char *home = std::getenv("HOME"))
+        {
+            if (home[0] != '\0')
+                dir = fs::path(home) / ".config" / "torrent-builder";
+        }
+    }
+#endif
+
+    if (dir.empty())
+        return {};
+
+    return (dir / "update_check.state").string();
+}
+
+bool Updater::should_check_for_updates(int interval_h)
+{
+    std::string path = get_update_check_state_path();
+    if (path.empty())
+        return true;
+
+    long long last_check = 0;
+    {
+        std::ifstream in(path);
+        if (in)
+        {
+            std::string key;
+            while (in >> key)
+            {
+                if (key.rfind("last_check=", 0) == 0)
+                {
+                    try
+                    {
+                        last_check = std::stoll(key.substr(strlen("last_check=")));
+                    }
+                    catch (...)
+                    {
+                        last_check = 0;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    long long now = static_cast<long long>(std::time(nullptr));
+    long long interval_s = static_cast<long long>(interval_h) * 3600;
+    return (now - last_check) >= interval_s;
+}
+
+void Updater::record_update_check()
+{
+    std::string path = get_update_check_state_path();
+    if (path.empty())
+        return;
+
+    fs::path p(path);
+    std::error_code ec;
+    fs::create_directories(p.parent_path(), ec);
+
+    // Clean up stale temp files from a previous process that was killed
+    // between creating the temp and the rename.
+    for (const auto &entry : fs::directory_iterator(p.parent_path(), ec))
+    {
+        auto name = entry.path().filename().string();
+        if (name.starts_with("update_check.state.tmp"))
+        {
+            std::error_code rm_ec;
+            fs::remove(entry.path(), rm_ec);
+        }
+    }
+
+    std::random_device rd;
+    fs::path tmp = p.parent_path() / ("update_check.state.tmp." + std::to_string(rd()));
+    {
+        std::ofstream out(tmp, std::ios::trunc);
+        if (!out)
+        {
+            log_message("Could not write update-check state file: " + path, LogLevel::WARNING);
+            return;
+        }
+        out << "last_check=" << static_cast<long long>(std::time(nullptr)) << "\n";
+    }
+
+    fs::rename(tmp, p, ec);
+    if (ec)
+    {
+        log_message("Could not finalize update-check state file: " + ec.message(), LogLevel::WARNING);
+        std::error_code rm_ec;
+        fs::remove(tmp, rm_ec);
+    }
 }
 
 std::optional<std::string> Updater::find_matching_asset(const std::string &release_json, const PlatformInfo &platform)
