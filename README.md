@@ -150,6 +150,40 @@ Check for newer versions and update the binary in-place from GitHub Releases. Do
 ./torrent_builder update --rollback
 ```
 
+#### Automatic update check
+
+On startup, the default creation flow performs a best-effort check (short
+timeout, at most once per 24 h) for a newer
+release and prints a notice to **stderr** (so `--json` stdout is never affected):
+
+```
+*** Update available: v0.5.0 — run `torrent_builder update` ***
+```
+
+The check is throttled to **once per 24 hours** (a timestamp is stored in
+`update_check.state` under `~/.config/torrent-builder/` on Linux,
+`~/Library/Application Support/torrent-builder/` on macOS, and
+`%LOCALAPPDATA%\torrent-builder\` on Windows), so most runs make no network
+request. Network errors are handled silently — it never blocks or crashes the
+tool on offline.
+
+Builds compiled from source without a git tag (reporting a `dev` version) get an
+**informational** notice without the `update` command, since running
+`torrent_builder update` would replace the locally-compiled binary with a
+prebuilt release artifact:
+
+```
+*** Newer release available: v0.5.0 (you are running a dev build: dev (419271b)) ***
+```
+
+**Disable the check** for CI or offline environments:
+
+- Set the `TB_NO_UPDATE_CHECK=1` environment variable, or
+- Pass `--no-update-check` for a single run.
+
+The check only runs for the default creation flow; it is skipped for all
+subcommands and when `--quiet`/`--json` is used.
+
 ## Options
 
 ```
@@ -181,6 +215,7 @@ Check for newer versions and update the binary in-place from GitHub Releases. Do
        --preset NAME          Apply named preset from presets.yaml
        --preset-file FILE     Load presets from specified file (default: searches ./presets.yaml, $XDG_CONFIG_HOME/torrent-builder/presets.yaml, ~/.config/torrent-builder/presets.yaml)
        --fail-on-season-warning  Fail if a TV season pack has missing episodes
+       --no-update-check       Skip automatic update check on startup
 ```
 
 > **Note:** `--verbose`, `--quiet`, and `--json` are ignored in interactive mode. In CLI mode, `--verbose` and `--quiet` are mutually exclusive, as are `--verbose` and `--json`. The `--json` flag implies `--quiet` and auto-declines any overwrite prompts.
