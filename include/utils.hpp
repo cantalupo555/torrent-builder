@@ -45,6 +45,31 @@ std::string format_timestamp(int64_t timestamp);
 int auto_piece_size(int64_t total_size);
 
 /**
+ * @brief Calculate piece size that yields a piece count closest to the target.
+ *
+ * Iterates all valid power-of-2 piece sizes (AllowedPieceSizes) and selects
+ * the one whose resulting piece count is closest to target_piece_count.
+ * Tie-breaker: larger piece size (fewer pieces = smaller metadata).
+ *
+ * @param total_size Total content size in bytes.
+ * @param target_piece_count Desired number of pieces.
+ * @return Piece size in bytes (power-of-2, from 16KB to 32MB).
+ * @throws std::invalid_argument if total_size or target_piece_count is <= 0.
+ */
+int piece_size_for_target_count(int64_t total_size, int target_piece_count);
+
+/**
+ * @brief Compute the total size of all regular files at or under the given path.
+ *
+ * For a single file, returns its size. For a directory, recursively sums all
+ * regular file sizes. Returns 0 on error or if the path does not exist.
+ *
+ * @param path File or directory path.
+ * @return Total content size in bytes.
+ */
+int64_t compute_content_size(const std::filesystem::path &path);
+
+/**
  * @brief Check if a URL has a valid scheme (http, https, or udp).
  * @param url The URL string to validate.
  * @return true if the URL matches ^(http|https|udp)://.+$ (case-insensitive).
