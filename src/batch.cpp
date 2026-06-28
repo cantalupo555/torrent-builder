@@ -126,7 +126,9 @@ TorrentConfig build_torrent_config(const ConfigValues& cv, const fs::path& defau
         cv.source,
         cv.entropy.value_or(false),
         compile_patterns(cv.exclude_patterns),
-        compile_patterns(cv.include_patterns)
+        compile_patterns(cv.include_patterns),
+        false,
+        cv.target_piece_count
     );
 }
 
@@ -256,6 +258,41 @@ BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& prese
             resolved.output = *job.output;
         }
 
+        // Validate mutual exclusivity
+        if (resolved.piece_size && resolved.target_piece_count) {
+            throw std::runtime_error("Job " + std::to_string(job_index + 1)
+                + ": piece_size and target_piece_count are mutually exclusive");
+        }
+
+        // Compute content size once for target resolution and/or tracker rule enforcement
+        bool need_content_size = (resolved.target_piece_count && !resolved.piece_size)
+            || !resolved.trackers.value_or(std::vector<std::string>{}).empty();
+        int64_t content_size = need_content_size
+            ? utils::compute_content_size(fs::path(*resolved.path)) : 0;
+
+        // Resolve target_piece_count -> piece_size before tracker rule enforcement
+        if (resolved.target_piece_count && !resolved.piece_size) {
+            if (*resolved.target_piece_count <= 0) {
+                throw std::runtime_error("Job " + std::to_string(job_index + 1)
+                    + ": target_piece_count must be positive");
+            }
+
+            if (content_size > 0) {
+                int resolved_bytes = utils::piece_size_for_target_count(content_size, *resolved.target_piece_count);
+                resolved.piece_size = resolved_bytes / 1024;
+                int64_t resulting_pieces = (content_size + resolved_bytes - 1) / resolved_bytes;
+                log_message("Job " + std::to_string(job_index + 1) + ": target piece count "
+                    + std::to_string(*resolved.target_piece_count) + " resolved to "
+                    + std::to_string(resolved_bytes / 1024) + " KB ("
+                    + std::to_string(resulting_pieces) + " pieces)", LogLevel::INFO);
+            } else {
+                log_message("Job " + std::to_string(job_index + 1) + ": target_piece_count "
+                    + std::to_string(*resolved.target_piece_count)
+                    + " ignored: content size is 0", LogLevel::WARNING);
+                resolved.target_piece_count = std::nullopt;
+            }
+        }
+
         auto trackers = resolved.trackers.value_or(std::vector<std::string>{});
         if (!trackers.empty()) {
             auto matched_rule = rules.find_matching_rule(trackers);
@@ -267,26 +304,13 @@ BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& prese
                 }
 
                 if (matched_rule->max_piece_length || matched_rule->max_torrent_size || !matched_rule->piece_length_overrides.empty()) {
-                    int64_t total_size = 0;
-                    try {
-                        fs::path content_path(*resolved.path);
-                        if (fs::is_directory(content_path)) {
-                            for (const auto& entry : fs::recursive_directory_iterator(content_path)) {
-                                if (entry.is_regular_file()) total_size += entry.file_size();
-                            }
-                        } else {
-                            total_size = fs::file_size(content_path);
-                        }
-                    } catch (const fs::filesystem_error& e) {
-                        log_message("Job " + std::to_string(job_index + 1) + ": could not compute content size: " + std::string(e.what()), LogLevel::WARNING);
-                    }
 
                     std::optional<int> current_kb;
                     if (resolved.piece_size && *resolved.piece_size > 0) {
                         current_kb = *resolved.piece_size;
                     }
 
-                    auto enforcement = rules.enforce(*matched_rule, total_size, current_kb);
+                    auto enforcement = rules.enforce(*matched_rule, content_size, current_kb);
 
                     if (enforcement.adjusted && enforcement.adjusted_piece_length) {
                         if (current_kb) {

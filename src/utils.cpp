@@ -4,6 +4,7 @@
 #include <regex>
 #include <cctype>
 #include <climits>
+#include <cstdlib>
 #include <algorithm>
 #include <format>
 #include <sstream>
@@ -56,6 +57,51 @@ int auto_piece_size(int64_t total_size)
     if (total_size < 64LL * 1024 * 1024 * 1024)
         return k16384KB;
     return k32768KB;
+}
+
+int piece_size_for_target_count(int64_t total_size, int target_piece_count)
+{
+    if (total_size <= 0)
+        throw std::invalid_argument("total_size must be positive");
+    if (target_piece_count <= 0)
+        throw std::invalid_argument("target_piece_count must be positive");
+
+    int best_piece_bytes = PieceSizes::k16KB;
+    int64_t best_diff = INT64_MAX;
+
+    // Iterate from largest to smallest so that on ties the larger piece size wins
+    // (fewer pieces = smaller torrent metadata).
+    for (int i = static_cast<int>(AllowedPieceSizes::values.size()) - 1; i >= 0; --i)
+    {
+        int piece_bytes = AllowedPieceSizes::values[i] * 1024;
+        int64_t resulting_count = (total_size + piece_bytes - 1) / piece_bytes;
+        int64_t diff = std::abs(resulting_count - target_piece_count);
+
+        if (diff < best_diff)
+        {
+            best_diff = diff;
+            best_piece_bytes = piece_bytes;
+        }
+    }
+
+    return best_piece_bytes;
+}
+
+int64_t compute_content_size(const std::filesystem::path &path)
+{
+    int64_t total_size = 0;
+    try {
+        if (std::filesystem::is_directory(path)) {
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(path)) {
+                if (entry.is_regular_file()) total_size += entry.file_size();
+            }
+        } else {
+            total_size = std::filesystem::file_size(path);
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        log_message("Could not compute content size for " + path.string() + ": " + e.what(), LogLevel::WARNING);
+    }
+    return total_size;
 }
 
 bool is_valid_url(const std::string &url)

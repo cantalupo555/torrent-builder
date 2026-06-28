@@ -39,6 +39,7 @@ ConfigValues parse_yaml_config(const YAML::Node& node)
     if (node["private"]) cv.is_private = node["private"].as<bool>();
     if (node["source"]) cv.source = node["source"].as<std::string>();
     if (node["piece_size"]) cv.piece_size = node["piece_size"].as<int>();
+    if (node["target_piece_count"]) cv.target_piece_count = node["target_piece_count"].as<int>();
     if (node["comment"]) cv.comment = node["comment"].as<std::string>();
     if (node["creator"]) cv.creator = node["creator"].as<std::string>();
     if (node["name"]) cv.name = node["name"].as<std::string>();
@@ -76,6 +77,7 @@ ConfigValues merge_config_values(const ConfigValues& base, const ConfigValues& o
     if (overlay.is_private.has_value()) result.is_private = overlay.is_private;
     if (overlay.source) result.source = overlay.source;
     if (overlay.piece_size) result.piece_size = overlay.piece_size;
+    if (overlay.target_piece_count) result.target_piece_count = overlay.target_piece_count;
     if (overlay.comment) result.comment = overlay.comment;
     if (overlay.creator) result.creator = overlay.creator;
     if (overlay.name) result.name = overlay.name;

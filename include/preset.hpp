@@ -24,6 +24,7 @@ struct ConfigValues {
     std::optional<bool> is_private;                  ///< Whether torrent is private
     std::optional<std::string> source;              ///< Source field embedding
     std::optional<int> piece_size;                  ///< Piece size in KB (e.g. 4096 = 4MB)
+    std::optional<int> target_piece_count;           ///< Desired number of pieces (calculates piece size)
     std::optional<std::string> comment;             ///< Torrent comment
     std::optional<std::string> creator;             ///< Created-by field
     std::optional<std::string> name;                ///< Torrent name override

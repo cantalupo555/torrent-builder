@@ -1029,6 +1029,7 @@ TEST(CLI, InteractiveNamePrompt) {
 #endif
     namespace fs = std::filesystem;
     auto temp_dir = fs::temp_directory_path() / "torrent_builder_interactive_name_test";
+    fs::remove_all(temp_dir);
     fs::create_directories(temp_dir);
     auto input_file = temp_dir / "input.txt";
     auto output_file = temp_dir / "output.torrent";
@@ -1044,6 +1045,7 @@ TEST(CLI, InteractiveNamePrompt) {
         "n "                               // custom trackers? no
         "'' "                              // web seed (empty/finish)
         "n "                               // custom piece size? no
+        "n "                               // target piece count? no
         "n "                               // creator? no
         "'My.Interactive.Name' "           // custom name
         "n "                               // creation date? no
@@ -1421,6 +1423,7 @@ TEST(CLI, InteractiveSourceAndEntropy) {
 #endif
     namespace fs = std::filesystem;
     auto temp_dir = fs::temp_directory_path() / "torrent_builder_interactive_src_ent_test";
+    fs::remove_all(temp_dir);
     fs::create_directories(temp_dir);
     auto input_file = temp_dir / "input.txt";
     auto output_file = temp_dir / "output.torrent";
@@ -1436,6 +1439,7 @@ TEST(CLI, InteractiveSourceAndEntropy) {
         "n "                               // custom trackers? no
         "'' "                              // web seed (empty/finish)
         "n "                               // custom piece size? no
+        "n "                               // target piece count? no
         "n "                               // creator? no
         "'' "                              // custom name (empty/default)
         "n "                               // creation date? no
@@ -1672,6 +1676,7 @@ TEST(CLI, InteractiveExcludePatterns) {
 #endif
     namespace fs = std::filesystem;
     auto temp_dir = fs::temp_directory_path() / "torrent_builder_interactive_exc_test";
+    fs::remove_all(temp_dir);
     fs::create_directories(temp_dir);
     auto content_dir = temp_dir / "content";
     fs::create_directories(content_dir);
@@ -1689,6 +1694,7 @@ TEST(CLI, InteractiveExcludePatterns) {
         "n "                               // custom trackers? no
         "'' "                              // web seed (empty/finish)
         "n "                               // custom piece size? no
+        "n "                               // target piece count? no
         "n "                               // creator? no
         "'' "                              // custom name (empty/default)
         "n "                               // creation date? no
@@ -1818,6 +1824,7 @@ TEST(CLI, InteractiveMultipleExcludePatterns) {
 #endif
     namespace fs = std::filesystem;
     auto temp_dir = fs::temp_directory_path() / "torrent_builder_interactive_multi_exc_test";
+    fs::remove_all(temp_dir);
     fs::create_directories(temp_dir);
     auto content_dir = temp_dir / "content";
     fs::create_directories(content_dir);
@@ -1836,6 +1843,7 @@ TEST(CLI, InteractiveMultipleExcludePatterns) {
         "n "                               // custom trackers? no
         "'' "                              // web seed (empty/finish)
         "n "                               // custom piece size? no
+        "n "                               // target piece count? no
         "n "                               // creator? no
         "'' "                              // custom name (empty/default)
         "n "                               // creation date? no
@@ -3623,3 +3631,80 @@ TEST(CLI, QuietSuppressesUpdateCheck)
     fs::remove_all(home);
 }
 #endif
+
+// ─── --target-piece-count integration tests ───
+
+TEST(CLI, TargetPieceCountCreatesTorrent) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_target_pc_test";
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.bin";
+    auto output_file = temp_dir / "output.torrent";
+    // Create a 50 MB file so target_piece_count has meaningful work
+    {
+        std::ofstream f(input_file, std::ios::binary);
+        std::vector<char> data(1024 * 1024, '\0');
+        for (int i = 0; i < 50; ++i) f.write(data.data(), data.size());
+    }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --no-update-check --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 --target-piece-count 100 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    // 50 MB / 100 = 500 KB → nearest power of 2 is 512 KB → ~100 pieces
+    EXPECT_EQ(meta.piece_length, 512 * 1024) << "Should pick 512KB piece size for ~100 pieces of 50MB";
+    EXPECT_GT(meta.piece_count, 0);
+
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, TargetPieceCountAndPieceSizeMutuallyExclusive) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_mutual_excl_test";
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --no-update-check --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 --piece-size 256 --target-piece-count 100 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_NE(exit_code, 0) << "Should fail when both --piece-size and --target-piece-count are given";
+    EXPECT_NE(output.find("mutually exclusive"), std::string::npos);
+
+    fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, TargetPieceCountZeroFails) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_zero_target_test";
+    std::error_code ec;
+    fs::remove_all(temp_dir, ec);
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --no-update-check --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 --target-piece-count 0 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_NE(exit_code, 0) << "Should fail for target-piece-count of 0";
+
+    fs::remove_all(temp_dir, ec);
+}
