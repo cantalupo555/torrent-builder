@@ -611,6 +611,9 @@ void TorrentCreator::print_torrent_summary(int64_t total_size, int piece_size, i
     print_info("Version: " + version_str + "\n");
 
     print_info("Total size: " + utils::format_size(total_size) + "\n");
+    if (config_.target_piece_count) {
+        print_info("Target pieces: " + std::to_string(*config_.target_piece_count) + "\n");
+    }
     print_info("Pieces: " + std::to_string(num_pieces) + " of " + std::to_string(piece_size / 1024) + "KB\n");
     print_info("Trackers: " + std::to_string(config_.trackers.size()) + "\n");
     print_info("Web seeds: " + std::to_string(config_.web_seeds.size()) + "\n");

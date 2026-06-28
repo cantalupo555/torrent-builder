@@ -345,6 +345,58 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         }
     }
 
+    // Get target piece count (only if custom piece size was not set)
+    std::optional<int> target_piece_count = std::nullopt;
+    if (!piece_size && prompt_yes_no("Set target piece count?"))
+    {
+        while (true)
+        {
+            std::string input;
+            print_info("Target number of pieces: ");
+            std::getline(std::cin, input);
+            if (input.empty())
+            {
+                break;
+            }
+
+            try
+            {
+                int tpc = std::stoi(input);
+                if (tpc > 0)
+                {
+                    int64_t total_size = utils::compute_content_size(path);
+
+                    if (total_size > 0) {
+                        int resolved = utils::piece_size_for_target_count(total_size, tpc);
+                        int64_t resulting_pieces = (total_size + resolved - 1) / resolved;
+                        piece_size = resolved;
+                        target_piece_count = tpc;
+                        print_info("Target: " + std::to_string(tpc) + " pieces -> "
+                            + std::to_string(resolved / 1024) + " KB piece size"
+                            + " (yields ~" + std::to_string(resulting_pieces) + " pieces)\n");
+                    } else {
+                        print_info("WARNING: Content is empty — cannot compute piece size from target. Using automatic piece size.\n");
+                    }
+                    break;
+                }
+                else
+                {
+                    print_info("Error: Target piece count must be positive.\n");
+                }
+            }
+            catch (const std::invalid_argument &)
+            {
+                print_info("Invalid input. Please enter a valid integer.\n");
+                continue;
+            }
+            catch (const std::out_of_range &)
+            {
+                print_info("Input out of range. Please enter a valid integer.\n");
+                continue;
+            }
+        }
+    }
+
     // Get creator
     std::optional<std::string> creator_str = std::nullopt;
     if (prompt_yes_no("Set \"Torrent Builder\" as creator?"))
@@ -426,7 +478,8 @@ get_version: // Label to jump to if overwrite is 'n' or empty
                          comment.empty() ? std::nullopt : std::optional<std::string>(comment),
                          is_private, web_seeds, piece_size, creator_str, torrent_name,
                          include_creation_date, source, entropy,
-                         std::move(exclude_regex_compiled), std::move(include_regex_compiled)
+                         std::move(exclude_regex_compiled), std::move(include_regex_compiled),
+                         false, target_piece_count
     );
 }
 
@@ -631,6 +684,29 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
         }
     }
 
+    // Get and validate target piece count
+    std::optional<int> target_piece_count = std::nullopt;
+    if (result.count("target-piece-count"))
+    {
+        target_piece_count = result["target-piece-count"].as<int>();
+        if (*target_piece_count <= 0)
+        {
+            print_error("Error: --target-piece-count must be a positive integer\n");
+            throw std::runtime_error("Invalid target piece count");
+        }
+    }
+    else if (preset_values.target_piece_count && *preset_values.target_piece_count > 0)
+    {
+        target_piece_count = preset_values.target_piece_count;
+    }
+
+    // Mutual exclusivity: --piece-size and --target-piece-count
+    if (piece_size && target_piece_count)
+    {
+        print_error("Error: --piece-size and --target-piece-count are mutually exclusive\n");
+        throw std::runtime_error("Conflicting piece size options");
+    }
+
     // Get creator string
     std::optional<std::string> creator_str = std::nullopt;
     if (result.count("creator"))
@@ -734,6 +810,34 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
             log_message("No tracker rules file found, skipping rules enforcement", LogLevel::INFO);
         }
 
+        // Compute content size once for target resolution and/or tracker rule enforcement
+        bool need_content_size = (target_piece_count && !piece_size)
+            || (rules_loaded && !trackers.empty());
+        int64_t content_size = need_content_size
+            ? utils::compute_content_size(input_path) : 0;
+
+        // Resolve target_piece_count → piece_size before tracker rule enforcement
+        // so that rules can naturally cap/adjust the resolved piece size.
+        if (target_piece_count && !piece_size)
+        {
+            if (content_size > 0) {
+                int resolved = utils::piece_size_for_target_count(content_size, *target_piece_count);
+                piece_size = resolved;
+                int64_t resulting_pieces = (content_size + resolved - 1) / resolved;
+                print_verbose("Target: " + std::to_string(*target_piece_count)
+                    + " pieces -> " + std::to_string(resolved / 1024) + " KB piece size"
+                    + " (yields ~" + std::to_string(resulting_pieces) + " pieces)\n");
+                log_message("Target piece count " + std::to_string(*target_piece_count)
+                    + " resolved to " + std::to_string(resolved / 1024) + " KB ("
+                    + std::to_string(resulting_pieces) + " pieces)", LogLevel::INFO);
+            } else {
+                print_info("WARNING: target_piece_count cannot be resolved (content is empty); falling back to automatic piece size\n");
+                log_message("target_piece_count " + std::to_string(*target_piece_count)
+                    + " ignored: content size is 0", LogLevel::WARNING);
+                target_piece_count = std::nullopt;
+            }
+        }
+
         if (rules_loaded && !trackers.empty()) {
             auto matched_rule = rules_db.find_matching_rule(trackers);
             if (matched_rule) {
@@ -743,23 +847,11 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
                 }
 
                 if (matched_rule->max_piece_length || matched_rule->max_torrent_size || !matched_rule->piece_length_overrides.empty()) {
-                    int64_t total_size = 0;
-                    try {
-                        if (fs::is_directory(input_path)) {
-                            for (const auto& entry : fs::recursive_directory_iterator(input_path)) {
-                                if (entry.is_regular_file()) total_size += entry.file_size();
-                            }
-                        } else {
-                            total_size = fs::file_size(input_path);
-                        }
-                    } catch (const fs::filesystem_error& e) {
-                        log_message("Could not compute content size for rules enforcement: " + std::string(e.what()), LogLevel::WARNING);
-                    }
 
                     std::optional<int> current_kb;
                     if (piece_size) current_kb = *piece_size / 1024;
 
-                    auto enforcement = rules_db.enforce(*matched_rule, total_size, current_kb);
+                    auto enforcement = rules_db.enforce(*matched_rule, content_size, current_kb);
 
                     if (enforcement.adjusted && enforcement.adjusted_piece_length) {
                         if (current_kb) {
@@ -792,7 +884,8 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
                              comment, is_private, web_seeds, piece_size,
                              creator_str, torrent_name, include_creation_date,
                              source, entropy,
-                             std::move(exclude_regex_compiled), std::move(include_regex_compiled)
+                             std::move(exclude_regex_compiled), std::move(include_regex_compiled),
+                             false, target_piece_count
         );
     }
     catch (const fs::filesystem_error &e)
@@ -1638,7 +1731,9 @@ int main(int argc, char *argv[])
             "URL")("s,piece-size",
                    "Piece size in KB (allowed: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, "
                    "16384, 32768)",
-                   cxxopts::value<int>(), "SIZE")("creator", "Set \"Torrent Builder\" as creator")(
+                   cxxopts::value<int>(), "SIZE")(
+            "target-piece-count", "Target number of pieces (calculates optimal piece size)",
+            cxxopts::value<int>(), "N")("creator", "Set \"Torrent Builder\" as creator")(
             "creation-date", "Set creation date")("p,path", "Path to file or directory",
                                                   cxxopts::value<std::string>(), "PATH")(
             "o,output", "Output torrent file path (optional, auto-generated if omitted)", cxxopts::value<std::string>(), "OUTPUT")(
