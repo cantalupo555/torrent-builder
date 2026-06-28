@@ -68,6 +68,112 @@ TEST(AutoPieceSize, Max100GB) {
     EXPECT_EQ(utils::auto_piece_size(100LL * 1024 * 1024 * 1024), PieceSizes::k32768KB);
 }
 
+// ─── piece_size_for_target_count tests ───
+
+TEST(TargetPieceCount, SmallContent) {
+    // 100 MB, target 5 pieces → 100MB/5 = 20MB → nearest power-of-2 is 16MB
+    // 16MB → ceil(100MB/16MB) = 7 pieces (diff 2)
+    // 32MB → ceil(100MB/32MB) = 4 pieces (diff 1) → closer!
+    EXPECT_EQ(utils::piece_size_for_target_count(100LL * 1024 * 1024, 5), PieceSizes::k32768KB);
+}
+
+TEST(TargetPieceCount, Typical5GBTarget600) {
+    // 5 GB content, target 600 pieces
+    // 8 MB → 640 pieces (diff 40)
+    // 16 MB → 320 pieces (diff 280)
+    // Best: 8 MB
+    EXPECT_EQ(utils::piece_size_for_target_count(5LL * 1024 * 1024 * 1024, 600), PieceSizes::k8192KB);
+}
+
+TEST(TargetPieceCount, LargeContent50GBTarget1000) {
+    // 50 GB, target 1000 pieces
+    // 32 MB → 1600 pieces (diff 600)
+    // 16 MB → 3200 pieces (diff 2200)
+    // Best: 32 MB
+    EXPECT_EQ(utils::piece_size_for_target_count(50LL * 1024 * 1024 * 1024, 1000), PieceSizes::k32768KB);
+}
+
+TEST(TargetPieceCount, TargetOneUsesMaxPieceSize) {
+    // Target 1 piece → should pick 32 MB (largest valid)
+    EXPECT_EQ(utils::piece_size_for_target_count(5LL * 1024 * 1024 * 1024, 1), PieceSizes::k32768KB);
+}
+
+TEST(TargetPieceCount, ImpossibleTargetClampsToMinPieceSize) {
+    // 1 MB content, target 1000 → even 16KB pieces give only 64 pieces
+    // Should still return 16KB (smallest valid piece size)
+    EXPECT_EQ(utils::piece_size_for_target_count(1024 * 1024, 1000), PieceSizes::k16KB);
+}
+
+TEST(TargetPieceCount, ExactMatch) {
+    // 512 MB content, target 16 → 32MB pieces → exactly 16 pieces
+    EXPECT_EQ(utils::piece_size_for_target_count(512LL * 1024 * 1024, 16), PieceSizes::k32768KB);
+}
+
+TEST(TargetPieceCount, TieBreakerPrefersLargerPieceSize) {
+    // 48 MB content, target 3
+    // 16 MB → 3 pieces (diff 0) ← exact match, not a tie
+    // Test the actual tie-breaker: 24 MB content, target 3
+    // 16 MB → 2 pieces (diff 1)
+    // 8 MB  → 3 pieces (diff 0) ← exact match wins
+    // For a true tie: 32 MB content, target 3
+    // 16 MB → 2 pieces (diff 1)
+    // 8 MB  → 4 pieces (diff 1) ← tie, 16 MB wins (larger piece)
+    EXPECT_EQ(utils::piece_size_for_target_count(32LL * 1024 * 1024, 3), PieceSizes::k16384KB);
+}
+
+TEST(TargetPieceCount, ThrowsOnZeroSize) {
+    EXPECT_THROW(utils::piece_size_for_target_count(0, 100), std::invalid_argument);
+}
+
+TEST(TargetPieceCount, ThrowsOnNegativeSize) {
+    EXPECT_THROW(utils::piece_size_for_target_count(-1, 100), std::invalid_argument);
+}
+
+TEST(TargetPieceCount, ThrowsOnZeroTarget) {
+    EXPECT_THROW(utils::piece_size_for_target_count(1024 * 1024, 0), std::invalid_argument);
+}
+
+TEST(TargetPieceCount, ThrowsOnNegativeTarget) {
+    EXPECT_THROW(utils::piece_size_for_target_count(1024 * 1024, -5), std::invalid_argument);
+}
+
+// ─── compute_content_size tests ───
+
+TEST(ComputeContentSize, SingleFile) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_ccs_single";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    auto file = temp_dir / "file.bin";
+    { std::ofstream f(file, std::ios::binary); f << "1234567890"; }
+    EXPECT_EQ(utils::compute_content_size(file), 10);
+    fs::remove_all(temp_dir);
+}
+
+TEST(ComputeContentSize, DirectoryRecursive) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_ccs_dir";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir / "sub");
+    { std::ofstream(temp_dir / "a.bin") << "aaaa"; }
+    { std::ofstream(temp_dir / "sub" / "b.bin") << "bbbbbb"; }
+    EXPECT_EQ(utils::compute_content_size(temp_dir), 10);
+    fs::remove_all(temp_dir);
+}
+
+TEST(ComputeContentSize, NonExistentPathReturnsZero) {
+    EXPECT_EQ(utils::compute_content_size("/nonexistent/path/here"), 0);
+}
+
+TEST(ComputeContentSize, EmptyDirectoryReturnsZero) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_ccs_empty";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    EXPECT_EQ(utils::compute_content_size(temp_dir), 0);
+    fs::remove_all(temp_dir);
+}
+
 TEST(IsValidUrl, HTTP) {
     EXPECT_TRUE(utils::is_valid_url("http://example.com"));
 }

@@ -98,6 +98,7 @@ jobs:
     private: true
     source: "SRC"
     piece_size: 1024
+    target_piece_count: 600
     comment: "Test"
     creator: "TestCreator"
     name: "custom"
@@ -119,6 +120,8 @@ jobs:
     EXPECT_TRUE(cv.is_private.has_value() && *cv.is_private);
     EXPECT_EQ(*cv.source, "SRC");
     EXPECT_EQ(*cv.piece_size, 1024);
+    ASSERT_TRUE(cv.target_piece_count.has_value());
+    EXPECT_EQ(*cv.target_piece_count, 600);
     EXPECT_EQ(*cv.comment, "Test");
     EXPECT_EQ(*cv.creator, "TestCreator");
     EXPECT_EQ(*cv.name, "custom");
@@ -864,6 +867,60 @@ jobs:
     ASSERT_EQ(results.size(), 1u);
     EXPECT_FALSE(results[0].success);
     EXPECT_NE(results[0].error_message.find("Invalid piece size"), std::string::npos);
+}
+
+TEST_F(BatchTest, RunWithTargetPieceCount) {
+#ifdef __MINGW32__
+    GTEST_SKIP() << "Skipped on MinGW due to known SegFault in libtorrent hashing";
+#endif
+    fs::path test_file = temp_dir / "testfile.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(50 * 1024 * 1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    write_file("batch.yaml", R"(
+version: 1
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "target.torrent").generic_string() + R"("
+    target_piece_count: 100
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << results[0].error_message;
+
+    TorrentInspector inspector((temp_dir / "target.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    // 50 MB / 100 pieces → 512 KB piece size
+    EXPECT_EQ(meta.piece_length, 512 * 1024);
+}
+
+TEST_F(BatchTest, RunWithTargetPieceCountAndPieceSizeFails) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    { std::ofstream f(test_file, std::ios::binary); f << "test content"; }
+
+    write_file("batch.yaml", R"(
+version: 1
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "out.torrent").generic_string() + R"("
+    piece_size: 256
+    target_piece_count: 100
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_FALSE(results[0].success);
+    EXPECT_NE(results[0].error_message.find("mutually exclusive"), std::string::npos);
 }
 
 TEST_F(BatchTest, ParseFailOnSeasonWarning) {
