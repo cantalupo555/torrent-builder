@@ -42,6 +42,7 @@ struct TorrentConfig {
     bool is_private;
     std::vector<std::string> web_seeds;
     std::optional<int> piece_size;
+    std::optional<int> target_piece_count;         ///< Original target (for display only; piece_size holds resolved value)
     std::optional<std::string> creator;
     std::optional<std::string> name;              // Overrides default name inferred from path
     bool include_creation_date;
@@ -68,6 +69,7 @@ struct TorrentConfig {
      * @param entropy Add random entropy field for unique info hash.
      * @param exclude_re Pre-compiled regex patterns for file exclusion.
      * @param include_re Pre-compiled regex patterns for file inclusion (overrides exclude).
+     * @param tpc Optional target piece count (for display; piece_size holds resolved value).
      * @throws std::filesystem::filesystem_error if the path does not exist.
      */
     TorrentConfig(fs::path p, fs::path o, std::vector<std::string> t,
@@ -80,9 +82,11 @@ struct TorrentConfig {
                  bool entropy = false,
                  std::vector<std::regex> exclude_re = {},
                  std::vector<std::regex> include_re = {},
-                 bool silent = false)
+                 bool silent = false,
+                 std::optional<int> tpc = std::nullopt)
         : path(p), output(o), trackers(t), version(v),
           comment(c), is_private(priv), web_seeds(ws), piece_size(ps),
+          target_piece_count(tpc),
           creator(creator), name(name_val), include_creation_date(include_creation_date),
           source(source), entropy(entropy),
           exclude_regex(std::move(exclude_re)),
