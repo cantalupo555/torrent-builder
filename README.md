@@ -203,6 +203,7 @@ subcommands and when `--quiet`/`--json` is used.
   -T, --tracker arg          Add tracker URL (can be used multiple times)
   -w, --webseed arg          Add web seed URL (can be used multiple times)
   -s, --piece-size arg       Piece size in KB (must be one of: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)
+      --target-piece-count N Target number of pieces (calculates optimal piece size; mutually exclusive with --piece-size)
   --creator                  Set "Torrent Builder" as creator
   --creation-date            Set creation date
   --source arg               Add source string to torrent info for cross-seeding
@@ -219,6 +220,8 @@ subcommands and when `--quiet`/`--json` is used.
 ```
 
 > **Note:** `--verbose`, `--quiet`, and `--json` are ignored in interactive mode. In CLI mode, `--verbose` and `--quiet` are mutually exclusive, as are `--verbose` and `--json`. The `--json` flag implies `--quiet` and auto-declines any overwrite prompts.
+
+> **Piece size vs target piece count:** `--piece-size` sets the exact piece size in KB. `--target-piece-count N` calculates the optimal power-of-2 piece size to approximate N pieces (common on private trackers like PTP/BTN/GGN). The actual count may differ slightly since piece sizes must be powers of 2. These two options are mutually exclusive. If both `--target-piece-count` and tracker rules (`max_piece_length`) are active, the target is resolved first and the rule logs a warning if the resolved size exceeds the limit (same behavior as explicit `--piece-size`).
 
 ### JSON Output Format
 
@@ -287,6 +290,7 @@ Basic usage:
 ./torrent_builder --path /data/file --output file.torrent --default-trackers
 ./torrent_builder --path /data/folder --output folder.torrent --torrent-version 2 --private
 ./torrent_builder --path /data/file --output file.torrent --piece-size 1024
+./torrent_builder --path /data/movie.mkv --output movie.torrent --target-piece-count 600
 ./torrent_builder --version
 ```
 
@@ -469,6 +473,7 @@ presets:
     trackers:
       - "https://ptp.example/announce"
     exclude_patterns: ["*.nfo", "*.txt", "*.sfv"]
+    target_piece_count: 1000
 
   public:
     private: false
@@ -508,6 +513,7 @@ jobs:
     preset: ptp
   - path: /data/movie2.mkv
     output: custom_output.torrent
+    target_piece_count: 600
     trackers:
       - "https://tracker.example/announce"
   - path: /data/Show.Name.S01
