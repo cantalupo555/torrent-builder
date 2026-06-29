@@ -204,8 +204,8 @@ subcommands and when `--quiet`/`--json` is used.
   -w, --webseed arg          Add web seed URL (can be used multiple times)
   -s, --piece-size arg       Piece size in KB (must be one of: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768)
       --target-piece-count N Target number of pieces (calculates optimal piece size; mutually exclusive with --piece-size)
-  --creator                  Set "Torrent Builder" as creator
-  --creation-date            Set creation date
+  --no-creator               Omit creator field from torrent metadata
+  -d, --no-date              Omit creation date from torrent metadata
   --source arg               Add source string to torrent info for cross-seeding
   -e, --entropy              Randomize info hash by adding entropy field
   -x, --exclude arg          Exclude files matching glob pattern (can be used multiple times)
@@ -245,7 +245,7 @@ When using `--json`, the output is a single JSON object to stdout (errors go to 
 }
 ```
 
-Optional fields (`comment`, `creation_date`, `created_by`, `source`, `entropy`) appear only when present in the torrent metadata.
+Optional fields (`comment`, `creation_date`, `created_by`, `source`, `entropy`) appear only when present in the torrent metadata. Creator and creation date are included by default; use `--no-creator` and `--no-date` to omit them.
 
 > **Note:** `--version` now shows the software version. For torrent format version, use `--torrent-version` or `-t`.
 
@@ -355,6 +355,12 @@ Cross-seeding (unique info hash per tracker):
 
 ./torrent_builder --path /data/file --output unique.torrent \
   -e --tracker "https://tracker.example/announce"
+```
+
+Omit creator and creation date for clean cross-seeding:
+```bash
+./torrent_builder --path /data/file --output clean.torrent \
+  --no-creator --no-date --tracker "https://tracker.example/announce"
 ```
 
 Season pack detection:
@@ -479,6 +485,12 @@ presets:
     private: false
     trackers:
       - "udp://tracker.example/announce"
+
+  cross-seed:
+    no_creator: true
+    no_date: true
+    trackers:
+      - "https://tracker.example/announce"
 ```
 
 **Preset file resolution**: `--preset-file` (if given, used directly). Otherwise, search order: `./presets.yaml` → `$XDG_CONFIG_HOME/torrent-builder/presets.yaml` → `~/.config/torrent-builder/presets.yaml`.
@@ -518,6 +530,9 @@ jobs:
       - "https://tracker.example/announce"
   - path: /data/Show.Name.S01
     fail_on_season_warning: true
+  - path: /data/cross_seed.mkv
+    no_creator: true
+    no_date: true
 ```
 
 > **Note:** Output paths automatically receive a `.torrent` extension if not already present. `workers: 0` in the YAML config throws an error; `--workers 0` on the CLI is ignored with a warning.
