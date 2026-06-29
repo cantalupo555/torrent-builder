@@ -1046,9 +1046,9 @@ TEST(CLI, InteractiveNamePrompt) {
         "'' "                              // web seed (empty/finish)
         "n "                               // custom piece size? no
         "n "                               // target piece count? no
-        "n "                               // creator? no
+        "n "                               // omit creator? no
         "'My.Interactive.Name' "           // custom name
-        "n "                               // creation date? no
+        "n "                               // omit creation date? no
         "'' "                              // source (empty/skip)
         "n "                               // entropy? no
         "n "                               // exclude patterns? no
@@ -1440,9 +1440,9 @@ TEST(CLI, InteractiveSourceAndEntropy) {
         "'' "                              // web seed (empty/finish)
         "n "                               // custom piece size? no
         "n "                               // target piece count? no
-        "n "                               // creator? no
+        "n "                               // omit creator? no
         "'' "                              // custom name (empty/default)
-        "n "                               // creation date? no
+        "n "                               // omit creation date? no
         "'PTP' "                           // source: PTP
         "y "                                // entropy? yes
         "n "                                // exclude patterns? no
@@ -1695,9 +1695,9 @@ TEST(CLI, InteractiveExcludePatterns) {
         "'' "                              // web seed (empty/finish)
         "n "                               // custom piece size? no
         "n "                               // target piece count? no
-        "n "                               // creator? no
+        "n "                               // omit creator? no
         "'' "                              // custom name (empty/default)
-        "n "                               // creation date? no
+        "n "                               // omit creation date? no
         "'' "                              // source (empty)
         "n "                               // entropy? no
         "y "                               // exclude patterns? yes
@@ -1844,9 +1844,9 @@ TEST(CLI, InteractiveMultipleExcludePatterns) {
         "'' "                              // web seed (empty/finish)
         "n "                               // custom piece size? no
         "n "                               // target piece count? no
-        "n "                               // creator? no
+        "n "                               // omit creator? no
         "'' "                              // custom name (empty/default)
-        "n "                               // creation date? no
+        "n "                               // omit creation date? no
         "'' "                              // source (empty)
         "n "                               // entropy? no
         "y "                               // exclude patterns? yes
@@ -3707,4 +3707,452 @@ TEST(CLI, TargetPieceCountZeroFails) {
     EXPECT_NE(exit_code, 0) << "Should fail for target-piece-count of 0";
 
     fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, DefaultCreatorAndDatePresent) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_default_creator_date_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content for default creator and date"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --no-update-check --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.created_by.has_value()) << "Creator should be present by default";
+    EXPECT_EQ(*meta.created_by, "Torrent Builder");
+    ASSERT_TRUE(meta.creation_date.has_value()) << "Creation date should be present by default";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, NoCreatorOmitsField) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_no_creator_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content for no-creator"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --no-update-check --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 --no-creator 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.created_by.has_value()) << "Creator should be absent with --no-creator";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, NoDateOmitsField) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_no_date_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content for no-date"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --no-update-check --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 --no-date 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.creation_date.has_value()) << "Creation date should be absent with --no-date";
+    ASSERT_TRUE(meta.created_by.has_value()) << "Creator should still be present with --no-date";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, NoDateShortFlagOmitsField) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_no_date_short_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content for -d short flag"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --no-update-check --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 -d 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.creation_date.has_value()) << "Creation date should be absent with -d";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, NoCreatorNoDateAllVersions) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_no_creator_date_versions_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "input.txt") << "test content for all versions"; }
+
+    for (const std::string& ver : {"1", "2", "3"}) {
+        auto output_file = temp_dir / ("output_v" + ver + ".torrent");
+
+        int exit_code;
+        std::string cmd = get_binary_path() + " --no-update-check --path " + content_dir.string()
+            + " --output " + output_file.string()
+            + " --torrent-version " + ver + " --no-creator --no-date 2>&1";
+        std::string output = exec_command(cmd, exit_code);
+
+        EXPECT_EQ(exit_code, 0) << "Version " << ver << " output: " << output;
+
+        TorrentInspector inspector(output_file.string());
+        TorrentMetadata meta = inspector.inspect();
+        EXPECT_FALSE(meta.created_by.has_value())
+            << "Creator should be absent in v" << ver;
+        EXPECT_FALSE(meta.creation_date.has_value())
+            << "Creation date should be absent in v" << ver;
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetNoCreatorOmitsField) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_no_creator_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    no_creator: true\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --no-update-check --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -t 1" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.created_by.has_value()) << "Creator should be absent with preset no_creator: true";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetNoDateOmitsField) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_no_date_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    no_date: true\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --no-update-check --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -t 1" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.creation_date.has_value()) << "Creation date should be absent with preset no_date: true";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, RemovedCreatorFlagRejected) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_removed_creator_flag_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --no-update-check --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 --creator 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_NE(exit_code, 0) << "Should fail: --creator was removed";
+    EXPECT_NE(output.find("does not exist"), std::string::npos)
+        << "Should report option does not exist. Output: " << output;
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, RemovedCreationDateFlagRejected) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_removed_date_flag_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content"; }
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --no-update-check --path " + input_file.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 --creation-date 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_NE(exit_code, 0) << "Should fail: --creation-date was removed";
+    EXPECT_NE(output.find("does not exist"), std::string::npos)
+        << "Should report option does not exist. Output: " << output;
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, HelpShowsNoCreatorAndNoDate) {
+    int exit_code;
+    std::string output = exec_command(get_binary_path() + " --help 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0);
+    EXPECT_NE(output.find("--no-creator"), std::string::npos);
+    EXPECT_NE(output.find("--no-date"), std::string::npos);
+    EXPECT_EQ(output.find("--creator"), std::string::npos)
+        << "Should not show removed --creator flag";
+    EXPECT_EQ(output.find("--creation-date"), std::string::npos)
+        << "Should not show removed --creation-date flag";
+}
+
+TEST(CLI, InteractiveOmitCreatorAndDate) {
+#ifdef _WIN32
+    GTEST_SKIP() << "stdin piping via popen() is unreliable on Windows";
+#endif
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_interactive_omit_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "interactive omit test content"; }
+
+    std::string inputs =
+        "'" + input_file.string() + "' "
+        "'" + output_file.string() + "' "
+        "1 "
+        "'' "
+        "n "
+        "n "
+        "n "
+        "'' "
+        "n "
+        "n "
+        "y "
+        "'' "
+        "y "
+        "'' "
+        "n "
+        "n "
+        "n ";
+
+    std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.created_by.has_value()) << "Creator should be omitted in interactive y path";
+    EXPECT_FALSE(meta.creation_date.has_value()) << "Creation date should be omitted in interactive y path";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetCreationDateFalseOmitsField) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_date_false_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    creation_date: false\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --no-update-check --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -t 1" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.creation_date.has_value()) << "Creation date should be absent with preset creation_date: false";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, PresetDefaultNoCreatorNoDate) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_preset_default_no_cd_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "default:\n"
+          << "  no_creator: true\n"
+          << "  no_date: true\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    source: \"TEST\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --no-update-check --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -t 1" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.created_by.has_value()) << "Creator should be absent via default section no_creator";
+    EXPECT_FALSE(meta.creation_date.has_value()) << "Creation date should be absent via default section no_date";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, NoCreatorOverridesPresetCreator) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_no_creator_overrides_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    creator: \"CustomPresetCreator\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --no-update-check --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -t 1 --no-creator" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.created_by.has_value())
+        << "CLI --no-creator should override preset creator setting";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(PresetCLI, NoDateOverridesPresetCreationDate) {
+    fs::path temp_dir = fs::temp_directory_path() / ("cli_no_date_overrides_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'X');
+        f.write(data.data(), data.size());
+    }
+
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  mypreset:\n"
+          << "    creation_date: true\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --no-update-check --preset mypreset --preset-file " + (temp_dir / "presets.yaml").string() +
+        " -p " + test_file.string() +
+        " -t 1 --no-date" +
+        " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.creation_date.has_value())
+        << "CLI --no-date should override preset creation_date: true";
+
+    fs::remove_all(temp_dir);
 }
