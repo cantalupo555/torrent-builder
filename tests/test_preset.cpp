@@ -421,3 +421,75 @@ TEST_F(PresetTest, LoadFileTooLargeThrows) {
     PresetLoader loader;
     EXPECT_THROW(loader.load(temp_dir / "presets.yaml"), std::runtime_error);
 }
+
+TEST_F(PresetTest, ParseNoCreatorNoDate) {
+    write_file("presets.yaml", R"(
+version: 1
+presets:
+  clean:
+    no_creator: true
+    no_date: true
+)");
+
+    PresetLoader loader;
+    loader.load(temp_dir / "presets.yaml");
+
+    auto clean = loader.resolve("clean");
+    ASSERT_TRUE(clean.no_creator.has_value());
+    EXPECT_TRUE(*clean.no_creator);
+    ASSERT_TRUE(clean.no_date.has_value());
+    EXPECT_TRUE(*clean.no_date);
+}
+
+TEST_F(PresetTest, MergeNoCreatorNoDate) {
+    ConfigValues base;
+    base.no_creator = false;
+    base.no_date = false;
+
+    ConfigValues overlay;
+    overlay.no_creator = true;
+    overlay.no_date = true;
+
+    auto result = merge_config_values(base, overlay);
+    ASSERT_TRUE(result.no_creator.has_value());
+    EXPECT_TRUE(*result.no_creator);
+    ASSERT_TRUE(result.no_date.has_value());
+    EXPECT_TRUE(*result.no_date);
+}
+
+TEST_F(PresetTest, MergeNoCreatorOverlayWinsOverPresetCreator) {
+    ConfigValues base;
+    base.creator = "CustomCreator";
+
+    ConfigValues overlay;
+    overlay.no_creator = true;
+
+    auto result = merge_config_values(base, overlay);
+    ASSERT_TRUE(result.no_creator.has_value());
+    EXPECT_TRUE(*result.no_creator);
+    EXPECT_TRUE(result.creator.has_value())
+        << "Creator string preserved in merge; resolution happens at config build time";
+}
+
+TEST_F(PresetTest, DefaultSectionNoCreatorNoDatePropagatesToPreset) {
+    write_file("presets.yaml", R"(
+version: 1
+default:
+  no_creator: true
+  no_date: true
+presets:
+  mypreset:
+    source: "TEST"
+)");
+
+    PresetLoader loader;
+    loader.load(temp_dir / "presets.yaml");
+
+    auto resolved = loader.resolve("mypreset");
+    ASSERT_TRUE(resolved.no_creator.has_value());
+    EXPECT_TRUE(*resolved.no_creator) << "no_creator from default section should propagate";
+    ASSERT_TRUE(resolved.no_date.has_value());
+    EXPECT_TRUE(*resolved.no_date) << "no_date from default section should propagate";
+    ASSERT_TRUE(resolved.source.has_value());
+    EXPECT_EQ(*resolved.source, "TEST") << "Preset-specific fields should still work";
+}
