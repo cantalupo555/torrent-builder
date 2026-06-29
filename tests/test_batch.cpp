@@ -787,8 +787,8 @@ TEST_F(BatchTest, RunWithNoCreatorNoDateProducesCleanTorrent) {
         std::ofstream f(temp_dir / "batch.yaml");
         f << "version: 1\n"
           << "jobs:\n"
-          << "  - path: \"" << content_dir.string() << "\"\n"
-          << "    output: \"" << output_file.string() << "\"\n"
+          << "  - path: \"" << content_dir.generic_string() << "\"\n"
+          << "    output: \"" << output_file.generic_string() << "\"\n"
           << "    no_creator: true\n"
           << "    no_date: true\n";
     }
@@ -825,8 +825,8 @@ TEST_F(BatchTest, RunWithDefaultCreatorAndDatePresent) {
         std::ofstream f(temp_dir / "batch.yaml");
         f << "version: 1\n"
           << "jobs:\n"
-          << "  - path: \"" << content_dir.string() << "\"\n"
-          << "    output: \"" << output_file.string() << "\"\n";
+          << "  - path: \"" << content_dir.generic_string() << "\"\n"
+          << "    output: \"" << output_file.generic_string() << "\"\n";
     }
 
     auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
