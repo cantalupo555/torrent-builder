@@ -106,9 +106,20 @@ TorrentConfig build_torrent_config(const ConfigValues& cv, const fs::path& defau
         piece_size_bytes = validate_piece_size(*cv.piece_size);
     }
 
-    std::optional<std::string> creator;
-    if (cv.creator) {
+    std::optional<std::string> creator = "Torrent Builder";
+    if (cv.no_creator && *cv.no_creator) {
+        creator = std::nullopt;
+        log_message("Creator omitted via no_creator setting", LogLevel::INFO);
+    } else if (cv.creator) {
         creator = *cv.creator;
+    }
+
+    bool include_creation_date = true;
+    if (cv.no_date && *cv.no_date) {
+        include_creation_date = false;
+        log_message("Creation date omitted via no_date setting", LogLevel::INFO);
+    } else if (cv.creation_date) {
+        include_creation_date = *cv.creation_date;
     }
 
     return TorrentConfig(
@@ -122,7 +133,7 @@ TorrentConfig build_torrent_config(const ConfigValues& cv, const fs::path& defau
         piece_size_bytes,
         creator,
         cv.name,
-        cv.creation_date.value_or(false),
+        include_creation_date,
         cv.source,
         cv.entropy.value_or(false),
         compile_patterns(cv.exclude_patterns),
