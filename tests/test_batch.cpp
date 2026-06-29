@@ -264,7 +264,33 @@ jobs:
 
     ASSERT_EQ(results.size(), 1u);
     EXPECT_TRUE(results[0].success);
-    EXPECT_TRUE(fs::exists(temp_dir / "output.torrent"));
+}
+
+TEST_F(BatchTest, ParseNoCreatorNoDate) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / ("batch_no_creator_date_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    {
+        std::ofstream f(temp_dir / "batch.yaml");
+        f << R"(version: 1
+jobs:
+  - path: "/data/movie.mkv"
+    no_creator: true
+    no_date: true
+)";
+    }
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    ASSERT_EQ(config.jobs.size(), 1u);
+
+    const auto& cv = config.jobs[0].values;
+    ASSERT_TRUE(cv.no_creator.has_value());
+    EXPECT_TRUE(*cv.no_creator);
+    ASSERT_TRUE(cv.no_date.has_value());
+    EXPECT_TRUE(*cv.no_date);
+
+    fs::remove_all(temp_dir);
 }
 
 TEST_F(BatchTest, RunWithSeasonWarningDisabledOnIncompletePackSucceeds) {
@@ -728,11 +754,14 @@ jobs:
 }
 
 TEST_F(BatchTest, WorkersCappedWhenExceedingJobCount) {
+    auto input_file = temp_dir / "input.txt";
+    { std::ofstream(input_file) << "test content"; }
+
     write_file("batch.yaml", R"(
 version: 1
 workers: 100
 jobs:
-  - path: "/tmp/nonexistent_path_for_test"
+  - path: ")" + input_file.generic_string() + R"("
 )");
 
     auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
@@ -740,7 +769,82 @@ jobs:
     auto results = processor.run();
 
     ASSERT_EQ(results.size(), 1u);
-    EXPECT_FALSE(results[0].success);
+    EXPECT_TRUE(results[0].success);
+}
+
+TEST_F(BatchTest, RunWithNoCreatorNoDateProducesCleanTorrent) {
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / ("batch_no_cd_e2e_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video data"; }
+
+    auto output_file = temp_dir / "clean.torrent";
+
+    {
+        std::ofstream f(temp_dir / "batch.yaml");
+        f << "version: 1\n"
+          << "jobs:\n"
+          << "  - path: \"" << content_dir.generic_string() << "\"\n"
+          << "    output: \"" << output_file.generic_string() << "\"\n"
+          << "    no_creator: true\n"
+          << "    no_date: true\n";
+    }
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << "Job should succeed";
+
+    ASSERT_TRUE(fs::exists(output_file)) << "Torrent file should be created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.created_by.has_value()) << "Creator should be absent with batch no_creator: true";
+    EXPECT_FALSE(meta.creation_date.has_value()) << "Creation date should be absent with batch no_date: true";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_F(BatchTest, RunWithDefaultCreatorAndDatePresent) {
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / ("batch_default_cd_e2e_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video data"; }
+
+    auto output_file = temp_dir / "default.torrent";
+
+    {
+        std::ofstream f(temp_dir / "batch.yaml");
+        f << "version: 1\n"
+          << "jobs:\n"
+          << "  - path: \"" << content_dir.generic_string() << "\"\n"
+          << "    output: \"" << output_file.generic_string() << "\"\n";
+    }
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << "Job should succeed";
+
+    ASSERT_TRUE(fs::exists(output_file)) << "Torrent file should be created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.created_by.has_value()) << "Creator should be present by default in batch";
+    EXPECT_EQ(*meta.created_by, "Torrent Builder");
+    ASSERT_TRUE(meta.creation_date.has_value()) << "Creation date should be present by default in batch";
+
+    fs::remove_all(temp_dir);
 }
 
 TEST_F(BatchTest, RunWithOutputDirAutoCreate) {

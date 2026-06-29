@@ -397,11 +397,11 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         }
     }
 
-    // Get creator
-    std::optional<std::string> creator_str = std::nullopt;
-    if (prompt_yes_no("Set \"Torrent Builder\" as creator?"))
+    // Get creator (default: "Torrent Builder", user can choose to omit)
+    std::optional<std::string> creator_str = "Torrent Builder";
+    if (prompt_yes_no("Omit creator from torrent?"))
     {
-        creator_str = "Torrent Builder";
+        creator_str = std::nullopt;
     }
 
     // Get optional custom torrent name
@@ -419,8 +419,8 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         break;
     }
 
-    // Get creation date
-    bool include_creation_date = prompt_yes_no("Set creation date?");
+    // Get creation date (default: included, user can choose to omit)
+    bool include_creation_date = !prompt_yes_no("Omit creation date from torrent?");
 
     // Get optional source string
     std::optional<std::string> source = prompt_optional_string("Source string for cross-seeding (leave blank to skip): ");
@@ -707,20 +707,27 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
         throw std::runtime_error("Conflicting piece size options");
     }
 
-    // Get creator string
-    std::optional<std::string> creator_str = std::nullopt;
-    if (result.count("creator"))
-    {
-        creator_str = "Torrent Builder";
-    }
-    else if (preset_values.creator)
-    {
+    // Resolve creator (default: "Torrent Builder", unless --no-creator or preset)
+    std::optional<std::string> creator_str = "Torrent Builder";
+    if (result.count("no-creator")) {
+        creator_str = std::nullopt;
+        log_message("Creator omitted via --no-creator", LogLevel::INFO);
+    } else if (preset_values.no_creator && *preset_values.no_creator) {
+        creator_str = std::nullopt;
+        log_message("Creator omitted via preset no_creator", LogLevel::INFO);
+    } else if (preset_values.creator) {
         creator_str = preset_values.creator;
     }
 
-    // Get creation date flag
-    bool include_creation_date = result.count("creation-date") > 0;
-    if (!include_creation_date && preset_values.creation_date) {
+    // Resolve creation date (default: include, unless --no-date or preset)
+    bool include_creation_date = true;
+    if (result.count("no-date")) {
+        include_creation_date = false;
+        log_message("Creation date omitted via --no-date", LogLevel::INFO);
+    } else if (preset_values.no_date && *preset_values.no_date) {
+        include_creation_date = false;
+        log_message("Creation date omitted via preset no_date", LogLevel::INFO);
+    } else if (preset_values.creation_date) {
         include_creation_date = *preset_values.creation_date;
     }
 
@@ -1733,8 +1740,8 @@ int main(int argc, char *argv[])
                    "16384, 32768)",
                    cxxopts::value<int>(), "SIZE")(
             "target-piece-count", "Target number of pieces (calculates optimal piece size)",
-            cxxopts::value<int>(), "N")("creator", "Set \"Torrent Builder\" as creator")(
-            "creation-date", "Set creation date")("p,path", "Path to file or directory",
+            cxxopts::value<int>(), "N")("no-creator", "Omit creator field from torrent metadata")(
+            "d,no-date", "Omit creation date from torrent metadata")("p,path", "Path to file or directory",
                                                   cxxopts::value<std::string>(), "PATH")(
             "o,output", "Output torrent file path (optional, auto-generated if omitted)", cxxopts::value<std::string>(), "OUTPUT")(
             "skip-prefix", "Omit tracker domain from auto-generated output filename")(

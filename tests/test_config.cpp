@@ -59,8 +59,8 @@ TEST_F(TorrentConfigTest, DefaultValues) {
     EXPECT_FALSE(config.is_private);
     EXPECT_EQ(config.comment, std::nullopt);
     EXPECT_EQ(config.piece_size, std::nullopt);
-    EXPECT_EQ(config.creator, std::nullopt);
-    EXPECT_FALSE(config.include_creation_date);
+    EXPECT_EQ(config.creator, std::optional<std::string>("Torrent Builder"));
+    EXPECT_TRUE(config.include_creation_date);
     EXPECT_TRUE(config.web_seeds.empty());
     EXPECT_TRUE(config.trackers.empty());
 }

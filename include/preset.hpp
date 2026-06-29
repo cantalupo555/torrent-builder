@@ -31,6 +31,8 @@ struct ConfigValues {
     std::optional<bool> creation_date;              ///< Whether to embed creation date
     std::optional<int> torrent_version;             ///< 1=V1, 2=V2, 3=Hybrid
     std::optional<bool> entropy;                    ///< Whether to include entropy data
+    std::optional<bool> no_creator;                 ///< Explicitly omit creator field
+    std::optional<bool> no_date;                    ///< Explicitly omit creation date
     std::optional<std::vector<std::string>> exclude_patterns;///< Glob patterns to exclude
     std::optional<std::vector<std::string>> include_patterns;///< Glob patterns to include
 };

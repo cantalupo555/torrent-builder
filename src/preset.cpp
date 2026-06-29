@@ -46,6 +46,8 @@ ConfigValues parse_yaml_config(const YAML::Node& node)
     if (node["creation_date"]) cv.creation_date = node["creation_date"].as<bool>();
     if (node["torrent_version"]) cv.torrent_version = node["torrent_version"].as<int>();
     if (node["entropy"]) cv.entropy = node["entropy"].as<bool>();
+    if (node["no_creator"]) cv.no_creator = node["no_creator"].as<bool>();
+    if (node["no_date"]) cv.no_date = node["no_date"].as<bool>();
 
     if (node["exclude_patterns"]) {
         std::vector<std::string> patterns;
@@ -84,6 +86,8 @@ ConfigValues merge_config_values(const ConfigValues& base, const ConfigValues& o
     if (overlay.creation_date.has_value()) result.creation_date = overlay.creation_date;
     if (overlay.torrent_version) result.torrent_version = overlay.torrent_version;
     if (overlay.entropy.has_value()) result.entropy = overlay.entropy;
+    if (overlay.no_creator.has_value()) result.no_creator = overlay.no_creator;
+    if (overlay.no_date.has_value()) result.no_date = overlay.no_date;
     if (overlay.exclude_patterns) result.exclude_patterns = overlay.exclude_patterns;
     if (overlay.include_patterns) result.include_patterns = overlay.include_patterns;
 

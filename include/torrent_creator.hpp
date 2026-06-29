@@ -45,7 +45,7 @@ struct TorrentConfig {
     std::optional<int> target_piece_count;         ///< Original target (for display only; piece_size holds resolved value)
     std::optional<std::string> creator;
     std::optional<std::string> name;              // Overrides default name inferred from path
-    bool include_creation_date;
+    bool include_creation_date = true;
     std::optional<std::string> source;            // Cross-seeding identity (sets info.source)
     bool entropy;                                 // Randomize info hash per invocation
     std::vector<std::regex> exclude_regex;        // Pre-compiled exclude patterns
@@ -75,9 +75,9 @@ struct TorrentConfig {
     TorrentConfig(fs::path p, fs::path o, std::vector<std::string> t,
                  TorrentVersion v, std::optional<std::string> c = std::nullopt,
                  bool priv = false, std::vector<std::string> ws = {}, std::optional<int> ps = std::nullopt,
-                 std::optional<std::string> creator = std::nullopt,
+                 std::optional<std::string> creator = "Torrent Builder",
                  std::optional<std::string> name_val = std::nullopt,
-                 bool include_creation_date = false,
+                 bool include_creation_date = true,
                  std::optional<std::string> source = std::nullopt,
                  bool entropy = false,
                  std::vector<std::regex> exclude_re = {},
