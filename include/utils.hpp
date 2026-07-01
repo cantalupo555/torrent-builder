@@ -270,6 +270,42 @@ bool should_include_file(const std::string &relative_path,
                            const std::vector<std::regex> &include_regex);
 
 /**
+ * @brief Built-in glob patterns for OS-generated metadata and junk files.
+ *
+ * Excluded by default when creating torrents from directories to avoid
+ * leaking system information and including unnecessary files. Each pattern
+ * is prefixed with the recursive glob token (double-star-slash) so it matches
+ * at any depth, including the torrent root.
+ *
+ * Matches are case-insensitive (see glob_to_regex).
+ *
+ * Patterns:
+ *   - .DS_Store, Thumbs.db, desktop.ini (macOS/Windows metadata)
+ *   - Zone.Identifier and Zone.Identifier:* (Windows ADS / Mark-of-the-Web)
+ *   - @eaDir directory and its contents (Synology NAS metadata)
+ *   - star.torrent (avoid nesting existing torrent files)
+ *
+ * @return Reference to the static list of built-in exclude glob patterns.
+ */
+const std::vector<std::string>& builtin_exclude_patterns();
+
+/**
+ * @brief Prepend built-in exclude patterns to a list of user exclude regexes.
+ *
+ * When enabled, the built-in patterns (see builtin_exclude_patterns()) are
+ * compiled and placed before the user-supplied patterns in the returned vector.
+ * Built-ins are listed first so that, combined with should_include_file(),
+ * include patterns still take precedence over both built-in and user excludes.
+ *
+ * @param user_excludes User-supplied compiled exclude regexes (kept as-is).
+ * @param enabled Whether to prepend the built-in patterns.
+ * @return Combined vector (built-ins first, then user excludes) when enabled,
+ *         otherwise a copy of user_excludes unchanged.
+ */
+std::vector<std::regex> apply_builtin_excludes(const std::vector<std::regex>& user_excludes,
+                                                bool enabled);
+
+/**
  * @brief Generate 32 random bytes as a 64-char lowercase hex string.
  * @return 64-character hex string suitable for use as torrent info entropy field.
  */
