@@ -48,6 +48,7 @@ ConfigValues parse_yaml_config(const YAML::Node& node)
     if (node["entropy"]) cv.entropy = node["entropy"].as<bool>();
     if (node["no_creator"]) cv.no_creator = node["no_creator"].as<bool>();
     if (node["no_date"]) cv.no_date = node["no_date"].as<bool>();
+    if (node["builtin_excludes"]) cv.builtin_excludes = node["builtin_excludes"].as<bool>();
 
     if (node["exclude_patterns"]) {
         std::vector<std::string> patterns;
@@ -88,6 +89,7 @@ ConfigValues merge_config_values(const ConfigValues& base, const ConfigValues& o
     if (overlay.entropy.has_value()) result.entropy = overlay.entropy;
     if (overlay.no_creator.has_value()) result.no_creator = overlay.no_creator;
     if (overlay.no_date.has_value()) result.no_date = overlay.no_date;
+    if (overlay.builtin_excludes.has_value()) result.builtin_excludes = overlay.builtin_excludes;
     if (overlay.exclude_patterns) result.exclude_patterns = overlay.exclude_patterns;
     if (overlay.include_patterns) result.include_patterns = overlay.include_patterns;
 
