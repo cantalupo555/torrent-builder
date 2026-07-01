@@ -122,6 +122,11 @@ TorrentConfig build_torrent_config(const ConfigValues& cv, const fs::path& defau
         include_creation_date = *cv.creation_date;
     }
 
+    bool use_builtin_excludes = cv.builtin_excludes.value_or(true);
+    if (use_builtin_excludes) {
+        log_message("Applying built-in exclude patterns (set builtin_excludes: false to disable)", LogLevel::INFO);
+    }
+
     return TorrentConfig(
         input_path,
         output,
@@ -136,7 +141,7 @@ TorrentConfig build_torrent_config(const ConfigValues& cv, const fs::path& defau
         include_creation_date,
         cv.source,
         cv.entropy.value_or(false),
-        compile_patterns(cv.exclude_patterns),
+        utils::apply_builtin_excludes(compile_patterns(cv.exclude_patterns), use_builtin_excludes),
         compile_patterns(cv.include_patterns),
         false,
         cv.target_piece_count

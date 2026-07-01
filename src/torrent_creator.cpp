@@ -83,6 +83,7 @@ lt::create_flags_t TorrentCreator::get_torrent_flags(TorrentVersion version) {
                         }
                         if (!utils::should_include_file(rel_str, exclude_regex, include_regex)) {
                             ++files_excluded;
+                            log_message("Excluded by pattern: " + rel_str, LogLevel::INFO);
                             return false;
                         }
                         return true;
