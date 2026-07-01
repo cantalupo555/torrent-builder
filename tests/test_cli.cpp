@@ -1052,7 +1052,8 @@ TEST(CLI, InteractiveNamePrompt) {
         "'' "                              // source (empty/skip)
         "n "                               // entropy? no
         "n "                               // exclude patterns? no
-        "n ";                              // include patterns? no
+        "n "                               // include patterns? no
+        "n ";                              // exclude system files? no
 
     std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
 
@@ -1446,7 +1447,8 @@ TEST(CLI, InteractiveSourceAndEntropy) {
         "'PTP' "                           // source: PTP
         "y "                                // entropy? yes
         "n "                                // exclude patterns? no
-        "n ";                               // include patterns? no
+        "n "                                // include patterns? no
+        "n ";                               // exclude system files? no
 
     std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
 
@@ -1592,6 +1594,134 @@ TEST(CLI, HelpShowsExcludeInclude) {
     EXPECT_EQ(exit_code, 0);
     EXPECT_NE(output.find("--exclude"), std::string::npos);
     EXPECT_NE(output.find("--include"), std::string::npos);
+    EXPECT_NE(output.find("--no-builtin-excludes"), std::string::npos);
+}
+
+TEST(CLI, BuiltinExcludesFilterSystemFilesByDefault) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_builtin_exc_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / ".DS_Store") << "macos metadata"; }
+    { std::ofstream(content_dir / "Thumbs.db") << "windows metadata"; }
+    { std::ofstream(content_dir / "desktop.ini") << "windows folder"; }
+    { std::ofstream(content_dir / "existing.torrent") << "existing torrent"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_TRUE(fs::exists(output_file)) << "Torrent file not created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    // Only movie.mkv should survive — all system files filtered by default.
+    ASSERT_EQ(meta.files.size(), 1u) << "System files should be excluded by default";
+    EXPECT_NE(meta.files[0].path.find("movie.mkv"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, NoBuiltinExcludesFlagIncludesSystemFiles) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_no_builtin_exc_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / ".DS_Store") << "macos metadata"; }
+    { std::ofstream(content_dir / "Thumbs.db") << "windows metadata"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1"
+        + " --no-builtin-excludes 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+    EXPECT_TRUE(fs::exists(output_file)) << "Torrent file not created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    // With --no-builtin-excludes, system files must be present.
+    bool has_dsstore = false, has_thumbs = false;
+    for (const auto& fi : meta.files) {
+        if (fi.path.find(".DS_Store") != std::string::npos) has_dsstore = true;
+        if (fi.path.find("Thumbs.db") != std::string::npos) has_thumbs = true;
+    }
+    EXPECT_TRUE(has_dsstore) << ".DS_Store should be included with --no-builtin-excludes";
+    EXPECT_TRUE(has_thumbs) << "Thumbs.db should be included with --no-builtin-excludes";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, BuiltinExcludesApplyToNestedSystemFiles) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_builtin_nested_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir / "subs");
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "subs" / "en.srt") << "subtitle"; }
+    { std::ofstream(content_dir / "subs" / ".DS_Store") << "nested macos metadata"; }
+    { std::ofstream(content_dir / ".DS_Store") << "root macos metadata"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    // movie.mkv + subs/en.srt remain; both .DS_Store (root and nested) filtered.
+    for (const auto& fi : meta.files) {
+        EXPECT_EQ(fi.path.find(".DS_Store"), std::string::npos)
+            << "No .DS_Store should be present at any depth: " << fi.path;
+    }
+    ASSERT_EQ(meta.files.size(), 2u);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, IncludeOverridesBuiltinExcludes) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "torrent_builder_inc_over_builtin_test";
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video content"; }
+    { std::ofstream(content_dir / "extra.torrent") << "existing torrent"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    int exit_code;
+    // Built-ins exclude *.torrent by default, but --include *.torrent must win.
+    std::string cmd = get_binary_path() + " --path " + content_dir.string()
+        + " --output " + output_file.string()
+        + " --torrent-version 1"
+        + " --include \"*.torrent\" 2>&1";
+    std::string output = exec_command(cmd, exit_code);
+
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    // Only extra.torrent survives (it matched --include; movie.mkv did not).
+    ASSERT_EQ(meta.files.size(), 1u) << "Include should override built-in excludes";
+    EXPECT_NE(meta.files[0].path.find("extra.torrent"), std::string::npos);
+
+    fs::remove_all(temp_dir);
 }
 
 TEST(CLI, ExcludePatternSubdirectory) {
@@ -1704,6 +1834,7 @@ TEST(CLI, InteractiveExcludePatterns) {
         "*.nfo "                           // exclude pattern
         " "                                // blank to finish exclude
         "n "                               // include patterns? no
+        "n "                               // exclude system files? no
         "";
 
     std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
@@ -1854,6 +1985,7 @@ TEST(CLI, InteractiveMultipleExcludePatterns) {
         "*.srt "                           // exclude pattern 2
         " "                                // blank to finish exclude
         "n "                               // include patterns? no
+        "n "                               // exclude system files? no
         " ";
 
     std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
@@ -3992,6 +4124,7 @@ TEST(CLI, InteractiveOmitCreatorAndDate) {
         "'' "
         "y "
         "'' "
+        "n "
         "n "
         "n "
         "n ";

@@ -847,6 +847,115 @@ TEST_F(BatchTest, RunWithDefaultCreatorAndDatePresent) {
     fs::remove_all(temp_dir);
 }
 
+TEST_F(BatchTest, ParseBuiltinExcludes) {
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / ("batch_builtin_excl_parse_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    {
+        std::ofstream f(temp_dir / "batch.yaml");
+        f << R"(version: 1
+jobs:
+  - path: "/data/movie.mkv"
+    builtin_excludes: false
+)";
+    }
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    ASSERT_EQ(config.jobs.size(), 1u);
+
+    const auto& cv = config.jobs[0].values;
+    ASSERT_TRUE(cv.builtin_excludes.has_value());
+    EXPECT_FALSE(*cv.builtin_excludes);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_F(BatchTest, RunWithBuiltinExcludesDisabledIncludesSystemFiles) {
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / ("batch_builtin_excl_off_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video data"; }
+    { std::ofstream(content_dir / ".DS_Store") << "macos metadata"; }
+    { std::ofstream(content_dir / "Thumbs.db") << "windows metadata"; }
+
+    auto output_file = temp_dir / "out.torrent";
+
+    {
+        std::ofstream f(temp_dir / "batch.yaml");
+        f << "version: 1\n"
+          << "jobs:\n"
+          << "  - path: \"" << content_dir.generic_string() << "\"\n"
+          << "    output: \"" << output_file.generic_string() << "\"\n"
+          << "    builtin_excludes: false\n";
+    }
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << "Job should succeed";
+    ASSERT_TRUE(fs::exists(output_file)) << "Torrent file should be created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+
+    // With builtin_excludes: false, system files must be present in the torrent.
+    bool has_dsstore = false, has_thumbs = false;
+    for (const auto& fi : meta.files) {
+        if (fi.path.find(".DS_Store") != std::string::npos) has_dsstore = true;
+        if (fi.path.find("Thumbs.db") != std::string::npos) has_thumbs = true;
+    }
+    EXPECT_TRUE(has_dsstore) << ".DS_Store should be included when builtin_excludes is false";
+    EXPECT_TRUE(has_thumbs) << "Thumbs.db should be included when builtin_excludes is false";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_F(BatchTest, RunWithBuiltinExcludesDefaultFiltersSystemFiles) {
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / ("batch_builtin_excl_def_" + std::to_string(portable_getpid()));
+    fs::create_directories(temp_dir);
+
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video data"; }
+    { std::ofstream(content_dir / ".DS_Store") << "macos metadata"; }
+    { std::ofstream(content_dir / "Thumbs.db") << "windows metadata"; }
+    { std::ofstream(content_dir / "desktop.ini") << "windows folder"; }
+
+    auto output_file = temp_dir / "out.torrent";
+
+    {
+        std::ofstream f(temp_dir / "batch.yaml");
+        f << "version: 1\n"
+          << "jobs:\n"
+          << "  - path: \"" << content_dir.generic_string() << "\"\n"
+          << "    output: \"" << output_file.generic_string() << "\"\n";
+    }
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << "Job should succeed";
+    ASSERT_TRUE(fs::exists(output_file)) << "Torrent file should be created";
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+
+    // By default (no builtin_excludes key), system files must be filtered out.
+    ASSERT_EQ(meta.files.size(), 1u) << "Only movie.mkv should remain";
+    EXPECT_NE(meta.files[0].path.find("movie.mkv"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
 TEST_F(BatchTest, RunWithOutputDirAutoCreate) {
     fs::path test_file = temp_dir / "testfile.bin";
     {
