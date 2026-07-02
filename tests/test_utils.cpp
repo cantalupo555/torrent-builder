@@ -1091,6 +1091,85 @@ TEST(ShouldIncludeFile, RecursivePatternExclude) {
     EXPECT_TRUE(utils::should_include_file("movie.mkv", exclude_re, include_re));
 }
 
+// --- Built-in system-file exclusions (issue #62) ---
+
+TEST(BuiltinExcludePatterns, ContainsExpectedSystemFiles) {
+    const auto& patterns = utils::builtin_exclude_patterns();
+    // Must include the system files documented in the README/issue.
+    auto contains = [](const std::string& needle) {
+        const auto& p = utils::builtin_exclude_patterns();
+        return std::find(p.begin(), p.end(), needle) != p.end();
+    };
+    EXPECT_TRUE(contains("**/.DS_Store"));
+    EXPECT_TRUE(contains("**/Thumbs.db"));
+    EXPECT_TRUE(contains("**/desktop.ini"));
+    EXPECT_TRUE(contains("**/Zone.Identifier"));
+    EXPECT_TRUE(contains("**/Zone.Identifier:*"));
+    EXPECT_TRUE(contains("**/@eaDir"));
+    EXPECT_TRUE(contains("**/@eaDir/**"));
+    EXPECT_TRUE(contains("**/*.torrent"));
+    EXPECT_FALSE(patterns.empty());
+}
+
+TEST(ApplyBuiltinExcludes, DisabledReturnsUserExcludesUnchanged) {
+    std::vector<std::regex> user = {utils::glob_to_regex("*.nfo")};
+    auto combined = utils::apply_builtin_excludes(user, false);
+    // When disabled, the result must equal the user excludes (same count, no built-ins).
+    EXPECT_EQ(combined.size(), user.size());
+    EXPECT_TRUE(std::regex_match("readme.nfo", combined[0]));
+    // A built-in target (.torrent) is NOT excluded when disabled.
+    EXPECT_TRUE(utils::should_include_file("movie.torrent", combined, {}));
+}
+
+TEST(ApplyBuiltinExcludes, EnabledPrependsBuiltinsBeforeUserExcludes) {
+    std::vector<std::regex> user = {utils::glob_to_regex("*.nfo")};
+    auto combined = utils::apply_builtin_excludes(user, true);
+    EXPECT_EQ(combined.size(), user.size() + utils::builtin_exclude_patterns().size());
+    // User pattern still works.
+    EXPECT_FALSE(utils::should_include_file("readme.nfo", combined, {}));
+}
+
+TEST(ApplyBuiltinExcludes, ExcludesSystemFilesAtAnyDepth) {
+    auto exclude_re = utils::apply_builtin_excludes({}, true);
+    std::vector<std::regex> include_re;
+    // Root-level system files.
+    EXPECT_FALSE(utils::should_include_file(".DS_Store", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("Thumbs.db", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("desktop.ini", exclude_re, include_re));
+    // Nested system files.
+    EXPECT_FALSE(utils::should_include_file("sub/.DS_Store", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("deep/nested/Thumbs.db", exclude_re, include_re));
+    // Zone.Identifier (Windows ADS / Mark-of-the-Web): bare and stream variants.
+    EXPECT_FALSE(utils::should_include_file("Zone.Identifier", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("Zone.Identifier:$DATA", exclude_re, include_re));
+    // Synology @eaDir metadata directory and its contents.
+    EXPECT_FALSE(utils::should_include_file("@eaDir", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("@eaDir/synofile.ico", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("media/@eaDir/thumb.jpg", exclude_re, include_re));
+    // Existing .torrent files.
+    EXPECT_FALSE(utils::should_include_file("existing.torrent", exclude_re, include_re));
+    // Regular content is kept.
+    EXPECT_TRUE(utils::should_include_file("movie.mkv", exclude_re, include_re));
+    EXPECT_TRUE(utils::should_include_file("subs/en.srt", exclude_re, include_re));
+}
+
+TEST(ApplyBuiltinExcludes, MatchingIsCaseInsensitive) {
+    auto exclude_re = utils::apply_builtin_excludes({}, true);
+    std::vector<std::regex> include_re;
+    EXPECT_FALSE(utils::should_include_file(".ds_store", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("THUMBS.DB", exclude_re, include_re));
+    EXPECT_FALSE(utils::should_include_file("Sub/Desktop.INI", exclude_re, include_re));
+}
+
+TEST(ApplyBuiltinExcludes, IncludePatternOverridesBuiltins) {
+    // A file matching a built-in exclude AND an --include pattern must be kept.
+    auto exclude_re = utils::apply_builtin_excludes({}, true);
+    std::vector<std::regex> include_re = {utils::glob_to_regex("*.torrent")};
+    EXPECT_TRUE(utils::should_include_file("existing.torrent", exclude_re, include_re));
+    // But a non-matching file is still excluded by the built-ins when no include matches.
+    EXPECT_FALSE(utils::should_include_file(".DS_Store", exclude_re, include_re));
+}
+
 TEST(GlobToRegex, EmptyPattern) {
     auto re = utils::glob_to_regex("");
     EXPECT_TRUE(std::regex_match("", re));

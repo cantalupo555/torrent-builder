@@ -210,6 +210,7 @@ subcommands and when `--quiet`/`--json` is used.
   -e, --entropy              Randomize info hash by adding entropy field
   -x, --exclude arg          Exclude files matching glob pattern (can be used multiple times)
   -I, --include arg          Include only files matching glob pattern (can be used multiple times)
+       --no-builtin-excludes Disable built-in system-file exclusions (.DS_Store, Thumbs.db, etc.)
        --skip-prefix          Omit tracker domain from auto-generated output filename
        --output-dir DIR       Directory for auto-generated output filename (created if needed)
        --tracker-index N      Index of tracker to use for filename prefix (0-based, default: 0)
@@ -396,6 +397,28 @@ Include only specific file types:
 
 > **Note:** `--include` patterns take precedence over `--exclude` when both match. Glob syntax: `*` (any non-slash), `**/` (zero or more dirs), `**` (any path), `?` (single char). Matching is case-insensitive.
 
+#### Built-in system-file exclusions
+
+By default, common OS-generated metadata and junk files are excluded automatically (case-insensitive, matched at any depth):
+
+| Pattern | Origin |
+|---------|--------|
+| `.DS_Store` | macOS Finder metadata |
+| `Thumbs.db`, `desktop.ini` | Windows Explorer |
+| `Zone.Identifier`, `Zone.Identifier:*` | Windows ADS (Mark-of-the-Web) |
+| `@eaDir`, `@eaDir/**` | Synology NAS metadata |
+| `*.torrent` | Avoid nesting existing torrent files |
+
+Built-in excludes act as additional `--exclude` patterns, so `--include` still takes precedence — a file matching an `--include` pattern is kept even if it also matches a built-in. Disable with `--no-builtin-excludes`:
+
+```bash
+# System files excluded by default
+torrent-builder /path/to/folder
+
+# Opt out if needed
+torrent-builder /path/to/folder --no-builtin-excludes
+```
+
 Verbose, quiet, and JSON output:
 ```bash
 ./torrent_builder --path /data/file --output file.torrent --verbose
@@ -491,7 +514,10 @@ presets:
     no_date: true
     trackers:
       - "https://tracker.example/announce"
+    builtin_excludes: false   # disable system-file exclusions for this preset
 ```
+
+> **Note:** `builtin_excludes` (default: `true`) controls the automatic exclusion of `.DS_Store`, `Thumbs.db`, and other system files. Set it to `false` to disable. See [Built-in system-file exclusions](#built-in-system-file-exclusions).
 
 **Preset file resolution**: `--preset-file` (if given, used directly). Otherwise, search order: `./presets.yaml` → `$XDG_CONFIG_HOME/torrent-builder/presets.yaml` → `~/.config/torrent-builder/presets.yaml`.
 
@@ -533,6 +559,8 @@ jobs:
   - path: /data/cross_seed.mkv
     no_creator: true
     no_date: true
+  - path: /data/full_dump
+    builtin_excludes: false   # include system files (e.g. for a raw backup)
 ```
 
 > **Note:** Output paths automatically receive a `.torrent` extension if not already present. `workers: 0` in the YAML config throws an error; `--workers 0` on the CLI is ignored with a warning.

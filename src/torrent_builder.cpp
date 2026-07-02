@@ -474,6 +474,17 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         }
     }
 
+    // Built-in system-file exclusions are on by default. prompt_yes_no returns
+    // false on empty/n input, so the question is phrased to opt INTO inclusion:
+    // answering "no" (the default) keeps system files excluded, matching the
+    // documented on-by-default behavior of CLI and batch modes.
+    bool include_system_files = prompt_yes_no("Include system files (.DS_Store, Thumbs.db, etc.)?");
+    bool use_builtin_excludes = !include_system_files;
+    if (use_builtin_excludes) {
+        log_message("Applying built-in exclude patterns (interactive)", LogLevel::INFO);
+    }
+    exclude_regex_compiled = utils::apply_builtin_excludes(exclude_regex_compiled, use_builtin_excludes);
+
     return TorrentConfig(path, output, trackers, tv,
                          comment.empty() ? std::nullopt : std::optional<std::string>(comment),
                          is_private, web_seeds, piece_size, creator_str, torrent_name,
@@ -791,6 +802,19 @@ std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &
             catch (const std::regex_error &) { throw std::runtime_error("Invalid include pattern: " + p); }
         }
     }
+
+    // Built-in system-file exclusions (.DS_Store, Thumbs.db, etc.) are applied
+    // by default unless --no-builtin-excludes is passed or a preset disables them.
+    bool use_builtin_excludes = true;
+    if (result.count("no-builtin-excludes")) {
+        use_builtin_excludes = false;
+        log_message("Built-in exclude patterns disabled via --no-builtin-excludes", LogLevel::INFO);
+    } else if (preset_values.builtin_excludes.has_value()) {
+        use_builtin_excludes = *preset_values.builtin_excludes;
+        log_message(std::string("Built-in exclude patterns ") +
+                    (use_builtin_excludes ? "enabled" : "disabled") + " via preset", LogLevel::INFO);
+    }
+    exclude_regex_compiled = utils::apply_builtin_excludes(exclude_regex_compiled, use_builtin_excludes);
 
     try
     {
@@ -1756,6 +1780,7 @@ int main(int argc, char *argv[])
              cxxopts::value<std::vector<std::string>>(), "PATTERN")(
             "I,include", "Include only files matching glob pattern (supports *, **, ?)",
              cxxopts::value<std::vector<std::string>>(), "PATTERN")(
+            "no-builtin-excludes", "Disable built-in system-file exclusions (.DS_Store, Thumbs.db, etc.)")(
             "preset", "Apply named preset from presets.yaml", cxxopts::value<std::string>(), "NAME")(
             "preset-file", "Load presets from specified file", cxxopts::value<std::string>(), "FILE")(
             "rules-file", "Load tracker rules from specified file", cxxopts::value<std::string>(), "FILE")(

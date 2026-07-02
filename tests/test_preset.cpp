@@ -493,3 +493,77 @@ presets:
     ASSERT_TRUE(resolved.source.has_value());
     EXPECT_EQ(*resolved.source, "TEST") << "Preset-specific fields should still work";
 }
+
+TEST_F(PresetTest, ParseBuiltinExcludes) {
+    write_file("presets.yaml", R"(
+version: 1
+presets:
+  raw:
+    builtin_excludes: false
+)");
+
+    PresetLoader loader;
+    loader.load(temp_dir / "presets.yaml");
+
+    auto raw = loader.resolve("raw");
+    ASSERT_TRUE(raw.builtin_excludes.has_value());
+    EXPECT_FALSE(*raw.builtin_excludes);
+}
+
+TEST_F(PresetTest, BuiltinExcludesAbsentDefaultsToEmpty) {
+    write_file("presets.yaml", R"(
+version: 1
+presets:
+  plain:
+    source: "TEST"
+)");
+
+    PresetLoader loader;
+    loader.load(temp_dir / "presets.yaml");
+
+    auto plain = loader.resolve("plain");
+    EXPECT_FALSE(plain.builtin_excludes.has_value())
+        << "Absent key should leave builtin_excludes unset (defaults resolved at build time)";
+}
+
+TEST_F(PresetTest, MergeBuiltinExcludesOverlayWins) {
+    ConfigValues base;
+    base.builtin_excludes = true;
+
+    ConfigValues overlay;
+    overlay.builtin_excludes = false;
+
+    auto result = merge_config_values(base, overlay);
+    ASSERT_TRUE(result.builtin_excludes.has_value());
+    EXPECT_FALSE(*result.builtin_excludes) << "Explicit false in overlay must override base true";
+}
+
+TEST_F(PresetTest, MergeBuiltinExcludesOverlayAbsentKeepsBase) {
+    ConfigValues base;
+    base.builtin_excludes = false;
+
+    ConfigValues overlay;  // builtin_excludes unset
+
+    auto result = merge_config_values(base, overlay);
+    ASSERT_TRUE(result.builtin_excludes.has_value());
+    EXPECT_FALSE(*result.builtin_excludes) << "Base value preserved when overlay omits the key";
+}
+
+TEST_F(PresetTest, DefaultSectionBuiltinExcludesPropagatesToPreset) {
+    write_file("presets.yaml", R"(
+version: 1
+default:
+  builtin_excludes: false
+presets:
+  mypreset:
+    source: "TEST"
+)");
+
+    PresetLoader loader;
+    loader.load(temp_dir / "presets.yaml");
+
+    auto resolved = loader.resolve("mypreset");
+    ASSERT_TRUE(resolved.builtin_excludes.has_value());
+    EXPECT_FALSE(*resolved.builtin_excludes)
+        << "builtin_excludes from default section should propagate";
+}

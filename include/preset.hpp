@@ -35,6 +35,7 @@ struct ConfigValues {
     std::optional<bool> no_date;                    ///< Explicitly omit creation date
     std::optional<std::vector<std::string>> exclude_patterns;///< Glob patterns to exclude
     std::optional<std::vector<std::string>> include_patterns;///< Glob patterns to include
+    std::optional<bool> builtin_excludes;           ///< Apply built-in system-file exclusions (default: true)
 };
 
 /** @brief Merge two ConfigValues: overlay fields win over base. */

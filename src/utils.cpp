@@ -660,6 +660,41 @@ bool should_include_file(const std::string &relative_path,
     return true;
 }
 
+const std::vector<std::string>& builtin_exclude_patterns()
+{
+    // Each pattern is prefixed with "**/" so it matches at any depth, including
+    // the torrent root. Matching is case-insensitive (see glob_to_regex).
+    static const std::vector<std::string> patterns = {
+        "**/.DS_Store",          // macOS Finder metadata
+        "**/Thumbs.db",          // Windows Explorer thumbnail cache
+        "**/desktop.ini",        // Windows folder customization
+        "**/Zone.Identifier",    // Windows ADS (Mark-of-the-Web)
+        "**/Zone.Identifier:*",  // Windows ADS variant
+        "**/@eaDir",             // Synology NAS metadata directory
+        "**/@eaDir/**",          // ... and its contents
+        "**/*.torrent"           // avoid nesting existing torrent files
+    };
+    return patterns;
+}
+
+std::vector<std::regex> apply_builtin_excludes(const std::vector<std::regex>& user_excludes, bool enabled)
+{
+    if (!enabled)
+        return user_excludes;
+
+    std::vector<std::regex> combined;
+    combined.reserve(builtin_exclude_patterns().size() + user_excludes.size());
+    for (const auto& p : builtin_exclude_patterns())
+    {
+        // Patterns are static literals; glob_to_regex escapes metacharacters,
+        // so these never throw. The catch is defense-in-depth.
+        try { combined.push_back(glob_to_regex(p)); }
+        catch (const std::regex_error&) { /* unreachable */ }
+    }
+    combined.insert(combined.end(), user_excludes.begin(), user_excludes.end());
+    return combined;
+}
+
 std::string generate_entropy_hex()
 {
     constexpr char hex_chars[] = "0123456789abcdef";
