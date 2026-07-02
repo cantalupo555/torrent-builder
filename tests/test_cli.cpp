@@ -1053,7 +1053,7 @@ TEST(CLI, InteractiveNamePrompt) {
         "n "                               // entropy? no
         "n "                               // exclude patterns? no
         "n "                               // include patterns? no
-        "n ";                              // exclude system files? no
+        "n ";                              // include system files? no
 
     std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
 
@@ -1448,7 +1448,7 @@ TEST(CLI, InteractiveSourceAndEntropy) {
         "y "                                // entropy? yes
         "n "                                // exclude patterns? no
         "n "                                // include patterns? no
-        "n ";                               // exclude system files? no
+        "n ";                               // include system files? no
 
     std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
 
@@ -1834,7 +1834,7 @@ TEST(CLI, InteractiveExcludePatterns) {
         "*.nfo "                           // exclude pattern
         " "                                // blank to finish exclude
         "n "                               // include patterns? no
-        "n "                               // exclude system files? no
+        "n "                               // include system files? no
         "";
 
     std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
@@ -1985,7 +1985,7 @@ TEST(CLI, InteractiveMultipleExcludePatterns) {
         "*.srt "                           // exclude pattern 2
         " "                                // blank to finish exclude
         "n "                               // include patterns? no
-        "n "                               // exclude system files? no
+        "n "                               // include system files? no
         " ";
 
     std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
@@ -4140,6 +4140,57 @@ TEST(CLI, InteractiveOmitCreatorAndDate) {
     TorrentMetadata meta = inspector.inspect();
     EXPECT_FALSE(meta.created_by.has_value()) << "Creator should be omitted in interactive y path";
     EXPECT_FALSE(meta.creation_date.has_value()) << "Creation date should be omitted in interactive y path";
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, InteractiveDefaultsToExcludingSystemFiles) {
+#ifdef _WIN32
+    GTEST_SKIP() << "stdin piping via popen() is unreliable on Windows";
+#endif
+    namespace fs = std::filesystem;
+    auto temp_dir = fs::temp_directory_path() / "tb_interactive_builtin_default_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    auto content_dir = temp_dir / "content";
+    fs::create_directories(content_dir);
+    { std::ofstream(content_dir / "movie.mkv") << "video data"; }
+    { std::ofstream(content_dir / ".DS_Store") << "macos metadata"; }
+    auto output_file = temp_dir / "output.torrent";
+
+    // Answer 'n' (the default) to "Include system files?" — built-ins must stay ON,
+    // so .DS_Store is excluded. This guards against the interactive prompt default
+    // drifting from the documented on-by-default behavior of CLI/batch modes.
+    std::string inputs =
+        "'" + content_dir.string() + "' "
+        "'" + output_file.string() + "' "
+        "1 "                               // version (v1)
+        "'' "                              // comment (empty)
+        "n "                               // private? no
+        "n "                               // default trackers? no
+        "n "                               // custom trackers? no
+        "'' "                              // web seed (empty/finish)
+        "n "                               // custom piece size? no
+        "n "                               // target piece count? no
+        "n "                               // omit creator? no
+        "'' "                              // custom name
+        "n "                               // omit creation date? no
+        "'' "                              // source (empty/skip)
+        "n "                               // entropy? no
+        "n "                               // exclude patterns? no
+        "n "                               // include patterns? no
+        "n ";                              // include system files? no → built-ins ON
+
+    std::string cmd = "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1";
+
+    int exit_code;
+    std::string output = exec_command(cmd, exit_code);
+    EXPECT_EQ(exit_code, 0) << "Output: " << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_EQ(meta.files.size(), 1u) << "Only movie.mkv should remain (.DS_Store excluded by default)";
+    EXPECT_NE(meta.files[0].path.find("movie.mkv"), std::string::npos);
 
     fs::remove_all(temp_dir);
 }

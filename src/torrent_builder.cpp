@@ -474,8 +474,12 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         }
     }
 
-    // Built-in system-file exclusions are applied by default; the user may opt out.
-    bool use_builtin_excludes = prompt_yes_no("Exclude common system files (.DS_Store, Thumbs.db, etc.)?");
+    // Built-in system-file exclusions are on by default. prompt_yes_no returns
+    // false on empty/n input, so the question is phrased to opt INTO inclusion:
+    // answering "no" (the default) keeps system files excluded, matching the
+    // documented on-by-default behavior of CLI and batch modes.
+    bool include_system_files = prompt_yes_no("Include system files (.DS_Store, Thumbs.db, etc.)?");
+    bool use_builtin_excludes = !include_system_files;
     if (use_builtin_excludes) {
         log_message("Applying built-in exclude patterns (interactive)", LogLevel::INFO);
     }
