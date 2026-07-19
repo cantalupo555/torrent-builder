@@ -1217,3 +1217,34 @@ jobs:
     ASSERT_EQ(results.size(), 1u);
     EXPECT_TRUE(results[0].success);
 }
+
+// Keep examples/batch.yaml in sync with the parser (issue #63). The example
+// ships in the repo and is referenced by the JSON Schema; parsing it through
+// the real parser guards against drift that an IDE-only schema would miss.
+// Parsing alone is sufficient — paths need not exist on disk for parse() to
+// succeed, so this is a pure schema/shape check with no filesystem setup.
+TEST_F(BatchTest, ParsesShippedExampleFile) {
+    fs::path example = fs::path(SOURCE_DIR) / "examples" / "batch.yaml";
+    ASSERT_TRUE(fs::exists(example))
+        << "examples/batch.yaml is missing from the source tree";
+
+    auto config = BatchProcessor::parse(example);
+    EXPECT_GE(config.jobs.size(), 1u);
+    for (const auto& job : config.jobs) {
+        ASSERT_TRUE(job.values.path.has_value())
+            << "every job in examples/batch.yaml must have a 'path'";
+        EXPECT_FALSE(job.values.path->empty());
+    }
+
+    // Spot-check a couple of fields that would only be populated if the
+    // per-job config keys parsed correctly.
+    bool found_preset_ref = false;
+    bool found_exclude_patterns = false;
+    for (const auto& job : config.jobs) {
+        if (job.preset.has_value()) found_preset_ref = true;
+        if (job.values.exclude_patterns.has_value()) found_exclude_patterns = true;
+    }
+    EXPECT_TRUE(found_preset_ref) << "example should demonstrate the 'preset' key";
+    EXPECT_TRUE(found_exclude_patterns)
+        << "example should demonstrate the 'exclude_patterns' key";
+}

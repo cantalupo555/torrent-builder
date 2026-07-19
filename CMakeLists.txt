@@ -157,6 +157,7 @@ if(TEST_SOURCES)
 
     target_compile_definitions(torrent_builder_tests PRIVATE
         BINARY_PATH="${CMAKE_BINARY_DIR}/torrent_builder"
+        SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         TORRENT_BUILDER_EXCLUDE_MAIN
     )
 
