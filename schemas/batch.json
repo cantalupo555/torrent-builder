@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/cantalupo555/torrent-builder/master/schemas/batch.json",
   "title": "Torrent Builder batch.yaml",
-  "description": "Torrent Builder batch configuration file. Each job in `jobs` creates one torrent; jobs run in parallel with `workers` threads. NOTE: the per-job config field definitions (trackers, private, piece_size, etc.) are intentionally duplicated from presets.json so each schema stays self-contained and portable across editors/validators. Keep the two copies in sync.",
+  "description": "Torrent Builder batch configuration file. Each job in `jobs` creates one torrent; jobs run in parallel with `workers` threads. NOTE: the per-job config field definitions (trackers, private, piece_size, etc.) are intentionally duplicated from presets.json so each schema stays self-contained and portable across editors/validators. Keep the two copies in sync. Unknown keys are rejected (`additionalProperties: false`) on purpose — yaml-cpp silently ignores them, so this schema is the only layer that catches field-name typos.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "jobs"],
@@ -69,7 +69,7 @@
           "items": {
             "type": "string",
             "pattern": "^([hH][tT][tT][pP][sS]?|[uU][dD][pP])://.+$",
-            "description": "Tracker announce URL. Must be http://, https://, or udp://. Leading/trailing whitespace is rejected."
+            "description": "Tracker announce URL. Must be http://, https://, or udp://."
           }
         },
         "web_seeds": {
@@ -78,7 +78,7 @@
           "items": {
             "type": "string",
             "pattern": "^([hH][tT][tT][pP][sS]?|[uU][dD][pP])://.+$",
-            "description": "Web seed URL. Must be http://, https://, or udp://. Leading/trailing whitespace is rejected."
+            "description": "Web seed URL. Must be http://, https://, or udp://."
           }
         },
         "private": {
