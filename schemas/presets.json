@@ -35,7 +35,7 @@
           "items": {
             "type": "string",
             "pattern": "^([hH][tT][tT][pP][sS]?|[uU][dD][pP])://.+$",
-            "description": "Tracker announce URL. Must be http://, https://, or udp://."
+            "description": "Tracker announce URL. Must be http://, https://, or udp://. Leading/trailing whitespace is rejected."
           }
         },
         "web_seeds": {
@@ -44,7 +44,7 @@
           "items": {
             "type": "string",
             "pattern": "^([hH][tT][tT][pP][sS]?|[uU][dD][pP])://.+$",
-            "description": "Web seed URL. Must be http://, https://, or udp://."
+            "description": "Web seed URL. Must be http://, https://, or udp://. Leading/trailing whitespace is rejected."
           }
         },
         "private": {
@@ -58,7 +58,7 @@
         },
         "piece_size": {
           "type": "integer",
-          "description": "Piece size in KB (e.g. 4096 = 4MB). Powers of two only. Mutually exclusive with target_piece_count.",
+          "description": "Piece size in KB (e.g. 4096 = 4MB). Must be one of the enum values (16, 32, … 32768). Mutually exclusive with target_piece_count.",
           "enum": [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768]
         },
         "target_piece_count": {
