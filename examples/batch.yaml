@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=../schemas/batch.json
+#
+# Example Torrent Builder batch file. Run with:
+#   ./torrent_builder batch batch.yaml [--workers N]
+#
+# The $schema modeline above is relative to this file's location in examples/;
+# if you copy it elsewhere, update it to "schemas/batch.json".
+#
+# Each job in `jobs` creates one torrent; jobs run in parallel with `workers` threads.
+
+version: 1
+workers: 2
+preset_file: presets.yaml     # shared preset file referenced by job `preset` names
+output_dir: /torrents/output  # default output dir for jobs without an absolute `output`
+
+jobs:
+  # Apply a named preset and let output_dir/default naming decide the .torrent path.
+  - path: /data/movie1.mkv
+    preset: ptp
+
+  # Override output name and piece size per job.
+  - path: /data/movie2.mkv
+    output: custom_output.torrent   # .torrent extension auto-appended if missing
+    piece_size: 4096                 # 4 MB; mutually exclusive with target_piece_count
+    trackers:
+      - "https://tracker.example.com/announce"
+
+  # TV season pack: fail the job if episodes are missing.
+  - path: /data/Show.Name.S01
+    fail_on_season_warning: true
+
+  # Strip identifying date; override the creator label.
+  - path: /data/cross_seed.mkv
+    creator: "My Release Group"  # overrides the default "Torrent Builder"
+    no_date: true                # omit the creation date
+
+  # Raw dump: keep system files by disabling built-in excludes.
+  - path: /data/full_dump
+    builtin_excludes: false
+    exclude_patterns: ["*.tmp"]   # still drop obvious junk from the raw dump
