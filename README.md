@@ -523,6 +523,16 @@ presets:
 
 **Merge hierarchy**: CLI flags > preset values > `default:` section > built-in defaults.
 
+**Editor validation & autocomplete**: A [JSON Schema](schemas/presets.json) (Draft 2020-12) is provided for IDE validation, autocomplete, and hover docs. Wire it up with either method:
+
+- **Per-file modeline** (top of the YAML): `# yaml-language-server: $schema=../schemas/presets.json`
+- **VS Code** (`redhat.vscode-yaml`): map the schema in `.vscode/settings.json`:
+  ```json
+  { "yaml.schemas": { "schemas/presets.json": ["presets.yaml", "**/presets.yaml"] } }
+  ```
+
+See [`examples/presets.yaml`](examples/presets.yaml) for a copyable, fully-commented example.
+
 **Usage:**
 ```bash
 # Apply a preset
@@ -575,6 +585,16 @@ jobs:
 ```
 
 Each job can optionally reference a preset by name. Jobs run in parallel with `--workers` threads (default: 1). A summary showing success/failure per job is printed at the end.
+
+**Editor validation & autocomplete**: A [JSON Schema](schemas/batch.json) (Draft 2020-12) is provided for IDE validation, autocomplete, and hover docs. Wire it up with either method:
+
+- **Per-file modeline** (top of the YAML): `# yaml-language-server: $schema=../schemas/batch.json`
+- **VS Code** (`redhat.vscode-yaml`): map the schema in `.vscode/settings.json`:
+  ```json
+  { "yaml.schemas": { "schemas/batch.json": ["batch.yaml", "**/batch.yaml"] } }
+  ```
+
+See [`examples/batch.yaml`](examples/batch.yaml) for a copyable, fully-commented example.
 
 ## Troubleshooting
 
