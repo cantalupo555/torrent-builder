@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=../schemas/presets.json
+#
+# Example Torrent Builder preset file. Copy to ./presets.yaml and edit.
+# The $schema modeline above is relative to this file's location in examples/;
+# if you copy it elsewhere, update it to "schemas/presets.json".
+# Apply a preset with: ./torrent_builder --preset <name> --path <file> -o out.torrent
+#
+# Merge hierarchy: CLI flags > preset values > default section > built-in defaults.
+
+version: 1
+
+# Defaults merged under every preset below. Lowest precedence.
+default:
+  private: true
+  exclude_patterns: ["*.nfo", "*.txt", "*.jpg"]
+
+presets:
+  # A tracker-specific preset. Source tag, announce URL, and a target piece count.
+  ptp:
+    source: "PTP"
+    trackers:
+      - "https://ptp.example.com/announce"
+    target_piece_count: 1000  # piece_size derived from content size; mutually exclusive with piece_size
+    exclude_patterns: ["*.nfo", "*.sfv"]
+
+  # A public (non-private) torrent with a UDP tracker.
+  public:
+    private: false
+    piece_size: 2048            # 2 MB
+    trackers:
+      - "udp://tracker.example.com:1337/announce"
+    web_seeds:
+      - "https://webseed.example.com/file.bin"
+    torrent_version: 1        # V1; 2=V2, 3=Hybrid
+
+  # Cross-seed preset: strip identifying creator/date fields.
+  cross_seed:
+    no_creator: true
+    no_date: true
+    comment: "cross-seed copy"
+    trackers:
+      - "https://tracker.example.com/announce"
+    builtin_excludes: false    # keep system files for a raw backup
+
+  # Empty preset is valid; it simply inherits the `default` section above.
+  bare: {}

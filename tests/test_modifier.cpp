@@ -8,7 +8,6 @@
 #include <libtorrent/file_storage.hpp>
 #include <libtorrent/bencode.hpp>
 #include <libtorrent/entry.hpp>
-#include <libtorrent/hash_picker.hpp>
 #include "torrent_modifier.hpp"
 #include "torrent_inspector.hpp"
 #include "utils.hpp"

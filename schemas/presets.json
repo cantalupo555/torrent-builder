@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/cantalupo555/torrent-builder/master/schemas/presets.json",
+  "title": "Torrent Builder presets.yaml",
+  "description": "Torrent Builder preset configuration file. Each named preset holds per-tracker settings merged in via --preset <name>. NOTE: the `configFields` definition is intentionally duplicated in batch.json (job-level overrides accept the same fields) so each schema stays self-contained and portable across editors/validators. Keep the two copies in sync. Unknown keys are rejected (`additionalProperties: false`) on purpose — yaml-cpp silently ignores them, so this schema is the only layer that catches field-name typos.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Preset file format version. Only 1 is supported."
+    },
+    "default": {
+      "$ref": "#/$defs/configFields",
+      "description": "Defaults merged under every preset. Lowest precedence in the merge hierarchy: CLI flags > preset values > default section > built-in defaults."
+    },
+    "presets": {
+      "type": "object",
+      "description": "Named presets. Keys are arbitrary preset names (passed to --preset). Values use the same fields as `default`. An empty preset (`{}`) is valid.",
+      "additionalProperties": {
+        "$ref": "#/$defs/configFields"
+      }
+    }
+  },
+  "$defs": {
+    "configFields": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trackers": {
+          "type": "array",
+          "description": "Tracker announce URLs.",
+          "items": {
+            "type": "string",
+            "pattern": "^([hH][tT][tT][pP][sS]?|[uU][dD][pP])://.+$",
+            "description": "Tracker announce URL. Must be http://, https://, or udp://."
+          }
+        },
+        "web_seeds": {
+          "type": "array",
+          "description": "Web seed URLs.",
+          "items": {
+            "type": "string",
+            "pattern": "^([hH][tT][tT][pP][sS]?|[uU][dD][pP])://.+$",
+            "description": "Web seed URL. Must be http://, https://, or udp://."
+          }
+        },
+        "private": {
+          "type": "boolean",
+          "description": "Whether torrent is private.",
+          "default": false
+        },
+        "source": {
+          "type": "string",
+          "description": "Source field embedding (e.g. a tracker tag like \"PTP\")."
+        },
+        "piece_size": {
+          "type": "integer",
+          "description": "Piece size in KB (e.g. 4096 = 4MB). Must be one of the enum values (16, 32, … 32768). Mutually exclusive with target_piece_count.",
+          "enum": [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768]
+        },
+        "target_piece_count": {
+          "type": "integer",
+          "description": "Desired number of pieces; piece size is calculated from content size. Mutually exclusive with piece_size.",
+          "minimum": 1
+        },
+        "comment": {
+          "type": "string",
+          "description": "Torrent comment."
+        },
+        "creator": {
+          "type": "string",
+          "description": "Created-by field. Overrides the default \"Torrent Builder\". Set no_creator: true to omit.",
+          "default": "Torrent Builder"
+        },
+        "name": {
+          "type": "string",
+          "description": "Torrent name override."
+        },
+        "creation_date": {
+          "type": "boolean",
+          "description": "Whether to embed creation date. Set no_date: true to omit.",
+          "default": true
+        },
+        "torrent_version": {
+          "type": "integer",
+          "description": "Torrent format: 1=V1, 2=V2, 3=Hybrid.",
+          "enum": [1, 2, 3],
+          "default": 3
+        },
+        "entropy": {
+          "type": "boolean",
+          "description": "Whether to include entropy data.",
+          "default": false
+        },
+        "no_creator": {
+          "type": "boolean",
+          "description": "Explicitly omit the creator field. Takes precedence over `creator`."
+        },
+        "no_date": {
+          "type": "boolean",
+          "description": "Explicitly omit the creation date. Takes precedence over `creation_date`."
+        },
+        "exclude_patterns": {
+          "type": "array",
+          "description": "Glob patterns to exclude. Supports *, **, and ?.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "include_patterns": {
+          "type": "array",
+          "description": "Glob whitelist: when non-empty, only files matching a pattern are kept (matching also overrides exclude patterns). Supports *, **, and ?.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "builtin_excludes": {
+          "type": "boolean",
+          "description": "Apply built-in system-file exclusions (.DS_Store, Thumbs.db, etc.).",
+          "default": true
+        }
+      },
+      "allOf": [
+        {
+          "not": {
+            "required": ["piece_size", "target_piece_count"]
+          },
+          "description": "piece_size and target_piece_count are mutually exclusive."
+        }
+      ]
+    }
+  }
+}

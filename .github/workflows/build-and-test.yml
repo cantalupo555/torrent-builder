@@ -116,3 +116,24 @@ jobs:
 
       - name: Test
         run: cd build && ctest --output-on-failure --no-tests=error
+
+  validate-schemas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install validator
+        run: pip install check-jsonschema
+
+      - name: Validate example YAMLs against JSON Schemas
+        run: |
+          check-jsonschema --schemafile schemas/presets.json examples/presets.yaml
+          check-jsonschema --schemafile schemas/batch.json  examples/batch.yaml

@@ -567,3 +567,44 @@ presets:
     EXPECT_FALSE(*resolved.builtin_excludes)
         << "builtin_excludes from default section should propagate";
 }
+
+// Keep examples/presets.yaml in sync with the parser (issue #63). The example
+// ships in the repo and is referenced by the JSON Schema; loading it through
+// the real parser guards against drift that an IDE-only schema would miss.
+TEST_F(PresetTest, LoadsShippedExampleFile) {
+    fs::path example = fs::path(SOURCE_DIR) / "examples" / "presets.yaml";
+    ASSERT_TRUE(fs::exists(example))
+        << "examples/presets.yaml is missing from the source tree";
+
+    PresetLoader loader;
+    loader.load(example);
+
+    EXPECT_TRUE(loader.has_preset("ptp"));
+    EXPECT_TRUE(loader.has_preset("public"));
+    EXPECT_TRUE(loader.has_preset("cross_seed"));
+    EXPECT_TRUE(loader.has_preset("bare"));
+
+    // Defaults must propagate into a preset that adds only its own keys.
+    auto ptp = loader.resolve("ptp");
+    ASSERT_TRUE(ptp.source.has_value());
+    EXPECT_EQ(*ptp.source, "PTP");
+    ASSERT_TRUE(ptp.trackers.has_value());
+    EXPECT_FALSE(ptp.trackers->empty());
+
+    // The empty preset inherits the default section.
+    auto bare = loader.resolve("bare");
+    ASSERT_TRUE(bare.exclude_patterns.has_value())
+        << "'bare' should inherit exclude_patterns from the default section";
+
+    // Every resolved preset must be usable at runtime: piece_size and
+    // target_piece_count are mutually exclusive (batch.cpp), and a piece_size
+    // in the shared `default:` section collides with any preset that sets
+    // target_piece_count after merge. Guard against that drift here.
+    for (const auto& name : {"ptp", "public", "cross_seed", "bare"}) {
+        auto resolved = loader.resolve(name);
+        EXPECT_FALSE(resolved.piece_size && resolved.target_piece_count)
+            << "preset '" << name
+            << "' resolves with both piece_size and target_piece_count set "
+            << "(would throw 'mutually exclusive' at runtime)";
+    }
+}
