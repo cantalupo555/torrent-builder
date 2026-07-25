@@ -17,7 +17,7 @@
 
 // Constructor for TorrentCreator
 TorrentCreator::TorrentCreator(TorrentConfig config)
-    : config_(std::move(config)), ses(lt::session_params{}) {
+    : config_(std::move(config)) {
 }
 
 
@@ -397,12 +397,7 @@ void TorrentCreator::create_torrent() {
         double eta = 0.0;
         int64_t total_size = fs_.total_size(); // Total size in bytes
         int64_t piece_size_bytes = piece_size; // Piece size in bytes
-        lt::add_torrent_params p;
-        p.save_path = config_.output.parent_path().string(); // Where to save the torrent
 
-        // Vector to store alerts
-        std::vector<lt::alert*> alerts;
-        std::string error_message; // To store error messages
         int progress = 0; // Progress variable
 
         // Define the progress_callback with additional calculations
@@ -428,19 +423,7 @@ void TorrentCreator::create_torrent() {
 
             // Call print_progress_bar with all six arguments
             print_progress_bar(progress, num_pieces, speed, eta, progress * piece_size_bytes, total_size);
-            ses.pop_alerts(&alerts);
-            for (lt::alert const* a : alerts) {
-                if (auto const* te = lt::alert_cast<lt::torrent_error_alert>(a)) {
-                    error_message = "Torrent error: " + te->error.message();
-                }
-                if (auto const* fe = lt::alert_cast<lt::file_error_alert>(a)) {
-                    error_message = "File error: " + fe->error.message() + " - " + fe->filename();
-                }
-                if (auto const* srdf = lt::alert_cast<lt::save_resume_data_failed_alert>(a)) {
-                    error_message = "Save resume data failed: " + srdf->error.message();
-                }
-            }
-            
+
             // Check for user interruption
             char c = 0;
             if (guard.check_key_press(c)) {
@@ -492,7 +475,7 @@ void TorrentCreator::create_torrent() {
 
         // Only run progress loop for directory hashing (libtorrent async)
         if (fs::is_directory(config_.path)) {
-            // Progress monitoring loop: polls libtorrent alerts and user keypress
+            // Progress monitoring loop: polls hashing progress and user keypress
             // until hashing completes or times out.
             while (true) {
                 auto now = std::chrono::steady_clock::now();
@@ -529,19 +512,12 @@ void TorrentCreator::create_torrent() {
                     break;
                 }
 
-                ses.pop_alerts(&alerts);
-                std::this_thread::sleep_for(std::chrono::milliseconds(100)); // alert drain interval
+                std::this_thread::sleep_for(std::chrono::milliseconds(100)); // progress poll interval
             }
         } else {
             // For single files, hashing is already complete - just show final progress
             print_progress_bar(num_pieces, num_pieces, speed, 0.0, total_size, total_size);
             print_info("\n");
-        }
-
-        // If there was an error, throw an exception
-        if (!error_message.empty()) {
-            log_message("Error during torrent creation: " + error_message, LogLevel::ERR);
-            throw std::runtime_error(error_message);
         }
 
         // Generate and save torrent file

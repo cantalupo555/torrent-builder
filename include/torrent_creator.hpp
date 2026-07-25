@@ -7,8 +7,6 @@
 #include <libtorrent/entry.hpp>
 #include <libtorrent/bencode.hpp>
 #include <libtorrent/error_code.hpp>
-#include <libtorrent/alert_types.hpp>
-#include <libtorrent/session.hpp>
 
 #include "logger.hpp"
 #include "terminal.hpp"
@@ -128,7 +126,6 @@ public:
 private:
     TorrentConfig config_;
     lt::file_storage fs_;
-    lt::session ses;              // Needed for libtorrent async hashing alerts
     std::mutex progress_mutex_;   // Guards total_processed_ across worker threads
     int64_t total_processed_ = 0;
 
