@@ -75,7 +75,8 @@ int TorrentChecker::find_file_for_piece(int64_t piece_offset, int64_t piece_end)
     while (lo <= hi)
     {
         int mid = lo + (hi - lo) / 2;
-        int64_t file_end = files.file_offset(mid) + files.file_size(mid);
+        auto const idx = lt::file_index_t{mid};
+        int64_t file_end = files.file_offset(idx) + files.file_size(idx);
 
         if (file_end <= piece_offset)
         {
@@ -122,14 +123,15 @@ std::vector<CheckResult::MissingFile> TorrentChecker::check_missing_files(
 
     for (int i = 0; i < files.num_files(); ++i)
     {
-        if (files.pad_file_at(i))
+        auto const idx = lt::file_index_t{i};
+        if (files.pad_file_at(idx))
         {
             continue;
         }
 
         CheckResult::FileResult fr;
-        fr.path = files.file_path(i);
-        fr.expected_size = files.file_size(i);
+        fr.path = files.file_path(idx);
+        fr.expected_size = files.file_size(idx);
 
         fs::path file_path = base_path / fr.path;
         std::error_code ec;
@@ -191,8 +193,9 @@ void TorrentChecker::read_piece_data(int piece_index, const int piece_length,
 
     for (int i = start_file; i < files.num_files(); ++i)
     {
-        int64_t file_start = files.file_offset(i);
-        int64_t file_end = file_start + files.file_size(i);
+        auto const idx = lt::file_index_t{i};
+        int64_t file_start = files.file_offset(idx);
+        int64_t file_end = file_start + files.file_size(idx);
 
         if (file_start >= piece_end)
             break;
@@ -200,7 +203,7 @@ void TorrentChecker::read_piece_data(int piece_index, const int piece_length,
         if (file_end <= piece_start)
             continue;
 
-        if (files.pad_file_at(i))
+        if (files.pad_file_at(idx))
             continue;
 
         int64_t read_start_in_file = std::max(file_start, piece_start) - file_start;
@@ -208,7 +211,7 @@ void TorrentChecker::read_piece_data(int piece_index, const int piece_length,
         int64_t read_size = read_end_in_file - read_start_in_file;
         int64_t buf_pos = std::max(file_start, piece_start) - piece_start;
 
-        fs::path file_path = base_path / files.file_path(i);
+        fs::path file_path = base_path / files.file_path(idx);
 
         std::ifstream &f = get_file_stream(file_path);
         if (!f.is_open())
@@ -222,9 +225,9 @@ void TorrentChecker::read_piece_data(int piece_index, const int piece_length,
         f.clear();
         f.seekg(read_start_in_file);
 
-        if (read_end_in_file > files.file_size(i))
+        if (read_end_in_file > files.file_size(idx))
         {
-            int64_t available = files.file_size(i) - read_start_in_file;
+            int64_t available = files.file_size(idx) - read_start_in_file;
             if (available > 0)
             {
                 f.read(piece_buffer_.data() + buf_pos, available);
@@ -277,11 +280,12 @@ bool TorrentChecker::verify_piece_v2(int piece_index, const lt::torrent_info &in
 
     for (int i = file_idx; i < files.num_files(); ++i)
     {
-        if (files.pad_file_at(i))
+        auto const idx = lt::file_index_t{i};
+        if (files.pad_file_at(idx))
             continue;
 
-        int64_t file_start = files.file_offset(i);
-        int64_t file_size = files.file_size(i);
+        int64_t file_start = files.file_offset(idx);
+        int64_t file_size = files.file_size(idx);
         int64_t file_end = file_start + file_size;
 
         if (file_start >= piece_end)
@@ -290,7 +294,7 @@ bool TorrentChecker::verify_piece_v2(int piece_index, const lt::torrent_info &in
         if (!(piece_offset >= file_start && piece_offset < file_end))
             continue;
 
-        auto layer = info.piece_layer(lt::file_index_t(i));
+        auto layer = info.piece_layer(idx);
         if (layer.empty())
             return true;
 
@@ -401,10 +405,11 @@ std::vector<CheckResult::ExtraFile> TorrentChecker::find_extra_files(const fs::p
     std::unordered_set<std::string> torrent_paths;
     for (int i = 0; i < files.num_files(); ++i)
     {
-        if (files.pad_file_at(i))
+        auto const idx = lt::file_index_t{i};
+        if (files.pad_file_at(idx))
             continue;
 
-        fs::path p = fs::path(files.file_path(i));
+        fs::path p = fs::path(files.file_path(idx));
         std::string normalized = p.generic_string();
         std::transform(normalized.begin(), normalized.end(), normalized.begin(),
                        [](unsigned char c)

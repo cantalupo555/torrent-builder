@@ -148,13 +148,14 @@ TorrentMetadata TorrentInspector::inspect()
     for (int i = 0; i < files.num_files(); ++i)
     {
         TorrentMetadata::FileInfo file_info;
+        auto const idx = libtorrent::file_index_t{i};
 
-        file_info.path = files.file_path(i);
-        file_info.size = files.file_size(i);
+        file_info.path = files.file_path(idx);
+        file_info.size = files.file_size(idx);
 
-        if (files.file_flags(i) & libtorrent::file_storage::flag_symlink)
+        if (files.file_flags(idx) & libtorrent::file_storage::flag_symlink)
         {
-            file_info.symlink_path = files.symlink(i);
+            file_info.symlink_path = files.symlink(idx);
         }
 
         meta.files.push_back(file_info);
@@ -166,18 +167,12 @@ TorrentMetadata TorrentInspector::inspect()
         meta.trackers.push_back(entry.url);
     }
 
-    // url_seeds()/http_seeds() deprecated in newer libtorrent but still needed for backward compat
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    for (const auto &url_seed : torrent_info_->url_seeds())
+    // web_seeds() covers both url seeds and http seeds (url_seeds()/http_seeds()
+    // were removed in libtorrent 2.1).
+    for (const auto &seed : torrent_info_->web_seeds())
     {
-        meta.web_seeds.push_back(url_seed);
+        meta.web_seeds.push_back(seed.url);
     }
-    for (const auto &http_seed : torrent_info_->http_seeds())
-    {
-        meta.web_seeds.push_back(http_seed);
-    }
-#pragma GCC diagnostic pop
 
     meta.is_private = torrent_info_->priv();
 
@@ -244,7 +239,8 @@ bool TorrentInspector::verify_files(const fs::path &base_path) const
         const auto &files = torrent_info_->files();
         for (int i = 0; i < files.num_files(); ++i)
         {
-            fs::path file_path = base_path / files.file_path(i);
+            auto const idx = libtorrent::file_index_t{i};
+            fs::path file_path = base_path / files.file_path(idx);
 
             if (!fs::exists(file_path))
             {
@@ -252,7 +248,7 @@ bool TorrentInspector::verify_files(const fs::path &base_path) const
                 return false;
             }
 
-            if (fs::file_size(file_path) != files.file_size(i))
+            if (fs::file_size(file_path) != files.file_size(idx))
             {
                 log_message("File size mismatch: " + file_path.string(), LogLevel::WARNING);
                 return false;
