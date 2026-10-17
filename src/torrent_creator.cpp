@@ -16,8 +16,69 @@
 #include <system_error>
 
 // Constructor for TorrentCreator
-TorrentCreator::TorrentCreator(TorrentConfig config)
-    : config_(std::move(config)) {
+TorrentCreator::TorrentCreator(TorrentConfig config,
+                               OutputSink& sink,
+                               std::function<bool()> should_cancel)
+    : config_(std::move(config)),
+      sink_(sink),
+      should_cancel_(std::move(should_cancel)) {
+}
+
+void TorrentCreator::emit_progress(int pieces_done, int pieces_total, double speed, double eta,
+                                   int64_t bytes_done, int64_t bytes_total,
+                                   const std::string& current_file) const {
+    if (config_.silent) return;
+    try {
+        sink_.progress(ProgressInfo{
+            pieces_done, pieces_total, speed, eta, bytes_done, bytes_total, current_file
+        });
+    } catch (...) {
+        // A misbehaving sink must not std::terminate a hashing worker thread.
+    }
+}
+
+void TorrentCreator::end_progress() const {
+    if (config_.silent) return;
+    try {
+        sink_.progress_line_end();
+    } catch (...) {
+        // Same rationale as emit_progress: never let a sink kill the worker.
+    }
+}
+
+void TorrentCreator::report_error_noexcept(const std::string& msg) const noexcept {
+    // A throwing sink must never mask the exception currently being handled
+    // (or crash via a secondary throw while unwinding).
+    try {
+        sink_.error(msg);
+    } catch (...) {
+    }
+}
+
+std::string TorrentCreator::current_file_at_offset(int64_t offset) const {
+    if (fs_.num_files() == 0 || offset < 0 || offset >= fs_.total_size()) {
+        return {};
+    }
+    return fs_.file_path(fs_.file_index_at_offset(offset));
+}
+
+bool TorrentCreator::is_cancelled(TerminalGuard& guard) const noexcept {
+    try {
+        // GUI / programmatic cancellation: predicate injected at construction.
+        if (should_cancel_ && should_cancel_()) {
+            return true;
+        }
+        // CLI cancellation: TerminalGuard polls stdin (no-op when stdin is not a TTY).
+        char c = 0;
+        if (guard.check_key_press(c)) {
+            return c == 'q' || c == 'Q' || c == '\x03';
+        }
+    } catch (...) {
+        // Treat a throwing predicate/keyboard probe as a cancellation request
+        // so hashing unwinds as UserInterrupt, not a foreign exception.
+        return true;
+    }
+    return false;
 }
 
 
@@ -126,16 +187,25 @@ void TorrentCreator::hash_large_file_parallel(const fs::path& path, lt::create_t
         threads.emplace_back(&TorrentCreator::hash_block, this, path, std::ref(t), piece_size, start_offset, end_offset, std::ref(mutex), std::ref(cancel));
     }
 
-    // Monitor thread polls for 'q' keypress while workers block on I/O;
-    // signals shutdown via cancel atomic so workers can exit cleanly.
-    std::thread monitor([&guard, &cancel]() {
+    // Monitor thread polls for 'q' keypress (or programmatic cancel) while
+    // workers block on I/O; signals shutdown via cancel atomic so workers
+    // can exit cleanly. is_cancelled() honors both TerminalGuard (CLI) and
+    // the should_cancel_ predicate (GUI / programmatic).
+    //
+    // A throwing user predicate must not escape this thread — an uncaught
+    // exception in a std::thread calls std::terminate. Treat a throw as a
+    // cancel request so workers unwind through the normal UserInterrupt path.
+    std::thread monitor([&guard, &cancel, this]() {
         while (!cancel.load()) {
-            char c = 0;
-            if (guard.check_key_press(c)) {
-                if (c == 'q' || c == 'Q' || c == '\x03') {
-                    cancel.store(true);
-                    return;
-                }
+            bool stop = false;
+            try {
+                stop = is_cancelled(guard);
+            } catch (...) {
+                stop = true;
+            }
+            if (stop) {
+                cancel.store(true);
+                return;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
@@ -198,22 +268,32 @@ void TorrentCreator::hash_block(const fs::path& path, lt::create_torrent& t, int
             }
         }
 
-        // Update progress safely
+        // Update progress safely: mutate shared state under the lock, then
+        // emit OUTSIDE it — a sink that synchronizes on a lock also taken by
+        // this thread's monitor must never be invoked while holding
+        // progress_mutex_ (deadlock hazard).
+        int pieces_done_now = 0;
+        int pieces_total_now = 0;
+        int64_t bytes_done_now = 0;
+        double speed = 0.0;
+        double eta = 0.0;
         {
             std::lock_guard<std::mutex> lock(progress_mutex_);
             total_processed_ += bytes_read;
             auto now = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
-            double speed = elapsed > 0 ? static_cast<double>(total_processed_) / elapsed : 0.0;
-            double eta = speed > 0 ? (file_size - total_processed_) / speed : 0.0;
-            
-            print_progress_bar(static_cast<int>(total_processed_ / piece_size),
-                             static_cast<int>(file_size / piece_size),
-                             speed,
-                             eta,
-                             total_processed_, 
-                             file_size);
+            speed = elapsed > 0 ? static_cast<double>(total_processed_) / elapsed : 0.0;
+            eta = speed > 0 ? (file_size - total_processed_) / speed : 0.0;
+            pieces_done_now = static_cast<int>(total_processed_ / piece_size);
+            pieces_total_now = static_cast<int>(file_size / piece_size);
+            // Snapshot under the lock: other workers mutate total_processed_
+            // concurrently, so the unsynchronized emit below must not read it.
+            bytes_done_now = total_processed_;
         }
+
+        emit_progress(pieces_done_now, pieces_total_now, speed, eta,
+                      bytes_done_now, file_size,
+                      config_.path.filename().string());
 
         if (cancel.load()) {
             return;
@@ -278,9 +358,10 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
                 }
 
                 // Update progress bar
-                print_progress_bar(static_cast<int>(bytes_processed / piece_size),
+                emit_progress(static_cast<int>(bytes_processed / piece_size),
                                  static_cast<int>(total_bytes / piece_size),
-                                 speed, eta, bytes_processed, total_bytes);
+                                 speed, eta, bytes_processed, total_bytes,
+                                 config_.path.filename().string());
             }
         }
 
@@ -293,12 +374,9 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
             throw UserInterrupt("Hashing timeout");
         }
 
-        char c = 0;
-        if (guard.check_key_press(c)) {
-            if (c == 'q' || c == 'Q' || c == '\x03') {
-                log_message("Process interrupted by user", LogLevel::WARNING);
-                throw UserInterrupt("Process interrupted by user");
-            }
+        if (is_cancelled(guard)) {
+            log_message("Process interrupted by user", LogLevel::WARNING);
+            throw UserInterrupt("Process interrupted by user");
         }
         // --- End of timeout and user interruption check ---
     }
@@ -314,17 +392,11 @@ void TorrentCreator::hash_large_file(const fs::path& path, lt::create_torrent& t
     if (elapsed > 0) {
         speed = static_cast<double>(bytes_processed) / elapsed;
     }
-    print_progress_bar(static_cast<int>(bytes_processed / piece_size),
+    emit_progress(static_cast<int>(bytes_processed / piece_size),
                      static_cast<int>(total_bytes / piece_size),
-                     speed, 0.0, bytes_processed, total_bytes);
+                     speed, 0.0, bytes_processed, total_bytes,
+                     config_.path.filename().string());
 }
-
-// Displays a progress bar
-void TorrentCreator::print_progress_bar(int progress, int total, double speed, double eta, int64_t processed, int64_t total_size) const {
-    if (config_.silent) return;
-    print_progress(progress, total, speed, eta, processed, total_size);
-}
-
 
 // Creates the torrent file
 void TorrentCreator::create_torrent() {
@@ -365,15 +437,15 @@ void TorrentCreator::create_torrent() {
 
         // Add files to the file storage
         add_files_to_storage();
-        print_verbose("Files added to storage: " + std::to_string(fs_.num_files()) + " file(s), total size: " + utils::format_size(fs_.total_size()) + "\n");
+        sink_.verbose("Files added to storage: " + std::to_string(fs_.num_files()) + " file(s), total size: " + utils::format_size(fs_.total_size()) + "\n");
         log_message("Files in storage: " + std::to_string(fs_.num_files()) + ", total size: " + std::to_string(fs_.total_size()) + " bytes", LogLevel::INFO);
 
         int piece_size = config_.piece_size ? *config_.piece_size : utils::auto_piece_size(fs_.total_size());
         if (config_.piece_size) {
-            print_verbose("Piece size: " + std::to_string(piece_size / 1024) + " KB (user-specified)\n");
+            sink_.verbose("Piece size: " + std::to_string(piece_size / 1024) + " KB (user-specified)\n");
             log_message("Piece size: " + std::to_string(piece_size / 1024) + " KB (user-specified)", LogLevel::INFO);
         } else {
-            print_verbose("Piece size: " + std::to_string(piece_size / 1024) + " KB (auto-calculated for " + utils::format_size(fs_.total_size()) + " total)\n");
+            sink_.verbose("Piece size: " + std::to_string(piece_size / 1024) + " KB (auto-calculated for " + utils::format_size(fs_.total_size()) + " total)\n");
             log_message("Piece size: " + std::to_string(piece_size / 1024) + " KB (auto-calculated for " + std::to_string(fs_.total_size()) + " bytes)", LogLevel::INFO);
         }
         lt::create_flags_t flags = get_torrent_flags(config_.version);
@@ -384,11 +456,11 @@ void TorrentCreator::create_torrent() {
         int tier = 0;
         for (const auto& tracker : config_.trackers) {
             t.add_tracker(tracker, tier++);
-            print_verbose("Tracker tier " + std::to_string(tier - 1) + ": " + tracker + "\n");
+            sink_.verbose("Tracker tier " + std::to_string(tier - 1) + ": " + tracker + "\n");
         }
 
         // Set piece hashes using streaming for large files
-        print_info("Hashing pieces...\n");
+        sink_.info("Hashing pieces...\n");
         log_message("Starting hashing process for: " + config_.path.string(), LogLevel::INFO);
         int num_pieces = t.num_pieces();
 
@@ -421,16 +493,15 @@ void TorrentCreator::create_torrent() {
                 eta = 0.0;
             }
 
-            // Call print_progress_bar with all six arguments
-            print_progress_bar(progress, num_pieces, speed, eta, progress * piece_size_bytes, total_size);
+            // Call emit_progress with all six arguments
+            const int64_t bytes_done = static_cast<int64_t>(progress) * piece_size_bytes;
+            emit_progress(progress, num_pieces, speed, eta, bytes_done, total_size,
+                          current_file_at_offset(bytes_done));
 
-            // Check for user interruption
-            char c = 0;
-            if (guard.check_key_press(c)) {
-                if (c == 'q' || c == 'Q' || c == '\x03') {
-                    log_message("Process interrupted by user", LogLevel::WARNING);
-                    throw UserInterrupt("Process interrupted by user");
-                }
+            // Check for user interruption (keypress or programmatic cancel)
+            if (is_cancelled(guard)) {
+                log_message("Process interrupted by user", LogLevel::WARNING);
+                throw UserInterrupt("Process interrupted by user");
             }
         };
 
@@ -495,20 +566,22 @@ void TorrentCreator::create_torrent() {
                     throw UserInterrupt("Hashing timeout");
                 }
 
-                // Check for user interruption
-                char c = 0;
-                if (guard.check_key_press(c)) {
-                    if (c == 'q' || c == 'Q' || c == '\x03') {
-                        log_message("Process interrupted by user", LogLevel::WARNING);
-                        throw UserInterrupt("Process interrupted by user");
-                    }
+                // Check for user interruption (keypress or programmatic cancel)
+                if (is_cancelled(guard)) {
+                    log_message("Process interrupted by user", LogLevel::WARNING);
+                    throw UserInterrupt("Process interrupted by user");
                 }
-                
+
                 std::this_thread::sleep_for(std::chrono::milliseconds(10)); // keypress polling interval
 
                 if (progress >= num_pieces - 1) {
-                    print_progress_bar(num_pieces, num_pieces, speed, 0.0, total_size, total_size);
-                    print_info("\n");
+                    const int64_t final_offset =
+                        num_pieces > 0
+                            ? static_cast<int64_t>(num_pieces - 1) * piece_size_bytes
+                            : 0;
+                    emit_progress(num_pieces, num_pieces, speed, 0.0, total_size, total_size,
+                                  current_file_at_offset(final_offset));
+                    end_progress();
                     break;
                 }
 
@@ -516,8 +589,9 @@ void TorrentCreator::create_torrent() {
             }
         } else {
             // For single files, hashing is already complete - just show final progress
-            print_progress_bar(num_pieces, num_pieces, speed, 0.0, total_size, total_size);
-            print_info("\n");
+            emit_progress(num_pieces, num_pieces, speed, 0.0, total_size, total_size,
+                          config_.path.filename().string());
+            end_progress();
         }
 
         // Generate and save torrent file
@@ -561,14 +635,14 @@ void TorrentCreator::create_torrent() {
         }
 
     } catch (const UserInterrupt&) {
-        print_error("\n");
+        report_error_noexcept("\n");
         throw;
     } catch (const std::runtime_error& e) {
-        print_error(std::string(e.what()) + "\n");
+        report_error_noexcept(std::string(e.what()) + "\n");
         log_message("Runtime error: " + std::string(e.what()), LogLevel::ERR);
         throw;
     } catch (const std::exception& e) {
-        print_error(std::string("An unexpected error occurred: ") + e.what() + "\n");
+        report_error_noexcept(std::string("An unexpected error occurred: ") + e.what() + "\n");
         log_message("Unexpected error: " + std::string(e.what()), LogLevel::ERR);
         throw;
     }
@@ -576,29 +650,29 @@ void TorrentCreator::create_torrent() {
 
 // Prints a summary of the created torrent
 void TorrentCreator::print_torrent_summary(int64_t total_size, int piece_size, int num_pieces) const {
-    print_info("\n=== TORRENT CREATED SUCCESSFULLY ===\n");
-    print_info("File: " + config_.output.string() + "\n");
-    
+    sink_.info("\n=== TORRENT CREATED SUCCESSFULLY ===\n");
+    sink_.info("File: " + config_.output.string() + "\n");
+
     std::string version_str;
     switch(config_.version) {
         case TorrentVersion::V1: version_str = "v1"; break;
         case TorrentVersion::V2: version_str = "v2"; break;
         case TorrentVersion::HYBRID: version_str = "hybrid"; break;
     }
-    print_info("Version: " + version_str + "\n");
+    sink_.info("Version: " + version_str + "\n");
 
-    print_info("Total size: " + utils::format_size(total_size) + "\n");
+    sink_.info("Total size: " + utils::format_size(total_size) + "\n");
     if (config_.target_piece_count) {
-        print_info("Target pieces: " + std::to_string(*config_.target_piece_count) + "\n");
+        sink_.info("Target pieces: " + std::to_string(*config_.target_piece_count) + "\n");
     }
-    print_info("Pieces: " + std::to_string(num_pieces) + " of " + std::to_string(piece_size / 1024) + "KB\n");
-    print_info("Trackers: " + std::to_string(config_.trackers.size()) + "\n");
-    print_info("Web seeds: " + std::to_string(config_.web_seeds.size()) + "\n");
-    print_info("Private: " + std::string(config_.is_private ? "Yes" : "No") + "\n");
+    sink_.info("Pieces: " + std::to_string(num_pieces) + " of " + std::to_string(piece_size / 1024) + "KB\n");
+    sink_.info("Trackers: " + std::to_string(config_.trackers.size()) + "\n");
+    sink_.info("Web seeds: " + std::to_string(config_.web_seeds.size()) + "\n");
+    sink_.info("Private: " + std::string(config_.is_private ? "Yes" : "No") + "\n");
     if (config_.source) {
-        print_info("Source: " + *config_.source + "\n");
+        sink_.info("Source: " + *config_.source + "\n");
     }
     if (config_.entropy) {
-        print_info("Entropy: Yes (randomized info hash)\n");
+        sink_.info("Entropy: Yes (randomized info hash)\n");
     }
 }
