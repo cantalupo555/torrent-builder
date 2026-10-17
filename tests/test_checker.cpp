@@ -55,7 +55,7 @@ class CheckerTest : public ::testing::Test
 
         lt::span<char const> data(content.data(), content.size());
         auto hash = lt::hasher(data).final();
-        ct.set_hash(0, hash);
+        ct.set_hash(lt::piece_index_t(0), hash);
 
         lt::entry e = ct.generate();
         std::vector<char> buffer;
@@ -91,7 +91,7 @@ class CheckerTest : public ::testing::Test
 
             lt::span<char const> piece_data(all_content.data() + piece_start, static_cast<std::size_t>(sz));
             auto hash = lt::hasher(piece_data).final();
-            ct.set_hash(i, hash);
+            ct.set_hash(lt::piece_index_t(i), hash);
         }
 
         lt::entry e = ct.generate();

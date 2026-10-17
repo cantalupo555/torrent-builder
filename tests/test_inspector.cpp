@@ -52,7 +52,7 @@ class InspectorTest : public ::testing::Test
 
         const char data[] = "Hello World";
         auto piece_hash = lt::hasher(lt::span<char const>(data, 11)).final();
-        ct.set_hash(0, piece_hash);
+        ct.set_hash(lt::piece_index_t(0), piece_hash);
         ct.add_tracker("udp://tracker.example.com:80/announce");
 
         lt::entry e = ct.generate();
