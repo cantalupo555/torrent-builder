@@ -4,6 +4,7 @@
 #include "preset.hpp"
 #include "tracker_rules.hpp"
 #include "torrent_creator.hpp"
+#include "output_sink.hpp"
 #include <string>
 #include <vector>
 #include <optional>
@@ -58,8 +59,17 @@ public:
      */
     static BatchConfig parse(const fs::path& yaml_path);
 
-    /** @brief Execute all jobs and return results in order. */
-    std::vector<BatchResult> run();
+    /** @brief Execute all jobs and return results in order.
+     * @param sink Output sink for per-job messages and summaries. Defaults to
+     *             the process-wide stdout sink (CLI behavior). Batch mode sets
+     *             `silent=true` on each job, so progress bars are suppressed; a
+     *             GUI injecting its own sink receives status messages but no
+     *             per-piece progress.
+     * @note The sink must be safe to share across worker threads. StdoutOutputSink
+     *       serializes each call, so concurrent messages do not interleave at
+     *       the character level.
+     */
+    std::vector<BatchResult> run(OutputSink& sink = default_stdout_sink());
 
     /** @brief Print a human-readable summary to stdout. */
     static void print_summary(const std::vector<BatchResult>& results);
@@ -67,7 +77,7 @@ public:
 private:
     BatchConfig config_;
 
-    BatchResult execute_job(int job_index, const PresetLoader& presets, const TrackerRulesDatabase& rules);
+    BatchResult execute_job(int job_index, const PresetLoader& presets, const TrackerRulesDatabase& rules, OutputSink& sink);
 };
 
 #endif

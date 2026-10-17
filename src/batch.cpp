@@ -248,7 +248,7 @@ BatchConfig BatchProcessor::parse(const fs::path& yaml_path)
     return config;
 }
 
-BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& presets, const TrackerRulesDatabase& rules)
+BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& presets, const TrackerRulesDatabase& rules, OutputSink& sink)
 {
     const BatchJob& job = config_.jobs[job_index];
     BatchResult result;
@@ -368,7 +368,7 @@ BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& prese
         }
 
         tc.silent = true;
-        TorrentCreator creator(std::move(tc));
+        TorrentCreator creator(std::move(tc), sink);
         creator.create_torrent();
 
         result.success = true;
@@ -382,7 +382,7 @@ BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& prese
     return result;
 }
 
-std::vector<BatchResult> BatchProcessor::run()
+std::vector<BatchResult> BatchProcessor::run(OutputSink& sink)
 {
     PresetLoader presets;
     try {
@@ -411,7 +411,7 @@ std::vector<BatchResult> BatchProcessor::run()
             log_message("Job " + std::to_string(idx + 1) + " started: "
                 + sanitize_for_terminal(config_.jobs[idx].path), LogLevel::INFO);
 
-            results[idx] = execute_job(idx, presets, rules);
+            results[idx] = execute_job(idx, presets, rules, sink);
 
             if (results[idx].success) {
                 log_message("Job " + std::to_string(idx + 1) + " completed ("
