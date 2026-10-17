@@ -1,7 +1,7 @@
 #include "torrent_checker.hpp"
 #include "logger.hpp"
 #include "utils.hpp"
-#include "output.hpp"
+#include "output.hpp"  // default_stdout_sink()
 #include <libtorrent/torrent_info.hpp>
 #include <libtorrent/file_storage.hpp>
 #include <libtorrent/hasher.hpp>
@@ -66,7 +66,7 @@ void TorrentChecker::close_all_files()
     open_files_.clear();
 }
 
-int TorrentChecker::find_file_for_piece(int64_t piece_offset, int64_t piece_end) const
+int TorrentChecker::find_file_for_piece(int64_t piece_offset) const
 {
     const auto &files = torrent_info_->files();
     int lo = 0, hi = files.num_files() - 1;
@@ -187,7 +187,7 @@ void TorrentChecker::read_piece_data(int piece_index, const int piece_length,
 
     piece_buffer_.assign(piece_size, '\0');
 
-    int start_file = find_file_for_piece(piece_start, piece_end);
+    int start_file = find_file_for_piece(piece_start);
     if (start_file < 0)
         return;
 
@@ -274,7 +274,7 @@ bool TorrentChecker::verify_piece_v2(int piece_index, const lt::torrent_info &in
     int64_t piece_offset = static_cast<int64_t>(piece_index) * piece_length;
     int64_t piece_end = piece_offset + piece_length;
 
-    int file_idx = find_file_for_piece(piece_offset, piece_end);
+    int file_idx = find_file_for_piece(piece_offset);
     if (file_idx < 0)
         return true;
 
@@ -322,7 +322,7 @@ bool TorrentChecker::verify_piece_v2(int piece_index, const lt::torrent_info &in
 }
 
 std::vector<CheckResult::CorruptedPiece> TorrentChecker::verify_all_pieces(const fs::path &base_path,
-                                                                            bool verbose)
+                                                                            OutputSink& sink)
 {
     std::vector<CheckResult::CorruptedPiece> corrupted;
     int piece_length = torrent_info_->piece_length();
@@ -339,6 +339,7 @@ std::vector<CheckResult::CorruptedPiece> TorrentChecker::verify_all_pieces(const
 
     auto start_time = std::chrono::steady_clock::now();
     int64_t bytes_processed = 0;
+    bool emitted_progress = false;
 
     for (int i = 0; i < num_pieces; ++i)
     {
@@ -374,7 +375,18 @@ std::vector<CheckResult::CorruptedPiece> TorrentChecker::verify_all_pieces(const
 
         bytes_processed += piece_size;
 
-        if (verbose)
+        // Resolve which file the piece belongs to so frontends can display
+        // "verifying <file>" — O(log n) via libtorrent's offset index.
+        std::string current_file;
+        {
+            const auto &files = torrent_info_->files();
+            if (files.num_files() > 0 && piece_start < total_size)
+            {
+                auto fi = files.file_index_at_offset(piece_start);
+                current_file = files.file_path(fi);
+            }
+        }
+
         {
             auto now = std::chrono::steady_clock::now();
             double elapsed = std::chrono::duration<double>(now - start_time).count();
@@ -382,7 +394,23 @@ std::vector<CheckResult::CorruptedPiece> TorrentChecker::verify_all_pieces(const
             double remaining_bytes = total_size - bytes_processed;
             double eta = speed > 0 ? remaining_bytes / speed : 0;
 
-            print_progress(i + 1, num_pieces, speed, eta, bytes_processed, total_size);
+            try {
+                sink.progress(ProgressInfo{
+                    i + 1, num_pieces, speed, eta, bytes_processed, total_size, current_file
+                });
+                emitted_progress = true;
+            } catch (...) {
+                // A throwing sink must not abort verification or skip the
+                // file-handle cleanup below.
+            }
+        }
+    }
+
+    if (emitted_progress) {
+        try {
+            sink.progress_line_end();
+        } catch (...) {
+            // Same rationale as the progress call above.
         }
     }
 
@@ -456,6 +484,21 @@ std::vector<CheckResult::ExtraFile> TorrentChecker::find_extra_files(const fs::p
 
 CheckResult TorrentChecker::check(const fs::path &content_path, bool verbose)
 {
+    // CLI path: route progress to the default stdout sink when verbose, or to a
+    // discarding sink when quiet. Discarding sink is a function-local static so
+    // its address is stable and there's no heap allocation per call.
+    static class : public OutputSink {
+        void info(const std::string&) override {}
+        void verbose(const std::string&) override {}
+        void error(const std::string&) override {}
+        void progress(const ProgressInfo&) override {}
+    } discard_sink;
+
+    return check(content_path, verbose ? default_stdout_sink() : discard_sink);
+}
+
+CheckResult TorrentChecker::check(const fs::path &content_path, OutputSink& sink)
+{
     if (!torrent_info_)
     {
         log_message("Torrent info not loaded", LogLevel::ERR);
@@ -475,7 +518,8 @@ CheckResult TorrentChecker::check(const fs::path &content_path, bool verbose)
 
     result.missing_files = check_missing_files(content_path, result.file_results);
 
-    result.corrupted_pieces = verify_all_pieces(content_path, verbose);
+    // Sink-driven path (GUI): always report progress so the caller sees updates.
+    result.corrupted_pieces = verify_all_pieces(content_path, sink);
 
     result.extra_files = find_extra_files(content_path);
 

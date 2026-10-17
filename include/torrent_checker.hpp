@@ -1,10 +1,12 @@
 #ifndef TORRENT_CHECKER_HPP
 #define TORRENT_CHECKER_HPP
 
+#include "output_sink.hpp"
 #include <string>
 #include <vector>
 #include <optional>
 #include <memory>
+
 #include <filesystem>
 #include <unordered_map>
 #include <fstream>
@@ -110,6 +112,21 @@ class TorrentChecker
     CheckResult check(const fs::path &content_path, bool verbose = false);
 
     /**
+     * @brief Run a full verification, emitting structured progress via a sink.
+     *
+     * Equivalent to check(content_path, verbose) but routes per-piece progress
+     * to the provided OutputSink instead of stdout. Lets a GUI render a
+     * QProgressBar during verification. The CLI's bool overload is a thin
+     * wrapper that funnels into this one with the default stdout sink.
+     *
+     * @param content_path Root directory containing the local files.
+     * @param sink Output sink for progress updates.
+     * @return Populated CheckResult with all verification findings.
+     * @throws std::runtime_error if the torrent info is not loaded or the content path does not exist.
+     */
+    CheckResult check(const fs::path &content_path, OutputSink& sink);
+
+    /**
      * @brief Format verification results as human-readable text or JSON.
      * @param result The verification result to format.
      * @param json_format If true, output JSON; otherwise plain text.
@@ -128,7 +145,7 @@ class TorrentChecker
     void close_all_files();
     std::ifstream &get_file_stream(const fs::path &file_path);
 
-    int find_file_for_piece(int64_t piece_offset, int64_t piece_end) const;
+    int find_file_for_piece(int64_t piece_offset) const;
 
     void read_piece_data(int piece_index, const int piece_length,
                          const int64_t total_size,
@@ -139,7 +156,7 @@ class TorrentChecker
     bool verify_piece_v2(int piece_index, const lt::torrent_info &info) const;
 
     std::vector<CheckResult::CorruptedPiece> verify_all_pieces(const fs::path &base_path,
-                                                                bool verbose);
+                                                                OutputSink& sink);
 
     std::vector<CheckResult::ExtraFile> find_extra_files(const fs::path &base_path);
     std::vector<CheckResult::MissingFile> check_missing_files(const fs::path &base_path,
