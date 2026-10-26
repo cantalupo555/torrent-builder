@@ -56,7 +56,7 @@ class ModifierTest : public ::testing::Test
         std::vector<char> file_data((std::istreambuf_iterator<char>(data_file)),
                                      std::istreambuf_iterator<char>());
         auto piece_hash = lt::hasher(lt::span<char const>(file_data.data(), file_data.size())).final();
-        ct.set_hash(0, piece_hash);
+        ct.set_hash(lt::piece_index_t(0), piece_hash);
 
         if (!tracker.empty())
         {

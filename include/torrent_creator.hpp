@@ -9,10 +9,12 @@
 #include <libtorrent/error_code.hpp>
 
 #include "logger.hpp"
+#include "output_sink.hpp"
 #include "terminal.hpp"
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <functional>
 #include <string>
 #include <vector>
 #include <optional>
@@ -104,8 +106,19 @@ public:
     /**
      * @brief Construct a torrent creator with the given configuration.
      * @param config Fully populated TorrentConfig.
+     * @param sink Output sink for progress and status messages. Defaults to
+     *             the process-wide stdout sink (CLI behavior). Inject a
+     *             custom sink (e.g. QtOutputSink) for GUI usage.
+     * @param should_cancel Optional cancellation predicate. When provided and
+     *                      returning true, create_torrent() aborts hashing and
+     *                      throws UserInterrupt — same as pressing 'q' on the
+     *                      CLI. Lets a GUI without a TTY cancel a long hash.
+     *                      If empty (default), only the CLI TerminalGuard can
+     *                      interrupt.
      */
-    explicit TorrentCreator(TorrentConfig config);
+    explicit TorrentCreator(TorrentConfig config,
+                            OutputSink& sink = default_stdout_sink(),
+                            std::function<bool()> should_cancel = {});
 
     /**
      * @brief Create and save a .torrent file according to the configuration.
@@ -114,7 +127,8 @@ public:
      * based on file size), metadata assembly, and disk write.
      *
      * @throws std::runtime_error on hashing, I/O, or configuration errors.
-     * @throws UserInterrupt if the user presses 'q' or hashing times out.
+     * @throws UserInterrupt if the user presses 'q', cancels via the
+     *         should_cancel predicate, or hashing times out.
      */
     void create_torrent();
     /**
@@ -125,13 +139,38 @@ public:
 
 private:
     TorrentConfig config_;
+    OutputSink& sink_;
+    std::function<bool()> should_cancel_;
     lt::file_storage fs_;
     std::mutex progress_mutex_;   // Guards total_processed_ across worker threads
     int64_t total_processed_ = 0;
 
+    /// Emits a structured progress update via the injected sink (no-op when silent).
+    void emit_progress(int pieces_done, int pieces_total, double speed, double eta,
+                       int64_t bytes_done, int64_t bytes_total,
+                       const std::string& current_file = {}) const;
+
+    /// Signals the end of the transient progress line (no-op when silent).
+    void end_progress() const;
+
+    /**
+     * @brief Report an error through the sink without ever throwing.
+     *
+     * Used inside catch handlers: a custom sink that throws from error() must
+     * not mask the original exception (or replace it with a secondary one).
+     */
+    void report_error_noexcept(const std::string& msg) const noexcept;
+
+    /// Resolves which file contains a byte offset, for progress display.
+    /// Returns an empty string when the offset is out of range.
+    std::string current_file_at_offset(int64_t offset) const;
+
+    /// Returns true if cancellation has been requested (predicate or keypress).
+    /// A throwing predicate is treated as a cancellation request.
+    bool is_cancelled(TerminalGuard& guard) const noexcept;
+
     void add_files_to_storage();
     void print_torrent_summary(int64_t total_size, int piece_size, int num_pieces) const;
-    void print_progress_bar(int progress, int total, double speed, double eta, int64_t processed, int64_t total_size) const;
     void hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard);
     void hash_large_file_parallel(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard);
     void hash_block(const fs::path& path, lt::create_torrent& t, int piece_size, int64_t start_offset, int64_t end_offset, std::mutex& mutex, std::atomic<bool>& cancel);

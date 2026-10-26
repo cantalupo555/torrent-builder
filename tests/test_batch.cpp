@@ -1,10 +1,13 @@
 #include "portable.hpp"
 #include <gtest/gtest.h>
 #include "batch.hpp"
+#include "output_sink.hpp"
 #include "preset.hpp"
 #include "torrent_inspector.hpp"
 #include <filesystem>
 #include <fstream>
+#include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -264,6 +267,66 @@ jobs:
 
     ASSERT_EQ(results.size(), 1u);
     EXPECT_TRUE(results[0].success);
+}
+
+// BatchProcessor::run(OutputSink&) must route per-job output through the
+// injected sink instead of only touching the default stdout sink. This is the
+// seam a GUI batch view will rely on.
+//
+// Note on progress(): batch jobs run with TorrentConfig::silent = true (by
+// design — batch suppresses per-piece bars), so emit_progress() no-ops and
+// the sink legitimately receives zero progress() calls here. What we assert
+// is that informational flow reaches the injected sink.
+TEST_F(BatchTest, RunForwardsOutputToInjectedSink) {
+    fs::path test_file = temp_dir / "sink_job.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(64 * 1024, 'B');
+        f.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+
+    write_file("batch_sink.yaml", R"(
+version: 1
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "sink_out.torrent").generic_string() + R"("
+)");
+
+    class RecordingSink : public OutputSink {
+    public:
+        int progress_count = 0;
+        std::vector<std::string> infos;
+
+        void info(const std::string& msg) override { infos.push_back(msg); }
+        void verbose(const std::string&) override {}
+        void error(const std::string&) override {}
+        void progress(const ProgressInfo&) override { ++progress_count; }
+    };
+
+    auto config = BatchProcessor::parse(temp_dir / "batch_sink.yaml");
+    BatchProcessor processor(std::move(config));
+
+    RecordingSink sink;
+    auto results = processor.run(sink);
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success);
+
+    // Hashing start notice and the creation summary must arrive via the sink.
+    bool saw_hashing = false;
+    bool saw_summary = false;
+    for (const auto& msg : sink.infos) {
+        if (msg.find("Hashing pieces") != std::string::npos) saw_hashing = true;
+        if (msg.find("TORRENT CREATED SUCCESSFULLY") != std::string::npos) saw_summary = true;
+    }
+    EXPECT_TRUE(saw_hashing);
+    EXPECT_TRUE(saw_summary);
+
+    // Documented batch behavior: per-piece progress is silenced in batch mode.
+    EXPECT_EQ(sink.progress_count, 0);
+
+    // The job actually produced a .torrent file.
+    EXPECT_TRUE(fs::exists(temp_dir / "sink_out.torrent"));
 }
 
 TEST_F(BatchTest, ParseNoCreatorNoDate) {

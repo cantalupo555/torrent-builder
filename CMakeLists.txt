@@ -84,6 +84,24 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+# Qt6 (optional desktop GUI). NOT vendored via FetchContent — too large.
+# CI / developers install Qt6 system-wide (apt install qt6-base-dev, brew,
+# Chocolatey). Default is ON when Qt6 is found, OFF otherwise. Force OFF
+# with -DTB_ENABLE_GUI=OFF for CLI-only build matrices.
+option(TB_ENABLE_GUI "Build the Qt6 desktop GUI (requires Qt6)" ON)
+if(TB_ENABLE_GUI)
+    find_package(Qt6 QUIET COMPONENTS Widgets Gui Core)
+    if(Qt6_FOUND)
+        message(STATUS "Qt6 ${Qt6_VERSION} found — GUI target enabled.")
+    else()
+        # No cache FORCE here: an explicit -DTB_ENABLE_GUI=ON must survive
+        # re-configure after the user installs Qt6. The target block below
+        # guards on TB_ENABLE_GUI AND Qt6_FOUND, so nothing breaks meanwhile.
+        message(STATUS "Qt6 not found — GUI target skipped this configure run.")
+        message(STATUS "Install Qt6 and re-run cmake to enable torrent_builder_gui.")
+    endif()
+endif()
+
 # ─── Core library ────────────────────────────────────────────
 add_library(torrent_builder_core STATIC
     src/torrent_creator.cpp
@@ -148,6 +166,46 @@ target_link_libraries(torrent_builder PRIVATE
     cxxopts::cxxopts
 )
 
+# ─── Qt6 desktop GUI executable (optional) ───────────────────
+# Only built when Qt6 is found and TB_ENABLE_GUI is ON. The GUI links the same
+# core/config static libs as the CLI — it is a sibling frontend, never a fork.
+if(TB_ENABLE_GUI AND Qt6_FOUND)
+    # Equivalent to qt_standard_project_setup(), which requires Qt >= 6.3.
+    # Explicit flags keep the GUI buildable on hosts shipping Qt 6.2
+    # (e.g. Ubuntu 22.04 qt6-base-dev).
+    set(CMAKE_AUTOMOC ON)
+    set(CMAKE_AUTORCC ON)
+    set(CMAKE_AUTOUIC ON)
+
+    set(GUI_SOURCES
+        gui/main.cpp
+        gui/main_window.cpp
+        gui/qt_output_sink.cpp
+    )
+
+    qt_add_executable(torrent_builder_gui ${GUI_SOURCES})
+
+    target_include_directories(torrent_builder_gui PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_BINARY_DIR}
+    )
+
+    target_link_libraries(torrent_builder_gui PRIVATE
+        torrent_builder_core
+        torrent_builder_config
+        Qt6::Widgets
+        Qt6::Gui
+        Qt6::Core
+    )
+
+    # On Windows, build as a windowed app (no console window pops up).
+    if(WIN32)
+        set_target_properties(torrent_builder_gui PROPERTIES WIN32_EXECUTABLE ON)
+    endif()
+
+    message(STATUS "torrent_builder_gui target configured.")
+endif()
+
 # ─── Tests ───────────────────────────────────────────────────
 enable_testing()
 
@@ -164,6 +222,7 @@ if(TEST_SOURCES)
     target_include_directories(torrent_builder_tests PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/gui
     )
 
     target_link_libraries(torrent_builder_tests PRIVATE
@@ -224,3 +283,9 @@ add_test(NAME cmake_version_fallback
 install(TARGETS torrent_builder
     RUNTIME DESTINATION bin
 )
+
+if(TARGET torrent_builder_gui)
+    install(TARGETS torrent_builder_gui
+        RUNTIME DESTINATION bin
+    )
+endif()
