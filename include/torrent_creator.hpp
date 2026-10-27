@@ -171,12 +171,12 @@ private:
 
     void add_files_to_storage();
 
-    /// Renames duplicate pad-file paths (e.g. two ".pad/16382" entries) to
-    /// unique ".pad/<size>.N" paths. libtorrent allows the collision, but
-    /// strict clients reject torrents with duplicate paths. The file_storage
-    /// is shared by reference with the in-progress create_torrent object, so
-    /// this must run before generate().
-    void deduplicate_pad_paths();
+    /// Renames duplicate pad-file paths (e.g. two ".pad/16382" entries) in the
+    /// generated v1 file list to unique ".pad/<size>.N" paths. libtorrent
+    /// allows the collision, but strict clients reject torrents with duplicate
+    /// paths. Operates on the generated entry because libtorrent 2.1 copies
+    /// the file layout into create_torrent instead of referencing it.
+    void deduplicate_pad_paths(lt::entry& torrent);
 
     void print_torrent_summary(int64_t total_size, int piece_size, int num_pieces) const;
     void hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard);
