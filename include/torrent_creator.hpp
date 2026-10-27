@@ -170,6 +170,14 @@ private:
     bool is_cancelled(TerminalGuard& guard) const noexcept;
 
     void add_files_to_storage();
+
+    /// Renames duplicate pad-file paths (e.g. two ".pad/16382" entries) to
+    /// unique ".pad/<size>.N" paths. libtorrent allows the collision, but
+    /// strict clients reject torrents with duplicate paths. The file_storage
+    /// is shared by reference with the in-progress create_torrent object, so
+    /// this must run before generate().
+    void deduplicate_pad_paths();
+
     void print_torrent_summary(int64_t total_size, int piece_size, int num_pieces) const;
     void hash_large_file(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard);
     void hash_large_file_parallel(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard);

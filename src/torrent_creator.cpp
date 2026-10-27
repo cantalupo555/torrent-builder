@@ -14,6 +14,7 @@
 #include <thread>
 #include <stdexcept>
 #include <system_error>
+#include <unordered_set>
 
 // Constructor for TorrentCreator
 TorrentCreator::TorrentCreator(TorrentConfig config,
@@ -167,6 +168,32 @@ lt::create_flags_t TorrentCreator::get_torrent_flags(TorrentVersion version) {
             fs_.add_file(config_.path.filename().string(), fs::file_size(config_.path));
         }
     }
+
+void TorrentCreator::deduplicate_pad_paths() {
+    std::unordered_set<std::string> seen;
+    int renamed = 0;
+
+    for (auto i : fs_.file_range()) {
+        const std::string path = fs_.file_path(i);
+        if (seen.insert(utils::to_lower(path)).second) continue;
+        if (!fs_.pad_file_at(i)) continue;
+
+        for (int suffix = 1; ; ++suffix) {
+            const std::string candidate = path + "." + std::to_string(suffix);
+            if (!seen.insert(utils::to_lower(candidate)).second) continue;
+            fs_.rename_file(i, candidate);
+            ++renamed;
+            break;
+        }
+    }
+
+    if (renamed > 0) {
+        const std::string msg = "Renamed " + std::to_string(renamed)
+            + " duplicate pad path(s) to keep torrent paths unique";
+        sink_.verbose(msg + "\n");
+        log_message(msg, LogLevel::INFO);
+    }
+}
 
 // Hashing with streaming for large files
 void TorrentCreator::hash_large_file_parallel(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard) {
@@ -451,6 +478,13 @@ void TorrentCreator::create_torrent() {
         lt::create_flags_t flags = get_torrent_flags(config_.version);
 
         lt::create_torrent t(fs_, piece_size, flags);
+
+        // libtorrent canonicalizes hybrid/v2 layouts by inserting pad files
+        // named ".pad/<size>". Same-size pads collide; strict clients reject
+        // duplicate paths, so make them unique before hashing/generation.
+        // create_torrent holds a const reference to fs_, so renaming here
+        // affects the pending torrent object.
+        deduplicate_pad_paths();
 
         // Add trackers to create_torrent object
         int tier = 0;
