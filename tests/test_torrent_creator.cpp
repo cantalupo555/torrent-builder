@@ -93,7 +93,8 @@ std::string join_path(const lt::bdecode_node& path) {
     std::string joined;
     for (int i = 0; i < path.list_size(); ++i) {
         if (!joined.empty()) joined += "/";
-        joined += path.list_string_value_at(i).to_string();
+        const auto component = path.list_string_value_at(i);
+        joined.append(component.data(), component.size());
     }
     return joined;
 }
