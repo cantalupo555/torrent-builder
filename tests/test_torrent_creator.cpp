@@ -21,6 +21,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <random>
 #include <set>
 #include <string>
 #include <string_view>
@@ -42,7 +43,11 @@ public:
 class TorrentCreatorLayoutTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        temp_dir_ = fs::temp_directory_path() / "tb_torrent_creator_test";
+        // gtest_discover_tests runs each case as a separate ctest process;
+        // a fixed directory would race under `ctest -jN`.
+        temp_dir_ = fs::temp_directory_path()
+            / ("tb_torrent_creator_test_"
+               + std::to_string(std::random_device{}()));
         fs::remove_all(temp_dir_);
         fs::create_directories(temp_dir_);
     }

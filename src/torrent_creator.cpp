@@ -186,15 +186,25 @@ void TorrentCreator::deduplicate_pad_paths(lt::entry& torrent) {
     };
 
     // Collect every path up front so a generated suffix cannot collide with a
-    // file that appears later in the list.
+    // file that appears later in the list. Real-file paths are seeded
+    // separately so they always win over a pad with the same path, regardless
+    // of the order libtorrent emitted the entries in.
     std::unordered_set<std::string> taken;
+    std::unordered_set<std::string> real_paths;
     for (const auto& file : files) {
         auto path = file.dict().find("path");
         if (path == file.dict().end()) continue;
-        taken.insert(utils::to_lower(join_components(path->second.list())));
+        const std::string key =
+            utils::to_lower(join_components(path->second.list()));
+        taken.insert(key);
+
+        auto attr_it = file.dict().find("attr");
+        const bool is_pad = attr_it != file.dict().end()
+            && attr_it->second.string().find('p') != std::string::npos;
+        if (!is_pad) real_paths.insert(key);
     }
 
-    std::unordered_set<std::string> seen;
+    std::unordered_set<std::string> seen_pads;
     int renamed = 0;
     for (auto& file : files) {
         auto path_it = file.dict().find("path");
@@ -202,14 +212,17 @@ void TorrentCreator::deduplicate_pad_paths(lt::entry& torrent) {
         auto& components = path_it->second.list();
         if (components.empty()) continue;
 
-        const std::string path = join_components(components);
-        if (seen.insert(utils::to_lower(path)).second) continue;
-
         auto attr_it = file.dict().find("attr");
         if (attr_it == file.dict().end()
             || attr_it->second.string().find('p') == std::string::npos) {
             continue;
         }
+
+        const std::string path = join_components(components);
+        const std::string key = utils::to_lower(path);
+        const bool collides_with_real = real_paths.count(key) != 0;
+        const bool duplicate_pad = !seen_pads.insert(key).second;
+        if (!collides_with_real && !duplicate_pad) continue;
 
         const std::string leaf = components.back().string();
         for (int suffix = 1; ; ++suffix) {
@@ -224,8 +237,10 @@ void TorrentCreator::deduplicate_pad_paths(lt::entry& torrent) {
                                        candidate_leaf);
             }
 
-            const std::string key = utils::to_lower(candidate_path);
-            if (!taken.insert(key).second) continue;
+            const std::string candidate_key =
+                utils::to_lower(candidate_path);
+            if (!taken.insert(candidate_key).second) continue;
+            seen_pads.insert(candidate_key);
             components.back().string() = candidate_leaf;
             ++renamed;
             break;
