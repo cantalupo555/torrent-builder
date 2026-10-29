@@ -14,6 +14,7 @@
 #include <thread>
 #include <stdexcept>
 #include <system_error>
+#include <unordered_set>
 
 // Constructor for TorrentCreator
 TorrentCreator::TorrentCreator(TorrentConfig config,
@@ -167,6 +168,92 @@ lt::create_flags_t TorrentCreator::get_torrent_flags(TorrentVersion version) {
             fs_.add_file(config_.path.filename().string(), fs::file_size(config_.path));
         }
     }
+
+void TorrentCreator::deduplicate_pad_paths(lt::entry& torrent) {
+    auto info_it = torrent.dict().find("info");
+    if (info_it == torrent.dict().end()) return;
+    auto files_it = info_it->second.dict().find("files");
+    if (files_it == info_it->second.dict().end()) return;
+    auto& files = files_it->second.list();
+
+    auto join_components = [](const lt::entry::list_type& components) {
+        std::string joined;
+        for (const auto& component : components) {
+            if (!joined.empty()) joined += "/";
+            joined += component.string();
+        }
+        return joined;
+    };
+
+    // Collect every path up front so a generated suffix cannot collide with a
+    // file that appears later in the list. Real-file paths are seeded
+    // separately so they always win over a pad with the same path, regardless
+    // of the order libtorrent emitted the entries in.
+    std::unordered_set<std::string> taken;
+    std::unordered_set<std::string> real_paths;
+    for (const auto& file : files) {
+        auto path = file.dict().find("path");
+        if (path == file.dict().end()) continue;
+        const std::string key =
+            utils::to_lower(join_components(path->second.list()));
+        taken.insert(key);
+
+        auto attr_it = file.dict().find("attr");
+        const bool is_pad = attr_it != file.dict().end()
+            && attr_it->second.string().find('p') != std::string::npos;
+        if (!is_pad) real_paths.insert(key);
+    }
+
+    std::unordered_set<std::string> seen_pads;
+    int renamed = 0;
+    for (auto& file : files) {
+        auto path_it = file.dict().find("path");
+        if (path_it == file.dict().end()) continue;
+        auto& components = path_it->second.list();
+        if (components.empty()) continue;
+
+        auto attr_it = file.dict().find("attr");
+        if (attr_it == file.dict().end()
+            || attr_it->second.string().find('p') == std::string::npos) {
+            continue;
+        }
+
+        const std::string path = join_components(components);
+        const std::string key = utils::to_lower(path);
+        const bool collides_with_real = real_paths.count(key) != 0;
+        const bool duplicate_pad = !seen_pads.insert(key).second;
+        if (!collides_with_real && !duplicate_pad) continue;
+
+        const std::string leaf = components.back().string();
+        for (int suffix = 1; ; ++suffix) {
+            const std::string candidate_leaf =
+                leaf + "." + std::to_string(suffix);
+            std::string candidate_path = path;
+            const auto slash = candidate_path.rfind('/');
+            if (slash == std::string::npos) {
+                candidate_path = candidate_leaf;
+            } else {
+                candidate_path.replace(slash + 1, std::string::npos,
+                                       candidate_leaf);
+            }
+
+            const std::string candidate_key =
+                utils::to_lower(candidate_path);
+            if (!taken.insert(candidate_key).second) continue;
+            seen_pads.insert(candidate_key);
+            components.back().string() = candidate_leaf;
+            ++renamed;
+            break;
+        }
+    }
+
+    if (renamed > 0) {
+        const std::string msg = "Renamed " + std::to_string(renamed)
+            + " duplicate pad path(s) to keep torrent paths unique";
+        sink_.verbose(msg + "\n");
+        log_message(msg, LogLevel::INFO);
+    }
+}
 
 // Hashing with streaming for large files
 void TorrentCreator::hash_large_file_parallel(const fs::path& path, lt::create_torrent& t, int piece_size, TerminalGuard& guard) {
@@ -602,6 +689,11 @@ void TorrentCreator::create_torrent() {
             }
 
             lt::entry e = t.generate();
+
+            // libtorrent names hybrid pad files by size alone, so equal-sized
+            // pads collide in the v1 file list. Strict clients reject the
+            // resulting duplicate paths; rename them before bencoding.
+            deduplicate_pad_paths(e);
 
             if (config_.name) {
                 e["info"]["name"] = *config_.name;
