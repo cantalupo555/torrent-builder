@@ -13,11 +13,13 @@
 #include "output.hpp"
 #include "output_sink.hpp"
 #include "terminal.hpp"
+#include "portable.hpp"
 #include <fstream>
 #include <filesystem>
 #include <vector>
 #include <string>
 #include <atomic>
+#include <random>
 #include <stdexcept>
 
 namespace fs = std::filesystem;
@@ -54,7 +56,12 @@ public:
 class OutputSinkTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        temp_dir_ = fs::temp_directory_path() / "tb_output_sink_test";
+        // gtest_discover_tests runs each case as a separate ctest process;
+        // a fixed directory would race under `ctest -jN`.
+        temp_dir_ = fs::temp_directory_path()
+            / ("tb_output_sink_test_"
+               + std::to_string(portable_getpid()) + "_"
+               + std::to_string(std::random_device{}()));
         fs::remove_all(temp_dir_);
         fs::create_directories(temp_dir_);
     }
