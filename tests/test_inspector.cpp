@@ -369,7 +369,8 @@ TEST(TorrentInspectorHybridPadTest, InspectShowsRawPadPaths)
         EXPECT_NE(inspected_paths.find(expected), inspected_paths.end())
             << "missing raw pad path: " << expected;
         EXPECT_NE(text.find(expected), std::string::npos);
-        EXPECT_NE(json.find("\"" + expected + "\""), std::string::npos);
+        EXPECT_NE(json.find("\"" + utils::escape_json(expected) + "\""),
+                  std::string::npos);
     }
 }
 
