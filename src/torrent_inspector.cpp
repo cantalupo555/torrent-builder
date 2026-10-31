@@ -12,6 +12,33 @@
 #include <iomanip>
 #include <algorithm>
 #include <map>
+#include <optional>
+
+namespace
+{
+std::optional<std::string> join_path_components(const lt::entry::list_type &components)
+{
+    if (components.empty())
+    {
+        return std::nullopt;
+    }
+
+    std::string path;
+    for (const auto &component : components)
+    {
+        if (component.type() != lt::entry::string_t)
+        {
+            return std::nullopt;
+        }
+        if (!path.empty())
+        {
+            path += "/";
+        }
+        path += component.string();
+    }
+    return path;
+}
+} // namespace
 
 TorrentInspector::TorrentInspector(const fs::path &torrent_path) : torrent_path_(torrent_path)
 {
@@ -195,6 +222,9 @@ TorrentMetadata TorrentInspector::inspect()
 
     // libtorrent::torrent_info does not expose arbitrary info-dict fields.
     // Parse the stored raw buffer to extract source and entropy if present.
+    // The same buffer holds the original info.files paths, which matter for
+    // pads: libtorrent normalizes pads that share a size while parsing, so
+    // duplicate-size pads would otherwise be displayed with identical names.
     try
     {
         lt::entry root = lt::bdecode(lt::span<const char>(raw_buffer_.data(), raw_buffer_.size()));
@@ -215,11 +245,66 @@ TorrentMetadata TorrentInspector::inspect()
                     meta.entropy = ent->string();
                 }
             }
+            if (auto raw_files = info.find_key("files");
+                raw_files != nullptr && raw_files->type() == lt::entry::list_t)
+            {
+                const auto &raw_list = raw_files->list();
+                if (raw_list.size() == meta.files.size())
+                {
+                    for (size_t i = 0; i < raw_list.size(); ++i)
+                    {
+                        const auto idx = libtorrent::file_index_t{static_cast<int>(i)};
+                        if (!files.pad_file_at(idx))
+                        {
+                            continue;
+                        }
+
+                        const lt::entry &raw_file = raw_list[i];
+                        if (raw_file.type() != lt::entry::dictionary_t)
+                        {
+                            continue;
+                        }
+
+                        auto raw_path = raw_file.find_key("path");
+                        if (raw_path == nullptr || raw_path->type() != lt::entry::list_t)
+                        {
+                            continue;
+                        }
+
+                        // Extra alignment check: same-count lists in a
+                        // different order must not swap pad names.
+                        auto raw_length = raw_file.find_key("length");
+                        if (raw_length != nullptr &&
+                            raw_length->type() == lt::entry::int_t &&
+                            raw_length->integer() != files.file_size(idx))
+                        {
+                            continue;
+                        }
+
+                        const auto relative = join_path_components(raw_path->list());
+                        if (!relative)
+                        {
+                            continue;
+                        }
+
+                        meta.files[i].path = meta.name.empty()
+                                                 ? *relative
+                                                 : meta.name + "/" + *relative;
+                    }
+                }
+                else
+                {
+                    log_message("Raw info.files count does not match parsed file count; "
+                                "pad paths may be normalized",
+                                LogLevel::WARNING);
+                }
+            }
         }
     }
     catch (const std::exception &e)
     {
-        log_message("Could not extract source/entropy fields: " + std::string(e.what()), LogLevel::WARNING);
+        log_message("Could not extract raw info fields: " + std::string(e.what()),
+                    LogLevel::WARNING);
     }
 
     generate_magnet_link(meta);

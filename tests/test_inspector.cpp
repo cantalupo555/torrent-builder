@@ -1,15 +1,50 @@
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <fstream>
 #include <filesystem>
-#include <string>
+#include <iterator>
+#include <random>
 #include <regex>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
 #include <libtorrent/create_torrent.hpp>
 #include <libtorrent/torrent_info.hpp>
 #include <libtorrent/file_storage.hpp>
+#include <libtorrent/entry.hpp>
 #include "torrent_inspector.hpp"
+#include "torrent_creator.hpp"
+#include "output_sink.hpp"
 #include "utils.hpp"
 
 namespace fs = std::filesystem;
+
+namespace
+{
+class NoopOutputSink : public OutputSink
+{
+  public:
+    void info(const std::string &) override {}
+    void verbose(const std::string &) override {}
+    void error(const std::string &) override {}
+    void progress(const ProgressInfo &) override {}
+};
+
+std::string join_path_components(const lt::entry &path)
+{
+    std::string joined;
+    for (const auto &component : path.list())
+    {
+        if (!joined.empty())
+        {
+            joined += "/";
+        }
+        joined += component.string();
+    }
+    return joined;
+}
+} // namespace
 
 class InspectorTest : public ::testing::Test
 {
@@ -236,6 +271,96 @@ TEST_F(InspectorTest, V1TorrentHashLength)
 
     EXPECT_FALSE(meta.info_hash_v1.empty());
     EXPECT_EQ(meta.info_hash_v1.size(), 40);
+}
+
+TEST(TorrentInspectorHybridPadTest, InspectShowsRawPadPaths)
+{
+    const fs::path temp_dir = fs::temp_directory_path() /
+                              ("tb_inspector_pad_" + std::to_string(std::random_device{}()));
+    fs::create_directories(temp_dir);
+
+    struct TempDirGuard
+    {
+        fs::path path;
+        ~TempDirGuard()
+        {
+            std::error_code ec;
+            fs::remove_all(path, ec);
+        }
+    } guard{temp_dir};
+
+    const fs::path source_dir = temp_dir / "Show Pads";
+    fs::create_directories(source_dir);
+    {
+        std::ofstream a(source_dir / "a.txt", std::ios::binary);
+        a << "AA";
+        std::ofstream b(source_dir / "b.txt", std::ios::binary);
+        b << "BB";
+    }
+
+    const fs::path torrent_path = temp_dir / "show.torrent";
+    NoopOutputSink sink;
+    TorrentConfig config(source_dir, torrent_path, {}, TorrentVersion::HYBRID);
+    config.silent = true;
+    TorrentCreator creator(std::move(config), sink);
+    creator.create_torrent();
+    ASSERT_TRUE(fs::exists(torrent_path));
+
+    std::ifstream input(torrent_path, std::ios::binary);
+    std::vector<char> buffer((std::istreambuf_iterator<char>(input)),
+                             std::istreambuf_iterator<char>());
+    lt::entry root = lt::bdecode(lt::span<const char>(buffer.data(), buffer.size()));
+    const lt::entry *info = root.find_key("info");
+    ASSERT_NE(info, nullptr);
+    const lt::entry *raw_files = info->find_key("files");
+    ASSERT_NE(raw_files, nullptr);
+
+    std::vector<std::string> raw_pad_paths;
+    for (const auto &file : raw_files->list())
+    {
+        const lt::entry *attr = file.find_key("attr");
+        const lt::entry *path = file.find_key("path");
+        if (attr != nullptr && attr->type() == lt::entry::string_t &&
+            attr->string().find('p') != std::string::npos && path != nullptr &&
+            path->type() == lt::entry::list_t)
+        {
+            raw_pad_paths.push_back(join_path_components(*path));
+        }
+    }
+
+    ASSERT_GE(raw_pad_paths.size(), 2u);
+    const bool has_suffixed_pad = std::any_of(
+        raw_pad_paths.begin(), raw_pad_paths.end(), [](const std::string &path) {
+            const auto slash = path.rfind('/');
+            const std::string leaf =
+                slash == std::string::npos ? path : path.substr(slash + 1);
+            return leaf.find('.') != std::string::npos;
+        });
+    ASSERT_TRUE(has_suffixed_pad) << "fixture must contain duplicate-size pads";
+
+    TorrentInspector inspector(torrent_path);
+    TorrentMetadata meta = inspector.inspect();
+
+    std::set<std::string> inspected_paths;
+    for (const auto &file : meta.files)
+    {
+        EXPECT_TRUE(inspected_paths.insert(file.path).second)
+            << "duplicate inspected path: " << file.path;
+    }
+
+    EXPECT_NE(inspected_paths.find(meta.name + "/a.txt"), inspected_paths.end());
+    EXPECT_NE(inspected_paths.find(meta.name + "/b.txt"), inspected_paths.end());
+
+    const std::string text = TorrentInspector::format_file_tree(meta, false);
+    const std::string json = TorrentInspector::format_file_tree(meta, true);
+    for (const auto &raw_pad : raw_pad_paths)
+    {
+        const std::string expected = meta.name + "/" + raw_pad;
+        EXPECT_NE(inspected_paths.find(expected), inspected_paths.end())
+            << "missing raw pad path: " << expected;
+        EXPECT_NE(text.find(expected), std::string::npos);
+        EXPECT_NE(json.find("\"" + expected + "\""), std::string::npos);
+    }
 }
 
 TEST(UtilsTest, UrlEncodeBasic)
