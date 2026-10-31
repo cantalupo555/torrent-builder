@@ -10,6 +10,7 @@
 #include <libtorrent/entry.hpp>
 #include "torrent_modifier.hpp"
 #include "torrent_inspector.hpp"
+#include "test_temp_dir.hpp"
 #include "utils.hpp"
 
 namespace fs = std::filesystem;
@@ -23,8 +24,7 @@ class ModifierTest : public ::testing::Test
 
     void SetUp() override
     {
-        test_dir_ = fs::current_path() / "modifier_test_tmp";
-        fs::create_directories(test_dir_);
+        test_dir_ = test_support::unique_temp_dir("tb_modifier");
         test_file_ = test_dir_ / "test_file.txt";
         create_test_file();
         torrent_path_ = test_dir_ / "test.torrent";
@@ -657,8 +657,7 @@ class V2ModifierTest : public ::testing::Test
 
     void SetUp() override
     {
-        test_dir_ = fs::current_path() / "v2_modifier_test_tmp";
-        fs::create_directories(test_dir_);
+        test_dir_ = test_support::unique_temp_dir("tb_modifier_v2");
         test_file_ = test_dir_ / "test_file.txt";
         std::ofstream file(test_file_);
         file << "Hello World - v2 test content";
@@ -736,8 +735,7 @@ class HybridModifierTest : public ::testing::Test
 
     void SetUp() override
     {
-        test_dir_ = fs::current_path() / "hybrid_modifier_test_tmp";
-        fs::create_directories(test_dir_);
+        test_dir_ = test_support::unique_temp_dir("tb_modifier_hybrid");
         content_dir_ = test_dir_ / "content";
         fs::create_directories(content_dir_);
         std::ofstream(content_dir_ / "file1.txt") << "hybrid test file 1";

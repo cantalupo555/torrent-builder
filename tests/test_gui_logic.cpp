@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include "creation_options.hpp"
 #include "formatting.hpp"
+#include "test_temp_dir.hpp"
 
 #include <cmath>
 #include <filesystem>
@@ -20,9 +21,7 @@ namespace {
 class GuiLogicTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        temp_dir_ = fs::temp_directory_path() / "tb_gui_logic_test";
-        fs::remove_all(temp_dir_);
-        fs::create_directories(temp_dir_);
+        temp_dir_ = test_support::unique_temp_dir("tb_gui_logic");
     }
 
     void TearDown() override {

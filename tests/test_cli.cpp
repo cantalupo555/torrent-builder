@@ -1,4 +1,5 @@
 #include "portable.hpp"
+#include "test_temp_dir.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdio>
@@ -8,7 +9,6 @@
 #include <regex>
 #include <filesystem>
 #include <fstream>
-#include <ctime>
 #include "torrent_inspector.hpp"
 
 namespace {
@@ -3672,11 +3672,7 @@ TEST(CLI, NoFailOnSeasonWarningIncompletePackSucceeds) {
 #ifndef _WIN32
 static std::filesystem::path make_isolated_home()
 {
-    std::filesystem::path home =
-        std::filesystem::temp_directory_path() / ("tb_upd_home_" + std::to_string(std::time(nullptr)));
-    std::filesystem::remove_all(home);
-    std::filesystem::create_directories(home);
-    return home;
+    return test_support::unique_temp_dir("tb_upd_home");
 }
 
 static std::string make_input_file(const std::filesystem::path &dir)
