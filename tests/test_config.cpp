@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "torrent_creator.hpp"
+#include "test_temp_dir.hpp"
 #include <fstream>
 #include <filesystem>
 
@@ -8,8 +9,7 @@ namespace fs = std::filesystem;
 class TorrentConfigTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        temp_dir_ = fs::temp_directory_path() / "torrent_builder_test";
-        fs::create_directories(temp_dir_);
+        temp_dir_ = test_support::unique_temp_dir("tb_config");
     }
 
     void TearDown() override {

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "utils.hpp"
 #include "updater.hpp"
+#include "test_temp_dir.hpp"
 #include <string>
 #include <fstream>
 #include <sstream>
@@ -56,9 +57,7 @@ std::string sha256_file(const std::string &filepath)
 
 bool create_mock_zip(const std::string &dest_path, const std::string &binary_content)
 {
-    fs::path staging = fs::temp_directory_path() / "tb_mock_zip_staging";
-    fs::remove_all(staging);
-    fs::create_directories(staging);
+    fs::path staging = test_support::unique_temp_dir("tb_mock_zip");
     {
         std::ofstream f(staging / "torrent_builder", std::ios::binary);
         f << binary_content;
@@ -772,7 +771,7 @@ protected:
 
     void SetUp() override
     {
-        temp_file = fs::temp_directory_path() / "tb_verify_test";
+        temp_file = test_support::unique_temp_path("tb_verify");
     }
 
     void TearDown() override
@@ -841,8 +840,7 @@ protected:
 
     void SetUp() override
     {
-        temp_dir = fs::temp_directory_path() / "tb_update_test";
-        fs::create_directories(temp_dir);
+        temp_dir = test_support::unique_temp_dir("tb_update");
     }
 
     void TearDown() override
@@ -913,8 +911,7 @@ protected:
 
     void SetUp() override
     {
-        temp_dir = fs::temp_directory_path() / "tb_rollback_test";
-        fs::create_directories(temp_dir);
+        temp_dir = test_support::unique_temp_dir("tb_rollback");
     }
 
     void TearDown() override
@@ -979,8 +976,7 @@ protected:
 
     void SetUp() override
     {
-        temp_dir = fs::temp_directory_path() / "tb_checksum_test";
-        fs::create_directories(temp_dir);
+        temp_dir = test_support::unique_temp_dir("tb_checksum");
     }
 
     void TearDown() override
@@ -1001,8 +997,7 @@ protected:
 
     void SetUp() override
     {
-        temp_dir = fs::temp_directory_path() / "tb_checksum_match_test";
-        fs::create_directories(temp_dir);
+        temp_dir = test_support::unique_temp_dir("tb_checksum_match");
     }
 
     void TearDown() override
@@ -1937,8 +1932,7 @@ protected:
 
     void SetUp() override
     {
-        temp_dir = fs::temp_directory_path() / "tb_update_fail_test";
-        fs::create_directories(temp_dir);
+        temp_dir = test_support::unique_temp_dir("tb_update_fail");
     }
 
     void TearDown() override
@@ -2173,8 +2167,7 @@ protected:
 
     void SetUp() override
     {
-        temp_dir_ = fs::temp_directory_path() / ("tb_throttle_" + std::to_string(std::time(nullptr)));
-        fs::create_directories(temp_dir_);
+        temp_dir_ = test_support::unique_temp_dir("tb_throttle");
         Updater::set_update_check_state_path_for_testing(
             (temp_dir_ / "update_check.state").string());
     }
@@ -2277,8 +2270,7 @@ TEST_F(UpdateCheckStatePathTest, LinuxXdgConfigHomeUsed)
     GTEST_SKIP() << "Linux-only path test";
 #else
     Updater::set_update_check_state_path_for_testing(std::nullopt);
-    fs::path tmp = fs::temp_directory_path() / ("tb_xdg_" + std::to_string(std::time(nullptr)));
-    fs::create_directories(tmp);
+    fs::path tmp = test_support::unique_temp_dir("tb_xdg");
 
     char prev_xdg[4096] = {0};
     bool had_xdg = (std::getenv("XDG_CONFIG_HOME") != nullptr);
@@ -2307,8 +2299,7 @@ TEST_F(UpdateCheckStatePathTest, LinuxHomeFallbackUsed)
     GTEST_SKIP() << "Linux-only path test";
 #else
     Updater::set_update_check_state_path_for_testing(std::nullopt);
-    fs::path tmp = fs::temp_directory_path() / ("tb_home_" + std::to_string(std::time(nullptr)));
-    fs::create_directories(tmp);
+    fs::path tmp = test_support::unique_temp_dir("tb_home");
 
     // Clear XDG so HOME fallback engages
     char prev_xdg[4096] = {0};

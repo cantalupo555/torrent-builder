@@ -2,7 +2,6 @@
 #include <fstream>
 #include <filesystem>
 #include <iterator>
-#include <random>
 #include <regex>
 #include <set>
 #include <string>
@@ -15,6 +14,7 @@
 #include "torrent_inspector.hpp"
 #include "torrent_creator.hpp"
 #include "output_sink.hpp"
+#include "test_temp_dir.hpp"
 #include "utils.hpp"
 
 namespace fs = std::filesystem;
@@ -44,25 +44,23 @@ std::string replace_leaf(const std::string &path, const std::string &leaf)
 class InspectorTest : public ::testing::Test
 {
   protected:
+    fs::path temp_dir_;
     fs::path torrent_path_;
     fs::path test_file_;
 
     void SetUp() override
     {
-        torrent_path_ = fs::current_path() / "test.torrent";
-        test_file_ = fs::current_path() / "test_file.txt";
-        cleanup();
+        temp_dir_ = test_support::unique_temp_dir("tb_inspector");
+        torrent_path_ = temp_dir_ / "test.torrent";
+        test_file_ = temp_dir_ / "test_file.txt";
         create_test_file();
         create_simple_torrent();
     }
 
-    void TearDown() override { cleanup(); }
-
-    void cleanup()
+    void TearDown() override
     {
         std::error_code ec;
-        fs::remove(torrent_path_, ec);
-        fs::remove(test_file_, ec);
+        fs::remove_all(temp_dir_, ec);
     }
 
     void create_test_file()
@@ -110,7 +108,7 @@ TEST_F(InspectorTest, InspectThrowsForNonexistentFile)
 {
     EXPECT_THROW(
         {
-            TorrentInspector inspector("nonexistent.torrent");
+            TorrentInspector inspector((temp_dir_ / "nonexistent.torrent").string());
             inspector.inspect();
         },
         std::runtime_error);
@@ -118,25 +116,26 @@ TEST_F(InspectorTest, InspectThrowsForNonexistentFile)
 
 TEST_F(InspectorTest, InspectThrowsForCorruptedFile)
 {
-    std::ofstream corrupt("corrupt.torrent", std::ios::binary);
+    const fs::path corrupt_path = temp_dir_ / "corrupt.torrent";
+    std::ofstream corrupt(corrupt_path, std::ios::binary);
     corrupt << "this is not a valid torrent file";
     corrupt.close();
 
     EXPECT_THROW(
         {
-            TorrentInspector inspector("corrupt.torrent");
+            TorrentInspector inspector(corrupt_path.string());
             inspector.inspect();
         },
         std::runtime_error);
 
-    fs::remove("corrupt.torrent");
+    fs::remove(corrupt_path);
 }
 
 TEST_F(InspectorTest, VerifyFilesReturnsFalseWhenMissing)
 {
     TorrentInspector inspector(torrent_path_.string());
     fs::remove(test_file_);
-    bool result = inspector.verify_files(fs::current_path());
+    bool result = inspector.verify_files(temp_dir_);
     EXPECT_FALSE(result);
 }
 
@@ -270,9 +269,7 @@ TEST_F(InspectorTest, V1TorrentHashLength)
 
 TEST(TorrentInspectorHybridPadTest, InspectShowsRawPadPaths)
 {
-    const fs::path temp_dir = fs::temp_directory_path() /
-                              ("tb_inspector_pad_" + std::to_string(std::random_device{}()));
-    fs::create_directories(temp_dir);
+    const fs::path temp_dir = test_support::unique_temp_dir("tb_inspector_pad");
 
     struct TempDirGuard
     {
