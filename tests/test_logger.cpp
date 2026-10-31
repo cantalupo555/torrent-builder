@@ -1,6 +1,7 @@
 #include <regex>
 #include <gtest/gtest.h>
 #include "logger.hpp"
+#include "test_temp_dir.hpp"
 #include <fstream>
 #include <filesystem>
 #include <string>
@@ -12,20 +13,25 @@ namespace fs = std::filesystem;
 class LoggerTest : public ::testing::Test
 {
   protected:
+    fs::path original_cwd_;
+    fs::path temp_dir_;
     fs::path log_path_;
 
     void SetUp() override
     {
-        log_path_ = fs::current_path() / "torrent_builder.log";
-        cleanup_log();
+        original_cwd_ = fs::current_path();
+        temp_dir_ = test_support::unique_temp_dir("tb_logger");
+        fs::current_path(temp_dir_);
+        log_path_ = temp_dir_ / "torrent_builder.log";
     }
 
-    void TearDown() override { cleanup_log(); }
-
-    void cleanup_log()
+    void TearDown() override
     {
-        std::error_code ec;
-        fs::remove(log_path_, ec);
+        std::error_code cwd_ec;
+        fs::current_path(original_cwd_, cwd_ec);
+
+        std::error_code remove_ec;
+        fs::remove_all(temp_dir_, remove_ec);
     }
 
     std::string read_log()
