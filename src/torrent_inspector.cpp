@@ -16,27 +16,21 @@
 
 namespace
 {
-std::optional<std::string> join_path_components(const lt::entry::list_type &components)
+std::optional<std::string> raw_path_leaf(const lt::entry::list_type &components)
 {
     if (components.empty())
     {
         return std::nullopt;
     }
 
-    std::string path;
     for (const auto &component : components)
     {
         if (component.type() != lt::entry::string_t)
         {
             return std::nullopt;
         }
-        if (!path.empty())
-        {
-            path += "/";
-        }
-        path += component.string();
     }
-    return path;
+    return components.back().string();
 }
 } // namespace
 
@@ -281,15 +275,28 @@ TorrentMetadata TorrentInspector::inspect()
                             continue;
                         }
 
-                        const auto relative = join_path_components(raw_path->list());
-                        if (!relative)
+                        const auto &raw_components = raw_path->list();
+                        const auto raw_leaf = raw_path_leaf(raw_components);
+                        if (!raw_leaf || raw_leaf->empty())
                         {
                             continue;
                         }
 
-                        meta.files[i].path = meta.name.empty()
-                                                 ? *relative
-                                                 : meta.name + "/" + *relative;
+                        // Keep libtorrent's root and native separators; only
+                        // restore the raw leaf, which is the part normalized
+                        // for pads sharing the same size.
+                        std::string display_path = meta.files[i].path;
+                        const auto separator = display_path.find_last_of("/\\");
+                        if (separator == std::string::npos)
+                        {
+                            display_path = *raw_leaf;
+                        }
+                        else
+                        {
+                            display_path.replace(separator + 1, std::string::npos,
+                                                 *raw_leaf);
+                        }
+                        meta.files[i].path = display_path;
                     }
                 }
                 else
