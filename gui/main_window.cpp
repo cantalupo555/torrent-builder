@@ -18,6 +18,7 @@
 #include <QLineEdit>
 #include <QMimeData>
 #include <QMessageBox>
+#include <QMetaObject>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
@@ -110,8 +111,8 @@ void run_creation(TorrentConfig config, QtOutputSink* sink) {
         // and logs a translatable message in on_creation_finished().
         QMetaObject::invokeMethod(sink, &QtOutputSink::finished, Qt::QueuedConnection);
     } catch (const std::exception& e) {
-        QMetaObject::invokeMethod(sink, &QtOutputSink::failed,
-            Qt::QueuedConnection, QString::fromUtf8(e.what()));
+        QMetaObject::invokeMethod(sink, "failed", Qt::QueuedConnection,
+            Q_ARG(QString, QString::fromUtf8(e.what())));
     }
 }
 

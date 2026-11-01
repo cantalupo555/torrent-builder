@@ -77,6 +77,47 @@ cmake .. -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
 
 **Versioning**: When building from a git tag (e.g., `v0.2.0`), the version is automatically detected. Otherwise, the version defaults to `dev`. You can override with `-DTORRENT_BUILDER_VERSION=x.y.z` during cmake configuration. Use `./torrent_builder --version` to check.
 
+### GUI (Qt6, optional)
+
+The Qt6 desktop GUI is built when Qt6 is available. `TB_ENABLE_GUI` defaults to `ON`; the target is skipped when Qt6 is missing. Set `-DTB_REQUIRE_GUI=ON` to make configuration fail instead (used by CI). If configuration fails for missing Qt, install Qt6 or reconfigure with `-DTB_ENABLE_GUI=OFF` for a CLI-only build; `TB_REQUIRE_GUI=ON` requires `TB_ENABLE_GUI=ON`.
+
+Prerequisites:
+
+- Linux: `sudo apt install qt6-base-dev`
+- macOS: `brew install qt`; configure with the OpenSSL flag above and `-DCMAKE_PREFIX_PATH=$(brew --prefix qt)`
+- Windows/MSYS2: install the matching Qt6 package, e.g. `mingw-w64-ucrt-x86_64-qt6-base`
+
+Build the GUI:
+
+```bash
+cmake -B build -DTB_ENABLE_GUI=ON
+cmake --build build --target torrent_builder_gui
+```
+
+On macOS, include both the OpenSSL and Qt prefixes:
+
+```bash
+cmake -B build -DTB_ENABLE_GUI=ON -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) -DCMAKE_PREFIX_PATH=$(brew --prefix qt)
+```
+
+The executable is `build/torrent_builder_gui` on Linux/Windows, or a `build/torrent_builder_gui.app` bundle on macOS. Run it with:
+
+```bash
+# Linux / Windows
+./build/torrent_builder_gui
+```
+
+```bash
+# macOS
+open build/torrent_builder_gui.app
+```
+
+For a headless startup check (Linux, also used by CI):
+
+```bash
+QT_QPA_PLATFORM=offscreen ./build/torrent_builder_gui --smoke-test
+```
+
 ## Usage
 
 ### Interactive Mode

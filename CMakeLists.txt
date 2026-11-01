@@ -86,13 +86,24 @@ FetchContent_MakeAvailable(nlohmann_json)
 
 # Qt6 (optional desktop GUI). NOT vendored via FetchContent — too large.
 # CI / developers install Qt6 system-wide (apt install qt6-base-dev, brew,
-# Chocolatey). Default is ON when Qt6 is found, OFF otherwise. Force OFF
-# with -DTB_ENABLE_GUI=OFF for CLI-only build matrices.
+# MSYS2 mingw-w64-<prefix>-qt6-base). The option defaults ON; the
+# torrent_builder_gui target is skipped when Qt6 is not found. Force OFF
+# with -DTB_ENABLE_GUI=OFF for CLI-only build matrices, or set
+# -DTB_REQUIRE_GUI=ON to turn a missing Qt6 into a configure error.
 option(TB_ENABLE_GUI "Build the Qt6 desktop GUI (requires Qt6)" ON)
+option(TB_REQUIRE_GUI "Fail configuration when Qt6 is required but unavailable" OFF)
+if(TB_REQUIRE_GUI AND NOT TB_ENABLE_GUI)
+    message(FATAL_ERROR "TB_REQUIRE_GUI=ON requires TB_ENABLE_GUI=ON.")
+endif()
 if(TB_ENABLE_GUI)
     find_package(Qt6 QUIET COMPONENTS Widgets Gui Core)
     if(Qt6_FOUND)
         message(STATUS "Qt6 ${Qt6_VERSION} found — GUI target enabled.")
+    elseif(TB_REQUIRE_GUI)
+        message(FATAL_ERROR
+            "Qt6 was not found, but TB_REQUIRE_GUI=ON. Install Qt6 "
+            "(qt6-base-dev, brew install qt, or the MSYS2 qt6-base package) "
+            "or configure with -DTB_ENABLE_GUI=OFF for a CLI-only build.")
     else()
         # No cache FORCE here: an explicit -DTB_ENABLE_GUI=ON must survive
         # re-configure after the user installs Qt6. The target block below
@@ -208,6 +219,14 @@ endif()
 
 # ─── Tests ───────────────────────────────────────────────────
 enable_testing()
+
+if(TARGET torrent_builder_gui AND UNIX AND NOT APPLE)
+    add_test(NAME gui_smoke COMMAND torrent_builder_gui --smoke-test)
+    set_tests_properties(gui_smoke PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 30
+    )
+endif()
 
 file(GLOB TEST_SOURCES tests/*.cpp)
 if(TEST_SOURCES)

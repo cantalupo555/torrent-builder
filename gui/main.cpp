@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QMetaType>
+#include <QTimer>
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
@@ -14,6 +15,13 @@ int main(int argc, char* argv[]) {
 
     MainWindow window;
     window.show();
+
+    // Headless startup check for CTest gui_smoke
+    // (QT_QPA_PLATFORM=offscreen): build and show the window, then quit on
+    // the first event-loop tick.
+    if (app.arguments().contains(QStringLiteral("--smoke-test"))) {
+        QTimer::singleShot(0, &app, [] { QCoreApplication::quit(); });
+    }
 
     return app.exec();
 }
