@@ -319,6 +319,74 @@ add_test(NAME cmake_version_fallback
     COMMAND ${CMAKE_COMMAND}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_version_fallback.cmake)
 
+add_test(NAME cmake_gui_require_without_enable
+    COMMAND ${CMAKE_COMMAND}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_require_without_enable.cmake)
+
+add_test(NAME cmake_gui_require_missing_qt
+    COMMAND ${CMAKE_COMMAND}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_require_missing_qt.cmake)
+
+add_test(NAME cmake_gui_optional_missing_qt
+    COMMAND ${CMAKE_COMMAND}
+        -DTEST_GENERATOR=${CMAKE_GENERATOR}
+        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
+        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
+        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_optional_missing_qt.cmake)
+
+add_test(NAME cmake_gui_wiring_invalid_combo
+    COMMAND ${CMAKE_COMMAND}
+        -DTEST_GENERATOR=${CMAKE_GENERATOR}
+        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
+        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
+        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_wiring_invalid_combo.cmake)
+
+add_test(NAME cmake_gui_wiring_missing_qt
+    COMMAND ${CMAKE_COMMAND}
+        -DTEST_GENERATOR=${CMAKE_GENERATOR}
+        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
+        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
+        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_wiring_missing_qt.cmake)
+
+add_test(NAME cmake_gui_defaults
+    COMMAND ${CMAKE_COMMAND}
+        -DTEST_GENERATOR=${CMAKE_GENERATOR}
+        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
+        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
+        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_defaults.cmake)
+
+add_test(NAME cmake_gui_disabled_with_qt
+    COMMAND ${CMAKE_COMMAND}
+        -DTEST_GENERATOR=${CMAKE_GENERATOR}
+        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
+        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
+        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_disabled_with_qt.cmake)
+
+add_test(NAME cmake_gui_prefix_path_list
+    COMMAND ${CMAKE_COMMAND}
+        -DTEST_GENERATOR=${CMAKE_GENERATOR}
+        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
+        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
+        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_prefix_path_list.cmake)
+
 # ─── Installation ────────────────────────────────────────────
 install(TARGETS torrent_builder
     RUNTIME DESTINATION bin
