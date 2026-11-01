@@ -32,10 +32,10 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libboost-dev libtorrent-rasterbar-dev pkg-config libssl-dev
+          sudo apt-get install -y build-essential cmake libboost-dev libtorrent-rasterbar-dev pkg-config libssl-dev qt6-base-dev
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DTB_ENABLE_GUI=ON -DTB_REQUIRE_GUI=ON
 
       - name: Build
         run: cmake --build build --parallel
@@ -77,10 +77,11 @@ jobs:
             ${{ matrix.prefix }}-libtorrent-rasterbar
             ${{ matrix.prefix }}-pkg-config
             ${{ matrix.prefix }}-openssl
+            ${{ matrix.prefix }}-qt6-base
 
       - name: Configure
         shell: msys2 {0}
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G "MSYS Makefiles"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G "MSYS Makefiles" -DTB_ENABLE_GUI=ON -DTB_REQUIRE_GUI=ON -DCMAKE_PREFIX_PATH="$(cygpath -m "$MINGW_PREFIX")"
 
       - name: Build
         shell: msys2 {0}
@@ -106,10 +107,32 @@ jobs:
           persist-credentials: false
 
       - name: Install dependencies
-        run: brew install boost cmake libtorrent-rasterbar pkg-config openssl@3
+        run: brew install boost cmake libtorrent-rasterbar pkg-config openssl@3 qt
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) -DCMAKE_PREFIX_PATH=$(brew --prefix qt) -DTB_ENABLE_GUI=ON -DTB_REQUIRE_GUI=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: cd build && ctest --output-on-failure --no-tests=error
+
+  build-cli-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libboost-dev libtorrent-rasterbar-dev pkg-config libssl-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DTB_ENABLE_GUI=OFF
 
       - name: Build
         run: cmake --build build --parallel

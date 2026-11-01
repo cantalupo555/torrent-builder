@@ -25,6 +25,35 @@ else()
     add_compile_options(-O2)
 endif()
 
+# Qt6 (optional desktop GUI). NOT vendored via FetchContent — too large.
+# CI / developers install Qt6 system-wide (apt install qt6-base-dev, brew,
+# MSYS2 mingw-w64-<prefix>-qt6-base). The option defaults ON; the
+# torrent_builder_gui target is skipped when Qt6 is not found. Force OFF
+# with -DTB_ENABLE_GUI=OFF for CLI-only build matrices, or set
+# -DTB_REQUIRE_GUI=ON to turn a missing Qt6 into a configure error.
+option(TB_ENABLE_GUI "Build the Qt6 desktop GUI (requires Qt6)" ON)
+option(TB_REQUIRE_GUI "Fail configuration when Qt6 is required but unavailable" OFF)
+
+# The guards live in a standalone module so their fatal branches stay covered
+# by script-mode tests (tests/cmake/test_gui_*.cmake, registered below).
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/gui_checks.cmake)
+tb_validate_gui_options(${TB_REQUIRE_GUI} ${TB_ENABLE_GUI})
+
+if(TB_ENABLE_GUI)
+    find_package(Qt6 QUIET COMPONENTS Widgets Gui Core)
+    if(Qt6_FOUND)
+        message(STATUS "Qt6 ${Qt6_VERSION} found — GUI target enabled.")
+    else()
+        # Fatal only when CI (or a packager) explicitly requires the GUI.
+        tb_require_qt_or_fail(${TB_REQUIRE_GUI})
+        # No cache FORCE here: an explicit -DTB_ENABLE_GUI=ON must survive
+        # re-configure after the user installs Qt6. The target block below
+        # guards on TB_ENABLE_GUI AND Qt6_FOUND, so nothing breaks meanwhile.
+        message(STATUS "Qt6 not found — GUI target skipped this configure run.")
+        message(STATUS "Install Qt6 and re-run cmake to enable torrent_builder_gui.")
+    endif()
+endif()
+
 # Find OpenSSL (required for SHA-256 computation)
 find_package(OpenSSL REQUIRED)
 
@@ -83,24 +112,6 @@ FetchContent_Declare(
     URL https://github.com/nlohmann/json/archive/refs/tags/v3.11.3.tar.gz
 )
 FetchContent_MakeAvailable(nlohmann_json)
-
-# Qt6 (optional desktop GUI). NOT vendored via FetchContent — too large.
-# CI / developers install Qt6 system-wide (apt install qt6-base-dev, brew,
-# Chocolatey). Default is ON when Qt6 is found, OFF otherwise. Force OFF
-# with -DTB_ENABLE_GUI=OFF for CLI-only build matrices.
-option(TB_ENABLE_GUI "Build the Qt6 desktop GUI (requires Qt6)" ON)
-if(TB_ENABLE_GUI)
-    find_package(Qt6 QUIET COMPONENTS Widgets Gui Core)
-    if(Qt6_FOUND)
-        message(STATUS "Qt6 ${Qt6_VERSION} found — GUI target enabled.")
-    else()
-        # No cache FORCE here: an explicit -DTB_ENABLE_GUI=ON must survive
-        # re-configure after the user installs Qt6. The target block below
-        # guards on TB_ENABLE_GUI AND Qt6_FOUND, so nothing breaks meanwhile.
-        message(STATUS "Qt6 not found — GUI target skipped this configure run.")
-        message(STATUS "Install Qt6 and re-run cmake to enable torrent_builder_gui.")
-    endif()
-endif()
 
 # ─── Core library ────────────────────────────────────────────
 add_library(torrent_builder_core STATIC
@@ -183,7 +194,21 @@ if(TB_ENABLE_GUI AND Qt6_FOUND)
         gui/qt_output_sink.cpp
     )
 
-    qt_add_executable(torrent_builder_gui ${GUI_SOURCES})
+    # MACOSX_BUNDLE is ignored outside Apple platforms. On macOS it makes the
+    # target a build/torrent_builder_gui.app bundle, matching the README and
+    # the macdeployqt packaging planned for the release workflow.
+    qt_add_executable(torrent_builder_gui MACOSX_BUNDLE ${GUI_SOURCES})
+
+    # The README and release packaging assume a macOS .app bundle. Fail loudly
+    # if the bundle keyword is ever dropped instead of shipping a bare binary.
+    if(APPLE)
+        get_target_property(tb_gui_macosx_bundle torrent_builder_gui MACOSX_BUNDLE)
+        if(NOT tb_gui_macosx_bundle)
+            message(FATAL_ERROR
+                "torrent_builder_gui must be a macOS app bundle; "
+                "the documented run and install paths expect .app.")
+        endif()
+    endif()
 
     target_include_directories(torrent_builder_gui PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -206,8 +231,23 @@ if(TB_ENABLE_GUI AND Qt6_FOUND)
     message(STATUS "torrent_builder_gui target configured.")
 endif()
 
+# CI configures with TB_REQUIRE_GUI=ON: a missing target must not silently
+# drop the GUI (and its smoke test) from the build.
+if(TB_REQUIRE_GUI AND NOT TARGET torrent_builder_gui)
+    message(FATAL_ERROR
+        "TB_REQUIRE_GUI=ON, but the torrent_builder_gui target was not created.")
+endif()
+
 # ─── Tests ───────────────────────────────────────────────────
 enable_testing()
+
+if(TARGET torrent_builder_gui AND UNIX AND NOT APPLE)
+    add_test(NAME gui_smoke COMMAND torrent_builder_gui --smoke-test)
+    set_tests_properties(gui_smoke PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 30
+    )
+endif()
 
 file(GLOB TEST_SOURCES tests/*.cpp)
 if(TEST_SOURCES)
@@ -279,6 +319,74 @@ add_test(NAME cmake_version_fallback
     COMMAND ${CMAKE_COMMAND}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_version_fallback.cmake)
 
+add_test(NAME cmake_gui_require_without_enable
+    COMMAND ${CMAKE_COMMAND}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_require_without_enable.cmake)
+
+add_test(NAME cmake_gui_require_missing_qt
+    COMMAND ${CMAKE_COMMAND}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_require_missing_qt.cmake)
+
+add_test(NAME cmake_gui_optional_missing_qt
+    COMMAND ${CMAKE_COMMAND}
+        -DTEST_GENERATOR=${CMAKE_GENERATOR}
+        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
+        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
+        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_optional_missing_qt.cmake)
+
+add_test(NAME cmake_gui_wiring_invalid_combo
+    COMMAND ${CMAKE_COMMAND}
+        -DTEST_GENERATOR=${CMAKE_GENERATOR}
+        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
+        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
+        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_wiring_invalid_combo.cmake)
+
+add_test(NAME cmake_gui_wiring_missing_qt
+    COMMAND ${CMAKE_COMMAND}
+        -DTEST_GENERATOR=${CMAKE_GENERATOR}
+        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
+        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
+        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_wiring_missing_qt.cmake)
+
+add_test(NAME cmake_gui_defaults
+    COMMAND ${CMAKE_COMMAND}
+        -DTEST_GENERATOR=${CMAKE_GENERATOR}
+        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
+        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
+        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_defaults.cmake)
+
+add_test(NAME cmake_gui_disabled_with_qt
+    COMMAND ${CMAKE_COMMAND}
+        -DTEST_GENERATOR=${CMAKE_GENERATOR}
+        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
+        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
+        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_disabled_with_qt.cmake)
+
+add_test(NAME cmake_gui_prefix_path_list
+    COMMAND ${CMAKE_COMMAND}
+        -DTEST_GENERATOR=${CMAKE_GENERATOR}
+        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
+        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
+        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_prefix_path_list.cmake)
+
 # ─── Installation ────────────────────────────────────────────
 install(TARGETS torrent_builder
     RUNTIME DESTINATION bin
@@ -286,6 +394,7 @@ install(TARGETS torrent_builder
 
 if(TARGET torrent_builder_gui)
     install(TARGETS torrent_builder_gui
+        BUNDLE DESTINATION .
         RUNTIME DESTINATION bin
     )
 endif()
