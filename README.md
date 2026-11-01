@@ -79,7 +79,7 @@ cmake .. -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
 
 ### GUI (Qt6, optional)
 
-The Qt6 desktop GUI is built when Qt6 is available. `TB_ENABLE_GUI` defaults to `ON`; the target is skipped when Qt6 is missing. Set `-DTB_REQUIRE_GUI=ON` to make configuration fail instead (used by CI). If configuration fails for missing Qt, install Qt6 or reconfigure with `-DTB_ENABLE_GUI=OFF` for a CLI-only build; `TB_REQUIRE_GUI=ON` requires `TB_ENABLE_GUI=ON`.
+The Qt6 desktop GUI is built when Qt6 is available. `TB_ENABLE_GUI` defaults to `ON`; the target is skipped when Qt6 is missing. Set `-DTB_REQUIRE_GUI=ON` to make configuration fail instead (used by CI). If configuration fails for missing Qt, install Qt6 or reconfigure with `-DTB_ENABLE_GUI=OFF -DTB_REQUIRE_GUI=OFF` for a CLI-only build; `TB_REQUIRE_GUI=ON` requires `TB_ENABLE_GUI=ON`.
 
 Prerequisites:
 
@@ -100,11 +100,16 @@ On macOS, include both the OpenSSL and Qt prefixes:
 cmake -B build -DTB_ENABLE_GUI=ON -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) -DCMAKE_PREFIX_PATH=$(brew --prefix qt)
 ```
 
-The executable is `build/torrent_builder_gui` on Linux/Windows, or a `build/torrent_builder_gui.app` bundle on macOS. Run it with:
+The executable is `build/torrent_builder_gui` on Linux, `build/torrent_builder_gui.exe` on Windows, or a `build/torrent_builder_gui.app` bundle on macOS. Run it with:
 
 ```bash
-# Linux / Windows
+# Linux
 ./build/torrent_builder_gui
+```
+
+```bash
+# Windows (MSYS2 shell)
+./build/torrent_builder_gui.exe
 ```
 
 ```bash

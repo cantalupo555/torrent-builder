@@ -118,6 +118,28 @@ jobs:
       - name: Test
         run: cd build && ctest --output-on-failure --no-tests=error
 
+  build-cli-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libboost-dev libtorrent-rasterbar-dev pkg-config libssl-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DTB_ENABLE_GUI=OFF
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: cd build && ctest --output-on-failure --no-tests=error
+
   validate-schemas:
     runs-on: ubuntu-latest
     steps:

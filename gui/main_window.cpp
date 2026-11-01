@@ -111,8 +111,15 @@ void run_creation(TorrentConfig config, QtOutputSink* sink) {
         // and logs a translatable message in on_creation_finished().
         QMetaObject::invokeMethod(sink, &QtOutputSink::finished, Qt::QueuedConnection);
     } catch (const std::exception& e) {
-        QMetaObject::invokeMethod(sink, "failed", Qt::QueuedConnection,
-            Q_ARG(QString, QString::fromUtf8(e.what())));
+        // Functor overload (Qt >= 5.10): the signal is checked at compile
+        // time, unlike the string-based form, and it avoids the
+        // member-pointer-plus-argument overload missing in Qt 6.4. Qt runs
+        // the lambda in the sink's thread, so the emit reaches the UI slots
+        // there.
+        const QString message = QString::fromUtf8(e.what());
+        QMetaObject::invokeMethod(
+            sink, [sink, message] { emit sink->failed(message); },
+            Qt::QueuedConnection);
     }
 }
 
