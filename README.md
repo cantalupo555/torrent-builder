@@ -296,6 +296,8 @@ Optional fields (`comment`, `creation_date`, `created_by`, `source`, `entropy`) 
 
 > **Note:** `--version` now shows the software version. For torrent format version, use `--torrent-version` or `-t`.
 
+> **Note:** `--torrent-version` accepts only `1`, `2` or `3`; other values are rejected. Trackers accept `http`, `https` and `udp` URLs; web seeds accept `http` and `https`. Malformed URLs (empty host, whitespace or an invalid port) are rejected in every frontend.
+
 ### Inspect Options
 
 ```
