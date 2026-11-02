@@ -219,7 +219,56 @@ TEST(IsValidUrl, LeadingWhitespace) {
 }
 
 TEST(IsValidUrl, TrailingWhitespace) {
-    EXPECT_TRUE(utils::is_valid_url("http://example.com "));
+    EXPECT_FALSE(utils::is_valid_url("http://example.com "));
+}
+
+TEST(IsValidUrl, RejectsEmbeddedWhitespace) {
+    EXPECT_FALSE(utils::is_valid_url("https://host/announce with space"));
+}
+
+TEST(IsValidUrl, RejectsEmptyHostAuthorities) {
+    EXPECT_FALSE(utils::is_valid_url("http://:8080/announce"));
+    EXPECT_FALSE(utils::is_valid_url("http://user@:8080/announce"));
+    EXPECT_FALSE(utils::is_valid_url("http:///files/"));
+}
+
+TEST(IsValidUrl, RejectsMalformedPorts) {
+    EXPECT_FALSE(utils::is_valid_url("http://host:abc/announce"));
+    EXPECT_FALSE(utils::is_valid_url("http://host:/announce"));
+    EXPECT_FALSE(utils::is_valid_url("http://host:99999/announce"));
+    EXPECT_FALSE(utils::is_valid_url("http://host:0/announce"));
+}
+
+TEST(IsValidUrl, RejectsControlCharacters) {
+    EXPECT_FALSE(utils::is_valid_url(std::string("http://exa") + '\x01' + "mple.com"));
+}
+
+TEST(IsValidUrl, RejectsPortAboveRange) {
+    EXPECT_FALSE(utils::is_valid_url("http://host:65536/announce"));
+}
+
+TEST(IsValidUrl, AcceptsIpv6AndValidPorts) {
+    EXPECT_TRUE(utils::is_valid_url("http://[::1]:8080/announce"));
+    EXPECT_TRUE(utils::is_valid_url("http://host:65535/announce"));
+}
+
+TEST(IsValidUrl, RejectsMalformedIpv6Authorities) {
+    EXPECT_FALSE(utils::is_valid_url("http://[::1]garbage"));
+    EXPECT_FALSE(utils::is_valid_url("http://[::1]:abc"));
+}
+
+TEST(IsValidWebSeedUrl, AcceptsHttpAndHttps) {
+    EXPECT_TRUE(utils::is_valid_web_seed_url("http://mirror.example/files/"));
+    EXPECT_TRUE(utils::is_valid_web_seed_url("https://mirror.example/files/"));
+}
+
+TEST(IsValidWebSeedUrl, RejectsUdp) {
+    EXPECT_FALSE(utils::is_valid_web_seed_url("udp://mirror.example:80/files/"));
+}
+
+TEST(IsValidWebSeedUrl, RejectsInvalidStructure) {
+    EXPECT_FALSE(utils::is_valid_web_seed_url("http://:8080/files/"));
+    EXPECT_FALSE(utils::is_valid_web_seed_url("http://host:abc/files/"));
 }
 
 TEST(SanitizePath, Spaces) {

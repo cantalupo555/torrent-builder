@@ -43,8 +43,8 @@
           "description": "Web seed URLs.",
           "items": {
             "type": "string",
-            "pattern": "^([hH][tT][tT][pP][sS]?|[uU][dD][pP])://.+$",
-            "description": "Web seed URL. Must be http://, https://, or udp://."
+            "pattern": "^([hH][tT][tT][pP][sS]?)://.+$",
+            "description": "Web seed URL. Must be http:// or https://."
           }
         },
         "private": {

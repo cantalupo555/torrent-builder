@@ -149,6 +149,7 @@ add_library(torrent_builder_config STATIC
     src/preset.cpp
     src/batch.cpp
     src/tracker_rules.cpp
+    src/creation_planner.cpp
 )
 
 target_include_directories(torrent_builder_config PUBLIC

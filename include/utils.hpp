@@ -70,11 +70,26 @@ int piece_size_for_target_count(int64_t total_size, int target_piece_count);
 int64_t compute_content_size(const std::filesystem::path &path);
 
 /**
- * @brief Check if a URL has a valid scheme (http, https, or udp).
+ * @brief Check if a tracker URL is structurally valid.
+ *
+ * Accepts http, https and udp schemes, requires a non-empty host, rejects
+ * whitespace/control characters and validates the port when present.
+ *
  * @param url The URL string to validate.
- * @return true if the URL matches ^(http|https|udp)://.+$ (case-insensitive).
+ * @return true when the URL is a valid tracker URL.
  */
 bool is_valid_url(const std::string &url);
+
+/**
+ * @brief Check if a web seed URL is structurally valid.
+ *
+ * Web seeds support http and https only. Host, whitespace and port rules are
+ * the same as is_valid_url().
+ *
+ * @param url The URL string to validate.
+ * @return true when the URL is a valid web seed URL.
+ */
+bool is_valid_web_seed_url(const std::string &url);
 
 /**
  * @brief Trim whitespace, strip surrounding quotes, and remove escape backslashes.

@@ -28,7 +28,7 @@ ConfigValues parse_yaml_config(const YAML::Node& node)
         std::vector<std::string> seeds;
         for (const auto& s : node["web_seeds"]) {
             auto url = s.as<std::string>();
-            if (!utils::is_valid_url(url)) {
+            if (!utils::is_valid_web_seed_url(url)) {
                 throw std::runtime_error("Invalid web seed URL in config: " + url);
             }
             seeds.push_back(url);

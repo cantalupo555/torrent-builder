@@ -1,17 +1,18 @@
 #include "torrent_creator.hpp"
+#include "creation_planner.hpp"
 #include "logger.hpp"
 #include "constants.hpp"
 #include "utils.hpp"
 #include "terminal.hpp"
 #include "version.hpp"
-#include "preset.hpp"
 #include "batch.hpp"
-#include "tracker_rules.hpp"
 #include <iostream>
 #include <vector>
+#include <memory>
 #include <optional>
 #include <cxxopts.hpp>
 #include <filesystem>
+#include <charconv>
 #include <cmath>
 #include <random>
 #include <chrono>
@@ -25,21 +26,10 @@
 #include "torrent_inspector.hpp"
 #include "torrent_modifier.hpp"
 #include "torrent_checker.hpp"
-#include "season_pack.hpp"
 #include "output.hpp"
 #include "updater.hpp"
 
 namespace fs = std::filesystem;
-
-// Public open trackers from the NewTrackon list. Provide redundancy for peer discovery when no private tracker is configured.
-const std::vector<std::string> default_trackers = {
-    "udp://open.stealth.si:80/announce",         "udp://tracker.opentrackr.org:1337/announce",
-    "udp://tracker.torrent.eu.org:451/announce", "udp://explodie.org:6969/announce",
-    "udp://tracker.cyberia.is:6969/announce",    "udp://retracker.hotplug.ru:2710/announce"};
-
-// List of allowed piece sizes (in KB). These are powers of 2
-const std::vector<int> allowed_piece_sizes(AllowedPieceSizes::values.begin(),
-                                           AllowedPieceSizes::values.end());
 
 namespace
 {
@@ -107,9 +97,21 @@ OverwriteDecision prompt_overwrite(const std::string &filepath)
 }
 } // namespace
 
-// Get torrent configuration from user input (interactive mode)
-TorrentConfig get_interactive_config()
+// Get torrent configuration from user input (interactive mode). Answers become
+// a CreationRequest so the wizard shares resolution with the CLI and the GUI.
+TorrentConfig get_interactive_config(const cxxopts::ParseResult &result)
 {
+    // Load an explicit rules file before prompting: a typo should not cost the
+    // user the whole questionnaire. Default-path discovery stays CLI-only.
+    std::shared_ptr<TrackerRulesDatabase> rules;
+    if (result.count("rules-file"))
+    {
+        auto db = std::make_shared<TrackerRulesDatabase>();
+        db->load(TrackerRulesDatabase::find_rules_file(
+            fs::path(result["rules-file"].as<std::string>())));
+        rules = std::move(db);
+    }
+
     print_info("=== TORRENT CONFIGURATION ===\n");
 
     // Get input path
@@ -205,24 +207,24 @@ TorrentConfig get_interactive_config()
 get_version: // Label to jump to if overwrite is 'n' or empty
     // Get torrent version
     std::string version;
-    TorrentVersion tv = TorrentVersion::V1; // Initialize tv here
+    int version_number = 3;
     while (true)
     {
         print_info("Torrent version (1-v1, 2-v2, 3-Hybrid) [3]: ");
         std::getline(std::cin, version);
         if (version.empty() || version == "3")
         {
-            tv = TorrentVersion::HYBRID;
+            version_number = 3;
             break;
         }
         else if (version == "1")
         {
-            tv = TorrentVersion::V1;
+            version_number = 1;
             break;
         }
         else if (version == "2")
         {
-            tv = TorrentVersion::V2;
+            version_number = 2;
             break;
         }
         else
@@ -243,7 +245,7 @@ get_version: // Label to jump to if overwrite is 'n' or empty
     std::vector<std::string> trackers;
     if (prompt_yes_no("Use default trackers?"))
     {
-        trackers.insert(trackers.end(), default_trackers.begin(), default_trackers.end());
+        trackers.insert(trackers.end(), Defaults::trackers.begin(), Defaults::trackers.end());
     }
 
     if (prompt_yes_no("Add custom trackers?"))
@@ -283,9 +285,9 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         if (seed.empty())
             break;
 
-        if (!utils::is_valid_url(seed))
+        if (!utils::is_valid_web_seed_url(seed))
         {
-            print_info("Error: Invalid web seed URL. Must start with http://, https://, or udp://\n");
+            print_info("Error: Invalid web seed URL. Must start with http:// or https://\n");
             continue;
         }
 
@@ -302,10 +304,10 @@ get_version: // Label to jump to if overwrite is 'n' or empty
             print_info("Piece size in KB: \n");
 
             std::string valid_options = "Valid options: ";
-            for (size_t i = 0; i < allowed_piece_sizes.size(); ++i)
+            for (size_t i = 0; i < AllowedPieceSizes::values.size(); ++i)
             {
-                valid_options += std::to_string(allowed_piece_sizes[i]);
-                if (i < allowed_piece_sizes.size() - 1)
+                valid_options += std::to_string(AllowedPieceSizes::values[i]);
+                if (i < AllowedPieceSizes::values.size() - 1)
                 {
                     valid_options += ", ";
                 }
@@ -322,9 +324,9 @@ get_version: // Label to jump to if overwrite is 'n' or empty
             try
             {
                 int ps = std::stoi(piece_size_str);
-                if (std::ranges::contains(allowed_piece_sizes, ps))
+                if (std::ranges::contains(AllowedPieceSizes::values, ps))
                 {
-                    piece_size = ps * 1024;
+                    piece_size = ps; // KB; the planner converts to bytes
                     break;
                 }
                 else
@@ -347,6 +349,9 @@ get_version: // Label to jump to if overwrite is 'n' or empty
 
     // Get target piece count (only if custom piece size was not set)
     std::optional<int> target_piece_count = std::nullopt;
+    // Reuse the size scanned for the preview so the planner does not walk the
+    // content tree a second time.
+    std::optional<int64_t> content_size_hint;
     if (!piece_size && prompt_yes_no("Set target piece count?"))
     {
         while (true)
@@ -369,8 +374,8 @@ get_version: // Label to jump to if overwrite is 'n' or empty
                     if (total_size > 0) {
                         int resolved = utils::piece_size_for_target_count(total_size, tpc);
                         int64_t resulting_pieces = (total_size + resolved - 1) / resolved;
-                        piece_size = resolved;
                         target_piece_count = tpc;
+                        content_size_hint = total_size;
                         print_info("Target: " + std::to_string(tpc) + " pieces -> "
                             + std::to_string(resolved / 1024) + " KB piece size"
                             + " (yields ~" + std::to_string(resulting_pieces) + " pieces)\n");
@@ -397,12 +402,8 @@ get_version: // Label to jump to if overwrite is 'n' or empty
         }
     }
 
-    // Get creator (default: "Torrent Builder", user can choose to omit)
-    std::optional<std::string> creator_str = "Torrent Builder";
-    if (prompt_yes_no("Omit creator from torrent?"))
-    {
-        creator_str = std::nullopt;
-    }
+    // Creator defaults to "Torrent Builder" unless the user opts out.
+    const bool omit_creator = prompt_yes_no("Omit creator from torrent?");
 
     // Get optional custom torrent name
     std::optional<std::string> torrent_name = std::nullopt;
@@ -428,9 +429,8 @@ get_version: // Label to jump to if overwrite is 'n' or empty
     // Get entropy flag
     bool entropy = prompt_yes_no("Add random entropy for unique info hash?");
 
-    // Compile glob patterns to regex once at config time. glob_to_regex() escapes
-    // all metacharacters so regex_error is unreachable — the catch is defense-in-depth.
-    std::vector<std::regex> exclude_regex_compiled;
+    // Raw glob patterns; the planner compiles them and applies built-in excludes.
+    std::vector<std::string> exclude_patterns;
     if (prompt_yes_no("Exclude files by pattern?"))
     {
         while (true)
@@ -440,19 +440,11 @@ get_version: // Label to jump to if overwrite is 'n' or empty
             std::getline(std::cin, pattern);
             if (pattern.empty())
                 break;
-            try
-            {
-                exclude_regex_compiled.push_back(utils::glob_to_regex(pattern));
-            }
-            catch (const std::regex_error &)
-            {
-                print_info(std::string("Error: Invalid glob pattern: ") + pattern + "\n");
-                log_message("Invalid glob pattern entered: " + pattern, LogLevel::WARNING);
-            }
+            exclude_patterns.push_back(pattern);
         }
     }
 
-    std::vector<std::regex> include_regex_compiled;
+    std::vector<std::string> include_patterns;
     if (prompt_yes_no("Include only matching files?"))
     {
         while (true)
@@ -462,15 +454,7 @@ get_version: // Label to jump to if overwrite is 'n' or empty
             std::getline(std::cin, pattern);
             if (pattern.empty())
                 break;
-            try
-            {
-                include_regex_compiled.push_back(utils::glob_to_regex(pattern));
-            }
-            catch (const std::regex_error &)
-            {
-                print_info(std::string("Error: Invalid glob pattern: ") + pattern + "\n");
-                log_message("Invalid glob pattern entered: " + pattern, LogLevel::WARNING);
-            }
+            include_patterns.push_back(pattern);
         }
     }
 
@@ -483,447 +467,191 @@ get_version: // Label to jump to if overwrite is 'n' or empty
     if (use_builtin_excludes) {
         log_message("Applying built-in exclude patterns (interactive)", LogLevel::INFO);
     }
-    exclude_regex_compiled = utils::apply_builtin_excludes(exclude_regex_compiled, use_builtin_excludes);
 
-    return TorrentConfig(path, output, trackers, tv,
-                         comment.empty() ? std::nullopt : std::optional<std::string>(comment),
-                         is_private, web_seeds, piece_size, creator_str, torrent_name,
-                         include_creation_date, source, entropy,
-                         std::move(exclude_regex_compiled), std::move(include_regex_compiled),
-                         false, target_piece_count
-    );
+    CreationRequest request;
+    request.input = fs::path(path);
+    request.output = fs::path(output);
+    request.fail_on_season_warning = result.count("fail-on-season-warning") > 0;
+
+    request.values.trackers = trackers;
+    request.values.web_seeds = web_seeds;
+    request.values.torrent_version = version_number;
+    request.values.comment =
+        comment.empty() ? std::nullopt : std::optional<std::string>(comment);
+    request.values.is_private = is_private;
+    request.values.piece_size = piece_size;
+    request.values.target_piece_count = target_piece_count;
+    request.content_size_hint = content_size_hint;
+    request.values.no_creator = omit_creator;
+    request.values.name = torrent_name;
+    request.values.no_date = !include_creation_date;
+    request.values.source = source;
+    request.values.entropy = entropy;
+    request.values.exclude_patterns = exclude_patterns;
+    request.values.include_patterns = include_patterns;
+    request.values.builtin_excludes = use_builtin_excludes;
+
+    return CreationPlanner(PlannerResources{nullptr, std::move(rules)}).plan(request).config;
 }
 
-// Parse command-line arguments into a TorrentConfig.
-// Returns std::nullopt if the user declines to overwrite an existing output file.
-std::optional<TorrentConfig> get_commandline_config(const cxxopts::ParseResult &result, std::string &declined_path)
+namespace
+{
+
+int parse_torrent_version(const std::string &raw)
+{
+    int value = 0;
+    const char *begin = raw.data();
+    const char *end = begin + raw.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, value);
+    if (ec != std::errc{} || ptr != end || value < 1 || value > 3)
+    {
+        throw std::runtime_error("Invalid torrent version: " + raw + " (expected 1, 2 or 3)");
+    }
+    return value;
+}
+
+} // namespace
+
+// Map command-line flags into a CreationRequest and let CreationPlanner resolve
+// the configuration. Returns std::nullopt when the user declines to overwrite
+// an existing output file.
+std::optional<CreationPlan> get_commandline_config(const cxxopts::ParseResult &result,
+                                                   std::string &declined_path)
 {
     if (!result.count("path"))
     {
         throw std::runtime_error("Path is required");
     }
 
-    std::string input_path = result["path"].as<std::string>();
+    CreationRequest request;
+    request.input = fs::path(result["path"].as<std::string>());
 
-    ConfigValues preset_values;
-    if (result.count("preset"))
-    {
-        std::optional<fs::path> preset_file;
-        if (result.count("preset-file")) {
-            preset_file = result["preset-file"].as<std::string>();
-        }
-        PresetLoader loader;
-        auto path = PresetLoader::find_preset_file(preset_file);
-        loader.load(path);
-        preset_values = loader.resolve(result["preset"].as<std::string>());
-        log_message("Applied preset values for: " + result["preset"].as<std::string>(), LogLevel::INFO);
-    }
-
-    // Get trackers (before output, needed for auto-naming)
-    std::vector<std::string> trackers;
-    if (!result.count("tracker") && !result.count("default-trackers") && preset_values.trackers) {
-        trackers = *preset_values.trackers;
-    } else {
-        bool use_default = result.count("default-trackers") > 0;
-        if (use_default)
-        {
-            trackers.insert(trackers.end(), default_trackers.begin(), default_trackers.end());
-        }
-        if (result.count("tracker"))
-        {
-            std::vector<std::string> custom_trackers = result["tracker"].as<std::vector<std::string>>();
-            for (const auto &tracker : custom_trackers)
-            {
-                if (!utils::is_valid_url(tracker))
-                {
-                    throw std::runtime_error("Invalid tracker URL: " + tracker);
-                }
-                if (std::ranges::contains(trackers, tracker))
-                {
-                    throw std::runtime_error("Duplicate tracker URL: " + tracker);
-                }
-            }
-            trackers.insert(trackers.end(), custom_trackers.begin(), custom_trackers.end());
-        }
-    }
-
-    // Resolve output path (optional — auto-generate if not provided)
-    std::string output_path;
-    bool auto_named = false;
     if (result.count("output"))
     {
-        output_path = result["output"].as<std::string>();
+        request.output = fs::path(result["output"].as<std::string>());
+        if (request.output->empty())
+        {
+            throw std::runtime_error("--output cannot be empty");
+        }
     }
     else
     {
-        auto_named = true;
-        bool skip_prefix = result.count("skip-prefix") > 0;
-        int tracker_index = result["tracker-index"].as<int>();
-        fs::path output_dir;
+        request.skip_prefix = result.count("skip-prefix") > 0;
+        request.tracker_index = result["tracker-index"].as<int>();
         if (result.count("output-dir"))
         {
-            output_dir = result["output-dir"].as<std::string>();
-            if (!output_dir.empty())
-            {
-                std::error_code ec;
-                if (fs::exists(output_dir, ec))
-                {
-                    if (!fs::is_directory(output_dir))
-                        throw std::runtime_error("Output directory is not a directory: " + output_dir.string());
-                }
-                else
-                {
-                    fs::create_directories(output_dir, ec);
-                    if (!ec)
-                        log_message("Created output directory: " + output_dir.string(), LogLevel::INFO);
-                    if (ec)
-                        throw std::runtime_error("Failed to create output directory: " + output_dir.string()
-                                                 + " (" + ec.message() + ")");
-                }
-            }
+            request.output_dir = fs::path(result["output-dir"].as<std::string>());
         }
-
-        if (!trackers.empty() && (tracker_index < 0 || tracker_index >= static_cast<int>(trackers.size())))
-        {
-            log_message("Tracker index " + std::to_string(tracker_index)
-                        + " out of range (0-" + std::to_string(static_cast<int>(trackers.size()) - 1)
-                        + "), using first tracker", LogLevel::WARNING);
-            tracker_index = 0;
-        }
-
-        output_path = utils::generate_auto_output_path(input_path, trackers, skip_prefix,
-                                                        tracker_index, output_dir);
-        log_message("Auto-generated output path: " + output_path, LogLevel::INFO);
     }
 
-    if (!auto_named && fs::exists(output_path))
+    if (result.count("preset"))
     {
-        if (prompt_overwrite(output_path) == OverwriteDecision::Declined)
+        request.preset = result["preset"].as<std::string>();
+    }
+    if (result.count("preset-file"))
+    {
+        request.preset_file = fs::path(result["preset-file"].as<std::string>());
+    }
+    if (result.count("rules-file"))
+    {
+        request.rules_file = fs::path(result["rules-file"].as<std::string>());
+    }
+
+    request.use_default_trackers = result.count("default-trackers") > 0;
+    request.fail_on_season_warning = result.count("fail-on-season-warning") > 0;
+    // The CLI keeps discovering ./rules.yaml and the XDG/home fallbacks.
+    request.discover_rules = true;
+
+    if (result.count("tracker"))
+    {
+        request.values.trackers = result["tracker"].as<std::vector<std::string>>();
+    }
+    if (result.count("webseed"))
+    {
+        request.values.web_seeds = result["webseed"].as<std::vector<std::string>>();
+    }
+    if (result.count("torrent-version"))
+    {
+        request.values.torrent_version =
+            parse_torrent_version(result["torrent-version"].as<std::string>());
+    }
+    if (result.count("comment"))
+    {
+        request.values.comment = result["comment"].as<std::string>();
+    }
+    if (result.count("name"))
+    {
+        request.values.name = result["name"].as<std::string>();
+    }
+    if (result.count("source"))
+    {
+        request.values.source = result["source"].as<std::string>();
+    }
+    if (result.count("piece-size"))
+    {
+        request.values.piece_size = result["piece-size"].as<int>();
+    }
+    if (result.count("target-piece-count"))
+    {
+        request.values.target_piece_count = result["target-piece-count"].as<int>();
+    }
+    if (result.count("no-creator"))
+    {
+        request.values.no_creator = true;
+    }
+    if (result.count("no-date"))
+    {
+        request.values.no_date = true;
+    }
+    if (result.count("entropy"))
+    {
+        request.values.entropy = true;
+    }
+    if (result.count("exclude"))
+    {
+        request.values.exclude_patterns = result["exclude"].as<std::vector<std::string>>();
+    }
+    if (result.count("include"))
+    {
+        request.values.include_patterns = result["include"].as<std::vector<std::string>>();
+    }
+    if (result.count("no-builtin-excludes"))
+    {
+        request.values.builtin_excludes = false;
+    }
+    if (result.count("private"))
+    {
+        request.values.is_private = true;
+    }
+
+    // Resolve an explicit preset before prompting: a typo in --preset-file must
+    // be reported before the overwrite question, matching the old order. The
+    // loaded instance is injected so plan() does not read the file twice.
+    PlannerResources resources;
+    if (request.preset)
+    {
+        auto presets = std::make_shared<PresetLoader>();
+        presets->load(PresetLoader::find_preset_file(request.preset_file));
+        // Resolve now so an unknown preset name is reported before the prompt.
+        // plan() resolves again from the injected loader (a cheap map lookup).
+        presets->resolve(*request.preset);
+        resources.presets = std::move(presets);
+    }
+
+    // Validate cheap request-level values before asking about overwrite, so an
+    // invalid tracker/version/piece size is reported even when the output exists.
+    CreationPlanner::validate(request);
+
+    if (request.output && !request.output->empty() && fs::exists(*request.output))
+    {
+        if (prompt_overwrite(request.output->string()) == OverwriteDecision::Declined)
         {
-            declined_path = output_path;
+            declined_path = request.output->string();
             return std::nullopt;
         }
     }
 
-    // Get torrent version
-    std::string version_str = "3";
-    if (result.count("torrent-version")) {
-        version_str = result["torrent-version"].as<std::string>();
-    } else if (preset_values.torrent_version) {
-        version_str = std::to_string(*preset_values.torrent_version);
-    }
-    TorrentVersion tv = TorrentVersion::V1;
-    if (version_str == "2")
-        tv = TorrentVersion::V2;
-    else if (version_str == "3")
-        tv = TorrentVersion::HYBRID;
-
-    // Get optional comment
-    std::optional<std::string> comment = std::nullopt;
-    if (result.count("comment"))
-    {
-        comment = result["comment"].as<std::string>();
-    }
-    else if (preset_values.comment)
-    {
-        comment = preset_values.comment;
-    }
-
-    // Get optional torrent name
-    std::optional<std::string> torrent_name = std::nullopt;
-    if (result.count("name")) {
-        torrent_name = result["name"].as<std::string>();
-        if (torrent_name->find_first_not_of(" \t\n\r") == std::string::npos) {
-            throw std::runtime_error("Torrent name cannot be empty or whitespace-only");
-        }
-    }
-    else if (preset_values.name)
-    {
-        torrent_name = preset_values.name;
-    }
-
-    // Get web seeds
-    std::vector<std::string> web_seeds;
-    if (result.count("webseed"))
-    {
-        web_seeds = result["webseed"].as<std::vector<std::string>>();
-        for (const auto &webseed : web_seeds)
-        {
-            if (!utils::is_valid_url(webseed))
-            {
-                throw std::runtime_error("Invalid web seed URL: " + webseed);
-            }
-        }
-    }
-    else if (preset_values.web_seeds)
-    {
-        web_seeds = *preset_values.web_seeds;
-    }
-
-    // Get and validate piece size
-    std::optional<int> piece_size = std::nullopt;
-    if (result.count("piece-size"))
-    {
-        int ps = result["piece-size"].as<int>();
-        // Validate using std::ranges::contains
-        if (std::ranges::contains(allowed_piece_sizes, ps))
-        {
-            piece_size = ps * 1024; // Store in bytes
-        }
-        else
-        {
-            std::string piece_sizes_str = "Error: Invalid piece size. Must be one of: ";
-            for (size_t i = 0; i < allowed_piece_sizes.size(); ++i)
-            {
-                piece_sizes_str += std::to_string(allowed_piece_sizes[i]);
-                if (i < allowed_piece_sizes.size() - 1)
-                {
-                    piece_sizes_str += ", ";
-                }
-            }
-            piece_sizes_str += " KB\n";
-            print_error(piece_sizes_str);
-            throw std::runtime_error("Invalid piece size");
-        }
-    }
-    else if (preset_values.piece_size && *preset_values.piece_size > 0)
-    {
-        int ps = *preset_values.piece_size;
-        if (std::ranges::contains(allowed_piece_sizes, ps))
-        {
-            piece_size = ps * 1024;
-        }
-    }
-
-    // Get and validate target piece count
-    std::optional<int> target_piece_count = std::nullopt;
-    if (result.count("target-piece-count"))
-    {
-        target_piece_count = result["target-piece-count"].as<int>();
-        if (*target_piece_count <= 0)
-        {
-            print_error("Error: --target-piece-count must be a positive integer\n");
-            throw std::runtime_error("Invalid target piece count");
-        }
-    }
-    else if (preset_values.target_piece_count && *preset_values.target_piece_count > 0)
-    {
-        target_piece_count = preset_values.target_piece_count;
-    }
-
-    // Mutual exclusivity: --piece-size and --target-piece-count
-    if (piece_size && target_piece_count)
-    {
-        print_error("Error: --piece-size and --target-piece-count are mutually exclusive\n");
-        throw std::runtime_error("Conflicting piece size options");
-    }
-
-    // Resolve creator (default: "Torrent Builder", unless --no-creator or preset)
-    std::optional<std::string> creator_str = "Torrent Builder";
-    if (result.count("no-creator")) {
-        creator_str = std::nullopt;
-        log_message("Creator omitted via --no-creator", LogLevel::INFO);
-    } else if (preset_values.no_creator && *preset_values.no_creator) {
-        creator_str = std::nullopt;
-        log_message("Creator omitted via preset no_creator", LogLevel::INFO);
-    } else if (preset_values.creator) {
-        creator_str = preset_values.creator;
-    }
-
-    // Resolve creation date (default: include, unless --no-date or preset)
-    bool include_creation_date = true;
-    if (result.count("no-date")) {
-        include_creation_date = false;
-        log_message("Creation date omitted via --no-date", LogLevel::INFO);
-    } else if (preset_values.no_date && *preset_values.no_date) {
-        include_creation_date = false;
-        log_message("Creation date omitted via preset no_date", LogLevel::INFO);
-    } else if (preset_values.creation_date) {
-        include_creation_date = *preset_values.creation_date;
-    }
-
-    // Get optional source string
-    std::optional<std::string> source = std::nullopt;
-    if (result.count("source"))
-    {
-        std::string source_str = result["source"].as<std::string>();
-        if (!source_str.empty())
-        {
-            source = source_str;
-        }
-    }
-    else if (preset_values.source)
-    {
-        source = preset_values.source;
-    }
-
-    // Get entropy flag
-    bool entropy = result.count("entropy") > 0;
-    if (!entropy && preset_values.entropy) {
-        entropy = *preset_values.entropy;
-    }
-
-    // Compile glob patterns to regex once at config time. glob_to_regex() escapes
-    // all metacharacters so regex_error is unreachable — the catch is defense-in-depth.
-    std::vector<std::regex> exclude_regex_compiled;
-    if (result.count("exclude"))
-    {
-        auto patterns = result["exclude"].as<std::vector<std::string>>();
-        for (const auto &p : patterns)
-        {
-            try { exclude_regex_compiled.push_back(utils::glob_to_regex(p)); }
-            catch (const std::regex_error &) { throw std::runtime_error("Invalid exclude pattern: " + p); }
-        }
-    }
-    else if (preset_values.exclude_patterns)
-    {
-        for (const auto &p : *preset_values.exclude_patterns)
-        {
-            try { exclude_regex_compiled.push_back(utils::glob_to_regex(p)); }
-            catch (const std::regex_error &) { throw std::runtime_error("Invalid exclude pattern: " + p); }
-        }
-    }
-
-    std::vector<std::regex> include_regex_compiled;
-    if (result.count("include"))
-    {
-        auto patterns = result["include"].as<std::vector<std::string>>();
-        for (const auto &p : patterns)
-        {
-            try { include_regex_compiled.push_back(utils::glob_to_regex(p)); }
-            catch (const std::regex_error &) { throw std::runtime_error("Invalid include pattern: " + p); }
-        }
-    }
-    else if (preset_values.include_patterns)
-    {
-        for (const auto &p : *preset_values.include_patterns)
-        {
-            try { include_regex_compiled.push_back(utils::glob_to_regex(p)); }
-            catch (const std::regex_error &) { throw std::runtime_error("Invalid include pattern: " + p); }
-        }
-    }
-
-    // Built-in system-file exclusions (.DS_Store, Thumbs.db, etc.) are applied
-    // by default unless --no-builtin-excludes is passed or a preset disables them.
-    bool use_builtin_excludes = true;
-    if (result.count("no-builtin-excludes")) {
-        use_builtin_excludes = false;
-        log_message("Built-in exclude patterns disabled via --no-builtin-excludes", LogLevel::INFO);
-    } else if (preset_values.builtin_excludes.has_value()) {
-        use_builtin_excludes = *preset_values.builtin_excludes;
-        log_message(std::string("Built-in exclude patterns ") +
-                    (use_builtin_excludes ? "enabled" : "disabled") + " via preset", LogLevel::INFO);
-    }
-    exclude_regex_compiled = utils::apply_builtin_excludes(exclude_regex_compiled, use_builtin_excludes);
-
-    try
-    {
-        bool is_private = result.count("private") > 0;
-        if (!is_private && preset_values.is_private) {
-            is_private = *preset_values.is_private;
-        }
-
-        TrackerRulesDatabase rules_db;
-        std::optional<fs::path> rules_file;
-        if (result.count("rules-file")) {
-            rules_file = result["rules-file"].as<std::string>();
-        }
-
-        bool rules_loaded = false;
-        try {
-            auto rules_path = TrackerRulesDatabase::find_rules_file(rules_file);
-            rules_db.load(rules_path);
-            rules_loaded = true;
-        } catch (const std::runtime_error& e) {
-            if (rules_file) {
-                throw;
-            }
-            log_message("No tracker rules file found, skipping rules enforcement", LogLevel::INFO);
-        }
-
-        // Compute content size once for target resolution and/or tracker rule enforcement
-        bool need_content_size = (target_piece_count && !piece_size)
-            || (rules_loaded && !trackers.empty());
-        int64_t content_size = need_content_size
-            ? utils::compute_content_size(input_path) : 0;
-
-        // Resolve target_piece_count → piece_size before tracker rule enforcement
-        // so that rules can naturally cap/adjust the resolved piece size.
-        if (target_piece_count && !piece_size)
-        {
-            if (content_size > 0) {
-                int resolved = utils::piece_size_for_target_count(content_size, *target_piece_count);
-                piece_size = resolved;
-                int64_t resulting_pieces = (content_size + resolved - 1) / resolved;
-                print_verbose("Target: " + std::to_string(*target_piece_count)
-                    + " pieces -> " + std::to_string(resolved / 1024) + " KB piece size"
-                    + " (yields ~" + std::to_string(resulting_pieces) + " pieces)\n");
-                log_message("Target piece count " + std::to_string(*target_piece_count)
-                    + " resolved to " + std::to_string(resolved / 1024) + " KB ("
-                    + std::to_string(resulting_pieces) + " pieces)", LogLevel::INFO);
-            } else {
-                print_info("WARNING: target_piece_count cannot be resolved (content is empty); falling back to automatic piece size\n");
-                log_message("target_piece_count " + std::to_string(*target_piece_count)
-                    + " ignored: content size is 0", LogLevel::WARNING);
-                target_piece_count = std::nullopt;
-            }
-        }
-
-        if (rules_loaded && !trackers.empty()) {
-            auto matched_rule = rules_db.find_matching_rule(trackers);
-            if (matched_rule) {
-                if (matched_rule->source && !source) {
-                    source = *matched_rule->source;
-                    log_message("Tracker rule '" + matched_rule->name + "': auto-set source to '" + *source + "'", LogLevel::INFO);
-                }
-
-                if (matched_rule->max_piece_length || matched_rule->max_torrent_size || !matched_rule->piece_length_overrides.empty()) {
-
-                    std::optional<int> current_kb;
-                    if (piece_size) current_kb = *piece_size / 1024;
-
-                    auto enforcement = rules_db.enforce(*matched_rule, content_size, current_kb);
-
-                    if (enforcement.adjusted && enforcement.adjusted_piece_length) {
-                        if (current_kb) {
-                            std::string limit_info;
-                            if (matched_rule->max_piece_length) {
-                                limit_info = "max_piece_length (" + std::to_string(*matched_rule->max_piece_length / 1024) + " KB)";
-                            } else {
-                                limit_info = "rule constraint";
-                            }
-                            log_message("Tracker rule '" + matched_rule->name + "': user-specified piece size ("
-                                + std::to_string(*current_kb) + " KB) adjusted by " + limit_info, LogLevel::WARNING);
-                        } else {
-                            piece_size = *enforcement.adjusted_piece_length * 1024;
-                            print_verbose("Tracker rule '" + matched_rule->name + "': piece size adjusted to "
-                                + std::to_string(*enforcement.adjusted_piece_length) + " KB\n");
-                        }
-                    }
-
-                    if (enforcement.constraint_violation) {
-                        print_info("WARNING: " + enforcement.violation_message + "\n");
-                        log_message(enforcement.violation_message, LogLevel::WARNING);
-                }
-            } else {
-                log_message("No matching tracker rule found for provided trackers", LogLevel::INFO);
-            }
-            }
-        }
-
-        return TorrentConfig(input_path, output_path, trackers, tv,
-                             comment, is_private, web_seeds, piece_size,
-                             creator_str, torrent_name, include_creation_date,
-                             source, entropy,
-                             std::move(exclude_regex_compiled), std::move(include_regex_compiled),
-                             false, target_piece_count
-        );
-    }
-    catch (const fs::filesystem_error &e)
-    {
-        // Preserve the specific path and system error for better diagnostics
-        throw std::runtime_error("Error accessing path '" + e.path1().string() + "': " + e.what());
-    }
+    return CreationPlanner(std::move(resources)).plan(request);
 }
 
 int handle_inspect_command(const std::vector<std::string> &args)
@@ -1860,15 +1588,15 @@ int main(int argc, char *argv[])
         {
             // Best-effort update check (default flow only; subcommands skip main()).
             maybe_check_for_updates_on_startup(result);
-            auto config = get_interactive_config();
+            auto config = get_interactive_config(result);
             TorrentCreator creator(config);
             creator.create_torrent();
         }
         else
         {
             std::string declined_path;
-            auto config_opt = get_commandline_config(result, declined_path);
-            if (!config_opt)
+            auto plan_opt = get_commandline_config(result, declined_path);
+            if (!plan_opt)
             {
                 log_message("Overwrite declined: " + declined_path, LogLevel::INFO);
                 if (is_json_mode()) {
@@ -1878,23 +1606,17 @@ int main(int argc, char *argv[])
                 }
                 return 1;
             }
-            auto season_error = season_pack::evaluate_season_warning(
-                config_opt->path, result.count("fail-on-season-warning") > 0);
-            if (season_error)
-            {
-                throw std::runtime_error(*season_error);
-            }
             // Best-effort update check — runs only after args are validated so
             // the notice never appears before an error message.
             maybe_check_for_updates_on_startup(result);
-            TorrentCreator creator(*config_opt);
+            TorrentCreator creator(plan_opt->config);
             creator.create_torrent();
             if (is_json_mode()) {
                 try {
-                    TorrentInspector inspector(config_opt->output);
+                    TorrentInspector inspector(plan_opt->config.output);
                     TorrentMetadata meta = inspector.inspect();
                     std::string json = TorrentInspector::format_metadata(meta, true);
-                    std::string path_field = ",\n  \"output_path\": \"" + utils::escape_json(config_opt->output.string()) + "\"\n";
+                    std::string path_field = ",\n  \"output_path\": \"" + utils::escape_json(plan_opt->config.output.string()) + "\"\n";
                     json.insert(json.rfind('}'), path_field);
                     std::cout << json;
                 } catch (const std::exception& e) {

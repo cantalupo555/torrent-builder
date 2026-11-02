@@ -3,6 +3,9 @@
 #include "logger.hpp"
 #include <regex>
 #include <cctype>
+#include <charconv>
+#include <string_view>
+#include <system_error>
 #include <climits>
 #include <cstdlib>
 #include <algorithm>
@@ -104,10 +107,111 @@ int64_t compute_content_size(const std::filesystem::path &path)
     return total_size;
 }
 
+namespace
+{
+
+bool is_numeric_port(std::string_view port)
+{
+    if (port.empty())
+    {
+        return false;
+    }
+    unsigned int value = 0;
+    const char *begin = port.data();
+    const char *end = begin + port.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, value);
+    return ec == std::errc{} && ptr == end && value > 0 && value <= 65535;
+}
+
+bool is_valid_url_impl(const std::string &url, bool allow_udp)
+{
+    if (url.empty())
+    {
+        return false;
+    }
+    for (unsigned char c : url)
+    {
+        if (std::isspace(c) || c < 0x20 || c == 0x7f)
+        {
+            return false;
+        }
+    }
+
+    const auto sep = url.find("://");
+    if (sep == std::string::npos || sep == 0)
+    {
+        return false;
+    }
+
+    std::string scheme = url.substr(0, sep);
+    for (auto &c : scheme)
+    {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    const bool scheme_ok =
+        scheme == "http" || scheme == "https" || (allow_udp && scheme == "udp");
+    if (!scheme_ok)
+    {
+        return false;
+    }
+
+    const auto host_start = sep + 3;
+    if (host_start >= url.size())
+    {
+        return false;
+    }
+    const auto host_end = url.find_first_of("/?#", host_start);
+    std::string_view authority(
+        url.data() + host_start,
+        (host_end == std::string::npos ? url.size() : host_end) - host_start);
+    if (const auto at = authority.rfind('@'); at != std::string_view::npos)
+    {
+        authority.remove_prefix(at + 1);
+    }
+    if (authority.empty() || authority.front() == ':')
+    {
+        return false;
+    }
+    if (authority.front() == '[')
+    {
+        const auto close = authority.find(']');
+        if (close == std::string_view::npos || close == 1)
+        {
+            return false;
+        }
+        const auto suffix = authority.substr(close + 1);
+        if (suffix.empty())
+        {
+            return true;
+        }
+        if (suffix.front() != ':')
+        {
+            return false;
+        }
+        return is_numeric_port(suffix.substr(1));
+    }
+    const auto colon = authority.find(':');
+    if (colon == std::string_view::npos)
+    {
+        return true;
+    }
+    if (colon == 0)
+    {
+        return false;
+    }
+    return is_numeric_port(authority.substr(colon + 1));
+}
+
+} // namespace
+
 bool is_valid_url(const std::string &url)
 {
-    static const std::regex url_regex(R"(^(http|https|udp)://.+$)", std::regex::icase);
-    return std::regex_match(url, url_regex);
+    return is_valid_url_impl(url, true);
+}
+
+bool is_valid_web_seed_url(const std::string &url)
+{
+    return is_valid_url_impl(url, false);
 }
 
 std::string sanitize_path(std::string input)

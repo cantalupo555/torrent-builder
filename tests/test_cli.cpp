@@ -9,6 +9,7 @@
 #include <regex>
 #include <filesystem>
 #include <fstream>
+#include "creation_planner.hpp"
 #include "torrent_inspector.hpp"
 
 namespace {
@@ -670,6 +671,256 @@ TEST(CLI, ExplicitOutputStillPromptsOverwrite) {
 
     std::error_code ec;
     fs::remove_all(temp_dir, ec);
+}
+
+TEST(CLI, InvalidTrackerFailsBeforeOverwritePrompt) {
+#ifdef _WIN32
+    GTEST_SKIP() << "stdin piping via popen() is unreliable on Windows";
+#endif
+    auto temp_dir = test_support::unique_temp_dir("tb_prompt_order");
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content"; }
+    { std::ofstream(output_file) << "existing torrent"; }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        "echo n| " + get_binary_path() +
+        " --no-update-check --path " + input_file.string() +
+        " --output " + output_file.string() +
+        " --tracker not-a-url --torrent-version 1 2>&1", exit_code);
+
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("Invalid tracker URL"), std::string::npos) << output;
+    EXPECT_EQ(output.find("already exists"), std::string::npos)
+        << "Validation must run before the overwrite prompt. Output: " << output;
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, InvalidPresetFailsBeforeOverwritePrompt) {
+#ifdef _WIN32
+    GTEST_SKIP() << "stdin piping via popen() is unreliable on Windows";
+#endif
+    auto temp_dir = test_support::unique_temp_dir("tb_preset_prompt_order");
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content"; }
+    { std::ofstream(output_file) << "existing torrent"; }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        "echo n| " + get_binary_path() +
+        " --no-update-check --path " + input_file.string() +
+        " --output " + output_file.string() +
+        " --preset ptp --preset-file " + (temp_dir / "missing.yaml").string() + " 2>&1",
+        exit_code);
+
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("Preset file not found"), std::string::npos) << output;
+    EXPECT_EQ(output.find("already exists"), std::string::npos)
+        << "Preset loading must run before the overwrite prompt. Output: " << output;
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, InvalidPresetNameFailsBeforeOverwritePrompt) {
+#ifdef _WIN32
+    GTEST_SKIP() << "stdin piping via popen() is unreliable on Windows";
+#endif
+    auto temp_dir = test_support::unique_temp_dir("tb_preset_name_prompt_order");
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content"; }
+    { std::ofstream(output_file) << "existing torrent"; }
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  ptp:\n"
+          << "    source: \"PTP\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        "echo n| " + get_binary_path() +
+        " --no-update-check --path " + input_file.string() +
+        " --output " + output_file.string() +
+        " --preset unknown --preset-file " + (temp_dir / "presets.yaml").string() + " 2>&1",
+        exit_code);
+
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("Unknown preset"), std::string::npos) << output;
+    EXPECT_EQ(output.find("already exists"), std::string::npos)
+        << "Preset name resolution must run before the overwrite prompt. Output: " << output;
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, InteractiveRejectsUdpWebSeed) {
+#ifdef _WIN32
+    GTEST_SKIP() << "stdin piping via popen() is unreliable on Windows";
+#endif
+    auto temp_dir = test_support::unique_temp_dir("tb_interactive_webseed");
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "interactive web seed test"; }
+
+    std::string inputs =
+        "'" + input_file.string() + "' "   // path
+        "'" + output_file.string() + "' "  // output
+        "1 "                               // version (v1)
+        "'' "                              // comment
+        "n "                               // private?
+        "n "                               // default trackers?
+        "n "                               // custom trackers?
+        "'udp://tracker.example:80/announce' " // invalid web seed
+        "'' "                              // finish web seeds
+        "n "                               // custom piece size?
+        "n "                               // target piece count?
+        "n "                               // omit creator?
+        "'' "                              // custom name
+        "n "                               // omit creation date?
+        "'' "                              // source
+        "n "                               // entropy?
+        "n "                               // exclude patterns?
+        "n "                               // include patterns?
+        "n ";                              // include system files?
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        "printf '%s\\n' " + inputs + "| " + get_binary_path() + " --interactive 2>&1",
+        exit_code);
+
+    EXPECT_EQ(exit_code, 0) << output;
+    EXPECT_NE(output.find("Invalid web seed URL. Must start with http:// or https://"),
+              std::string::npos) << output;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_TRUE(meta.web_seeds.empty());
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, EmptyOutputIsRejected) {
+#ifdef _WIN32
+    GTEST_SKIP() << "empty argument quoting differs on Windows";
+#endif
+    auto temp_dir = test_support::unique_temp_dir("tb_empty_output");
+    auto input_file = temp_dir / "input.txt";
+    { std::ofstream(input_file) << "test content"; }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() + " --no-update-check --path " + input_file.string()
+        + " --output \"\" 2>&1", exit_code);
+
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("--output cannot be empty"), std::string::npos) << output;
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, InvalidOptionsFailBeforeOverwritePrompt) {
+#ifdef _WIN32
+    GTEST_SKIP() << "stdin piping via popen() is unreliable on Windows";
+#endif
+    auto temp_dir = test_support::unique_temp_dir("tb_invalid_prompt_order");
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content"; }
+    { std::ofstream(output_file) << "existing torrent"; }
+
+    struct Case {
+        std::string args;
+        std::string expected;
+    };
+    const std::vector<Case> cases = {
+        {"--torrent-version 4", "Invalid torrent version"},
+        {"--piece-size 100", "Invalid piece size"},
+        {"--piece-size 512 --target-piece-count 10", "mutually exclusive"},
+    };
+
+    for (const auto& test_case : cases) {
+        int exit_code = -1;
+        std::string output = exec_command(
+            "echo n| " + get_binary_path() +
+            " --no-update-check --path " + input_file.string() +
+            " --output " + output_file.string() + " " + test_case.args + " 2>&1",
+            exit_code);
+
+        EXPECT_NE(exit_code, 0) << test_case.args;
+        EXPECT_NE(output.find(test_case.expected), std::string::npos)
+            << test_case.args << ": " << output;
+        EXPECT_EQ(output.find("already exists"), std::string::npos)
+            << "Validation must run before the overwrite prompt. Args: "
+            << test_case.args << ". Output: " << output;
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, OutputMatchesEquivalentPlannerConfig) {
+    auto temp_dir = test_support::unique_temp_dir("tb_cli_planner_parity");
+    auto input_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(input_file, std::ios::binary);
+        std::vector<char> data(64 * 1024, 'X');
+        f.write(data.data(), data.size());
+    }
+    auto rules_file = temp_dir / "rules.yaml";
+    {
+        std::ofstream f(rules_file);
+        f << "version: 1\n"
+          << "trackers:\n"
+          << "  other:\n"
+          << "    domain: \"other.example\"\n"
+          << "    source: \"OTHER\"\n";
+    }
+    auto cli_output = temp_dir / "cli.torrent";
+    auto planner_output = temp_dir / "planner.torrent";
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        get_binary_path() +
+        " --no-update-check --path " + input_file.string() +
+        " --output " + cli_output.string() +
+        " --rules-file " + rules_file.string() +
+        " --private --no-date --comment CM --source SRC" +
+        " --tracker https://tracker.example/announce 2>&1", exit_code);
+    ASSERT_EQ(exit_code, 0) << output;
+
+    CreationRequest request;
+    request.input = input_file;
+    request.output = planner_output;
+    request.rules_file = rules_file;
+    request.values.is_private = true;
+    request.values.no_date = true;
+    request.values.comment = "CM";
+    request.values.source = "SRC";
+    request.values.trackers = std::vector<std::string>{"https://tracker.example/announce"};
+    request.silent = true;
+    const CreationPlan plan = CreationPlanner{}.plan(request);
+    TorrentCreator creator(plan.config);
+    creator.create_torrent();
+
+    TorrentInspector cli_inspector(cli_output.string());
+    TorrentInspector planner_inspector(planner_output.string());
+    const TorrentMetadata cli_meta = cli_inspector.inspect();
+    const TorrentMetadata planner_meta = planner_inspector.inspect();
+
+    EXPECT_EQ(cli_meta.info_hash_v1, planner_meta.info_hash_v1);
+    EXPECT_EQ(cli_meta.info_hash_v2, planner_meta.info_hash_v2);
+    EXPECT_EQ(cli_meta.piece_length, planner_meta.piece_length);
+    EXPECT_EQ(cli_meta.is_private, planner_meta.is_private);
+    EXPECT_EQ(cli_meta.trackers, planner_meta.trackers);
+    ASSERT_TRUE(cli_meta.source.has_value());
+    ASSERT_TRUE(planner_meta.source.has_value());
+    EXPECT_EQ(*cli_meta.source, *planner_meta.source);
+    EXPECT_EQ(cli_meta.comment, planner_meta.comment);
+
+    fs::remove_all(temp_dir);
 }
 
 TEST(CLI, OutputDirAutoCreate) {
@@ -3444,6 +3695,39 @@ TEST(RulesCLI, NoRulesFileSucceedsSilently) {
         " -o " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
     EXPECT_EQ(exit_code, 0) << "Should succeed without rules file (no rules is fine)";
     EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(RulesCLI, DefaultRulesFileInCwdIsApplied) {
+    auto temp_dir = test_support::unique_temp_dir("rules_cli_discovery");
+
+    fs::path test_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        f << "discovery content";
+    }
+    {
+        std::ofstream f(temp_dir / "rules.yaml");
+        f << "version: 1\n"
+          << "trackers:\n"
+          << "  ptp:\n"
+          << "    domain: \"passthepopcorn.me\"\n"
+          << "    source: \"DISCOVERED\"\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        "cd " + temp_dir.string() + " && " + get_binary_path() +
+        " --no-update-check --path " + test_file.string() +
+        " --tracker https://passthepopcorn.me/announce" +
+        " --output " + (temp_dir / "out.torrent").string() + " 2>&1", exit_code);
+    EXPECT_EQ(exit_code, 0) << output;
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.source.has_value()) << "Default ./rules.yaml should be discovered by the CLI";
+    EXPECT_EQ(*meta.source, "DISCOVERED");
 
     fs::remove_all(temp_dir);
 }
