@@ -1,8 +1,8 @@
 // Tests for the GUI-side pure creation options and formatting helpers.
 //
 // These exercise gui/creation_options.hpp WITHOUT any Qt dependency: the
-// struct/validate/mapping/formatting logic is plain C++ so it runs in the
-// regular gtest binary (no QApplication needed).
+// struct/validate/request-mapping/formatting logic is plain C++ so it runs in
+// the regular gtest binary (no QApplication needed).
 
 #include <gtest/gtest.h>
 #include "creation_options.hpp"
@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
+#include <stdexcept>
 
 namespace fs = std::filesystem;
 
@@ -34,6 +36,12 @@ protected:
         std::ofstream out(path, std::ios::binary);
         out << "payload";
         return path;
+    }
+
+    /// Same hermetic setup as the planner tests: no rules file discovery.
+    CreationPlanner planner() const {
+        return CreationPlanner(
+            PlannerResources{nullptr, std::make_shared<TrackerRulesDatabase>()});
     }
 
     fs::path temp_dir_;
@@ -69,90 +77,110 @@ TEST_F(GuiLogicTest, ValidateRejectsTrackerWithoutScheme) {
     gui::CreationOptions options{
         .input_path = "x",
         .output_path = "y",
-        .trackers = {"udp://ok.example/announce", "not-a-url"},
+        .trackers = {"not-a-url"},
     };
     auto errors = options.validate();
     ASSERT_EQ(errors.size(), 1u);
     EXPECT_NE(errors[0].find("tracker"), std::string::npos);
 }
 
-TEST_F(GuiLogicTest, ValidateRejectsWebSeedWithoutScheme) {
+TEST_F(GuiLogicTest, ValidateRejectsWebSocketTracker) {
     gui::CreationOptions options{
         .input_path = "x",
         .output_path = "y",
-        .web_seeds = {"also-not-a-url"},
+        .trackers = {"wss://tracker.example/announce"},
     };
     auto errors = options.validate();
     ASSERT_EQ(errors.size(), 1u);
-    EXPECT_NE(errors[0].find("web seed"), std::string::npos);
+    EXPECT_NE(errors[0].find("tracker"), std::string::npos);
 }
 
-TEST_F(GuiLogicTest, ValidateAcceptsSupportedSchemes) {
+TEST_F(GuiLogicTest, ValidateAcceptsCliUrlSchemes) {
     gui::CreationOptions options{
         .input_path = "x",
         .output_path = "y",
         .trackers = {"udp://tracker.example:80/announce",
-                     "wss://tracker.example/announce",
-                     "HTTPS://Tracker.Example/announce",
-                     "http://[::1]:8080/announce",
-                     "http://host:65535/announce"},
+                     "https://tracker.example/announce"},
         .web_seeds = {"http://mirror.example/files/",
                       "https://mirror.example/files/"},
     };
     EXPECT_TRUE(options.validate().empty());
 }
 
-TEST_F(GuiLogicTest, ValidateRejectsWeakOrUnsupportedSchemes) {
+TEST_F(GuiLogicTest, ValidateRejectsUdpWebSeed) {
     gui::CreationOptions options{
         .input_path = "x",
         .output_path = "y",
-        .trackers = {"://", "x://host", "ftp://host/announce",
-                     "https://host/announce with space"},
-        .web_seeds = {"udp://host/files/", "http:///files/"},
+        .web_seeds = {"udp://mirror.example:80/files/"},
     };
     auto errors = options.validate();
-    ASSERT_EQ(errors.size(), 6u);
-    EXPECT_NE(errors[0].find("tracker"), std::string::npos);
-    EXPECT_NE(errors[3].find("tracker"), std::string::npos);
-    EXPECT_NE(errors[4].find("web seed"), std::string::npos);
-    EXPECT_NE(errors[5].find("web seed"), std::string::npos);
+    ASSERT_EQ(errors.size(), 1u);
+    EXPECT_NE(errors[0].find("web seed"), std::string::npos);
 }
 
-TEST_F(GuiLogicTest, ValidateRejectsEmptyHostAuthorities) {
+// ── planner integration ────────────────────────────────────────
+
+TEST_F(GuiLogicTest, PlannerRejectsTrackerWithoutScheme) {
+    auto input = create_temp_file("bad_tracker.bin");
     gui::CreationOptions options{
-        .input_path = "x",
-        .output_path = "y",
-        .trackers = {"http://:8080/announce", "http://user@:8080/announce"},
-        .web_seeds = {"https://:443/files/"},
+        .input_path = input.string(),
+        .output_path = (temp_dir_ / "out.torrent").string(),
+        .trackers = {"not-a-url"},
     };
-    auto errors = options.validate();
-    ASSERT_EQ(errors.size(), 3u);
+
+    EXPECT_THROW(planner().plan(options.to_creation_request()), std::runtime_error);
 }
 
-TEST_F(GuiLogicTest, ValidateRejectsMalformedIpv6Authorities) {
+TEST_F(GuiLogicTest, PlannerRejectsWebSocketTracker) {
+    auto input = create_temp_file("ws_tracker.bin");
     gui::CreationOptions options{
-        .input_path = "x",
-        .output_path = "y",
-        .trackers = {"http://[::1]garbage", "http://[::1]:abc"},
+        .input_path = input.string(),
+        .output_path = (temp_dir_ / "out.torrent").string(),
+        .trackers = {"wss://tracker.example/announce"},
     };
-    auto errors = options.validate();
-    ASSERT_EQ(errors.size(), 2u);
+
+    EXPECT_THROW(planner().plan(options.to_creation_request()), std::runtime_error);
 }
 
-TEST_F(GuiLogicTest, ValidateRejectsMalformedPorts) {
+TEST_F(GuiLogicTest, PlannerRejectsInvalidWebSeed) {
+    auto input = create_temp_file("bad_seed.bin");
     gui::CreationOptions options{
-        .input_path = "x",
-        .output_path = "y",
-        .trackers = {"http://host:abc/announce", "http://host:/announce",
-                     "http://host:99999/announce", "http://host:0/announce"},
+        .input_path = input.string(),
+        .output_path = (temp_dir_ / "out.torrent").string(),
+        .web_seeds = {"not-a-url"},
     };
-    auto errors = options.validate();
-    ASSERT_EQ(errors.size(), 4u);
+
+    EXPECT_THROW(planner().plan(options.to_creation_request()), std::runtime_error);
 }
 
-// ── to_torrent_config() ────────────────────────────────────────
+TEST_F(GuiLogicTest, PlannerAcceptsCliUrlSchemes) {
+    auto input = create_temp_file("schemes.bin");
+    gui::CreationOptions options{
+        .input_path = input.string(),
+        .output_path = (temp_dir_ / "out.torrent").string(),
+        .trackers = {"udp://tracker.example:80/announce",
+                     "https://tracker.example/announce"},
+        .web_seeds = {"http://mirror.example/files/",
+                      "https://mirror.example/files/"},
+    };
 
-TEST_F(GuiLogicTest, ToTorrentConfigMapsAllFields) {
+    EXPECT_NO_THROW(planner().plan(options.to_creation_request()));
+}
+
+TEST_F(GuiLogicTest, PlannerRejectsUdpWebSeed) {
+    auto input = create_temp_file("udp_seed.bin");
+    gui::CreationOptions options{
+        .input_path = input.string(),
+        .output_path = (temp_dir_ / "out.torrent").string(),
+        .web_seeds = {"udp://mirror.example:80/files/"},
+    };
+
+    EXPECT_THROW(planner().plan(options.to_creation_request()), std::runtime_error);
+}
+
+// ── to_creation_request() ──────────────────────────────────────
+
+TEST_F(GuiLogicTest, ToCreationRequestMapsAllFields) {
     auto input = create_temp_file("map.bin");
     auto output = temp_dir_ / "mapped.torrent";
 
@@ -168,7 +196,7 @@ TEST_F(GuiLogicTest, ToTorrentConfigMapsAllFields) {
         .entropy = true,
     };
 
-    TorrentConfig config = options.to_torrent_config();
+    TorrentConfig config = planner().plan(options.to_creation_request()).config;
 
     // The GUI form fields must reach the core config verbatim.
     EXPECT_EQ(config.path, input);
@@ -184,34 +212,100 @@ TEST_F(GuiLogicTest, ToTorrentConfigMapsAllFields) {
     EXPECT_EQ(*config.source, "TRK");
     EXPECT_TRUE(config.entropy);
 
-    // Documented defaults for fields outside the current GUI scope.
+    // Defaults come from the shared planner, not from GUI-local code.
     ASSERT_TRUE(config.creator.has_value());
-    EXPECT_EQ(*config.creator, "Torrent Builder GUI");
+    EXPECT_EQ(*config.creator, "Torrent Builder");
     EXPECT_FALSE(config.name.has_value());
     EXPECT_FALSE(config.piece_size.has_value());
     EXPECT_TRUE(config.include_creation_date);
     EXPECT_FALSE(config.silent);
 }
 
-TEST_F(GuiLogicTest, ToTorrentConfigEmptyOptionalTextBecomesNullopt) {
+TEST_F(GuiLogicTest, EmptyOptionalTextBecomesNullopt) {
     auto input = create_temp_file("opt.bin");
     gui::CreationOptions options{
         .input_path = input.string(),
         .output_path = (temp_dir_ / "opt.torrent").string(),
     };
-    TorrentConfig config = options.to_torrent_config();
+    TorrentConfig config = planner().plan(options.to_creation_request()).config;
     EXPECT_FALSE(config.comment.has_value());
     EXPECT_FALSE(config.source.has_value());
     EXPECT_EQ(config.trackers.size(), 0u);
     EXPECT_EQ(config.web_seeds.size(), 0u);
 }
 
-TEST_F(GuiLogicTest, ToTorrentConfigThrowsOnMissingInputPath) {
+TEST_F(GuiLogicTest, VersionMappingCoversAllEnumerators) {
+    gui::CreationOptions v1{.version = TorrentVersion::V1};
+    gui::CreationOptions v2{.version = TorrentVersion::V2};
+    gui::CreationOptions hybrid{.version = TorrentVersion::HYBRID};
+    EXPECT_EQ(v1.to_creation_request().values.torrent_version, 1);
+    EXPECT_EQ(v2.to_creation_request().values.torrent_version, 2);
+    EXPECT_EQ(hybrid.to_creation_request().values.torrent_version, 3);
+}
+
+TEST_F(GuiLogicTest, DefaultVersionMatchesCli) {
+    gui::CreationOptions options{};
+    EXPECT_EQ(options.version, TorrentVersion::HYBRID);
+    EXPECT_EQ(options.to_creation_request().values.torrent_version, 3);
+}
+
+TEST_F(GuiLogicTest, PlannerThrowsOnMissingInputPath) {
     gui::CreationOptions options{
         .input_path = (temp_dir_ / "does_not_exist.bin").string(),
         .output_path = (temp_dir_ / "x.torrent").string(),
     };
-    EXPECT_THROW(options.to_torrent_config(), std::filesystem::filesystem_error);
+    EXPECT_THROW(planner().plan(options.to_creation_request()),
+                 std::filesystem::filesystem_error);
+}
+
+TEST_F(GuiLogicTest, GuiRequestMatchesEquivalentPlannerRequest) {
+    // CLI flag parsing itself is covered by the integration tests in
+    // tests/test_cli.cpp; this pins the widget-to-request mapping.
+    auto input = create_temp_file("parity.bin");
+    const auto output = temp_dir_ / "parity.torrent";
+
+    gui::CreationOptions options{
+        .input_path = input.string(),
+        .output_path = output.string(),
+        .trackers = {"https://tracker.example/announce"},
+        .version = TorrentVersion::HYBRID,
+        .comment = "same",
+        .is_private = true,
+    };
+    const TorrentConfig gui_config = planner().plan(options.to_creation_request()).config;
+
+    CreationRequest cli_request;
+    cli_request.input = input;
+    cli_request.output = output;
+    cli_request.values.trackers =
+        std::vector<std::string>{"https://tracker.example/announce"};
+    cli_request.values.torrent_version = 3;
+    cli_request.values.comment = "same";
+    cli_request.values.is_private = true;
+    // The GUI keeps built-in excludes off until the toggle lands.
+    cli_request.values.builtin_excludes = false;
+    const TorrentConfig cli_config = planner().plan(cli_request).config;
+
+    EXPECT_EQ(gui_config.version, cli_config.version);
+    EXPECT_EQ(gui_config.creator, cli_config.creator);
+    EXPECT_EQ(gui_config.trackers, cli_config.trackers);
+    EXPECT_EQ(gui_config.comment, cli_config.comment);
+    EXPECT_EQ(gui_config.is_private, cli_config.is_private);
+    EXPECT_EQ(gui_config.include_creation_date, cli_config.include_creation_date);
+    EXPECT_EQ(gui_config.piece_size, cli_config.piece_size);
+    EXPECT_EQ(gui_config.exclude_regex.size(), cli_config.exclude_regex.size());
+    EXPECT_EQ(gui_config.output, cli_config.output);
+}
+
+TEST_F(GuiLogicTest, BuiltinExcludesStayOffUntilToggleExists) {
+    auto input = create_temp_file("excludes.bin");
+    gui::CreationOptions options{
+        .input_path = input.string(),
+        .output_path = (temp_dir_ / "excludes.torrent").string(),
+    };
+
+    const TorrentConfig config = planner().plan(options.to_creation_request()).config;
+    EXPECT_TRUE(config.exclude_regex.empty());
 }
 
 // ── format_bytes() ─────────────────────────────────────────────
