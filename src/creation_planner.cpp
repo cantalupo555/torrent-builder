@@ -36,6 +36,27 @@ bool is_whitespace_only(const std::string &value)
     return value.find_first_not_of(" \t\n\r") == std::string::npos;
 }
 
+bool has_effective_piece_size(const ConfigValues &values)
+{
+    return values.piece_size
+           && std::ranges::find(AllowedPieceSizes::values, *values.piece_size)
+                  != AllowedPieceSizes::values.end();
+}
+
+bool has_effective_target_count(const ConfigValues &values)
+{
+    return values.target_piece_count && *values.target_piece_count > 0;
+}
+
+void validate_piece_selection(const ConfigValues &values)
+{
+    if (has_effective_piece_size(values) && has_effective_target_count(values))
+    {
+        throw std::runtime_error(
+            "piece size and target piece count are mutually exclusive");
+    }
+}
+
 TorrentVersion to_version(int version)
 {
     switch (version)
@@ -115,7 +136,7 @@ void validate_request_values(const ConfigValues &values)
 
     if (values.piece_size && values.target_piece_count)
     {
-        throw std::runtime_error("--piece-size and --target-piece-count are mutually exclusive");
+        validate_piece_selection(values);
     }
 
     if (values.torrent_version
@@ -312,7 +333,7 @@ MetadataResolution resolve_metadata(const CreationRequest &request, const Config
 
     if (metadata.piece_size && metadata.target_piece_count)
     {
-        throw std::runtime_error("--piece-size and --target-piece-count are mutually exclusive");
+        throw std::runtime_error("piece size and target piece count are mutually exclusive");
     }
 
     const bool use_builtin_excludes = merged.builtin_excludes.value_or(true);
@@ -463,9 +484,11 @@ RulesResolution apply_rules(const CreationRequest &request, const PlannerResourc
                             limit_info = "rule constraint";
                         }
                         log_message("Tracker rule '" + matched_rule->name
-                                        + "': user-specified piece size ("
-                                        + std::to_string(*current_kb) + " KB) adjusted by "
-                                        + limit_info,
+                                        + "': keeping user-specified piece size ("
+                                        + std::to_string(*current_kb) + " KB) despite "
+                                        + limit_info + "; recommended "
+                                        + std::to_string(*enforcement.adjusted_piece_length)
+                                        + " KB. The torrent may violate the rule.",
                                     LogLevel::WARNING);
                     }
                     else
@@ -517,6 +540,13 @@ void CreationPlanner::validate(const CreationRequest &request)
         // identical to the one the resolver used to emit before prompting.
         validate_duplicate_trackers(request_trackers(request));
     }
+}
+
+void CreationPlanner::validate(const CreationRequest &request,
+                               const ConfigValues &preset_values)
+{
+    validate(request);
+    validate_piece_selection(merge_config_values(preset_values, request.values));
 }
 
 CreationPlan CreationPlanner::plan(const CreationRequest &request, OutputSink &sink) const

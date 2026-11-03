@@ -276,8 +276,8 @@ RulesEnforcementResult TrackerRulesDatabase::enforce(
 
     if (result.adjusted) {
         result.adjusted_piece_length = effective_kb;
-        log_message("Tracker rule '" + rule.name + "': piece size adjusted from "
-            + std::to_string(*result.original_piece_length) + " KB to "
+        log_message("Tracker rule '" + rule.name + "': piece size recommendation "
+            + std::to_string(*result.original_piece_length) + " KB -> "
             + std::to_string(effective_kb) + " KB", LogLevel::INFO);
     }
 

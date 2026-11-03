@@ -628,19 +628,22 @@ std::optional<CreationPlan> get_commandline_config(const cxxopts::ParseResult &r
     // be reported before the overwrite question, matching the old order. The
     // loaded instance is injected so plan() does not read the file twice.
     PlannerResources resources;
+    ConfigValues preset_values;
     if (request.preset)
     {
         auto presets = std::make_shared<PresetLoader>();
         presets->load(PresetLoader::find_preset_file(request.preset_file));
         // Resolve now so an unknown preset name is reported before the prompt.
         // plan() resolves again from the injected loader (a cheap map lookup).
-        presets->resolve(*request.preset);
+        preset_values = presets->resolve(*request.preset);
         resources.presets = std::move(presets);
     }
 
     // Validate cheap request-level values before asking about overwrite, so an
     // invalid tracker/version/piece size is reported even when the output exists.
-    CreationPlanner::validate(request);
+    // Preset-derived conflicts are checked here too, while the preset is already
+    // loaded and no prompt has run yet.
+    CreationPlanner::validate(request, preset_values);
 
     if (request.output && !request.output->empty() && fs::exists(*request.output))
     {

@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include "creation_planner.hpp"
+#include "constants.hpp"
 #include "torrent_inspector.hpp"
 
 namespace {
@@ -757,6 +758,44 @@ TEST(CLI, InvalidPresetNameFailsBeforeOverwritePrompt) {
     fs::remove_all(temp_dir);
 }
 
+TEST(CLI, PresetPieceSizeConflictFailsBeforeOverwritePrompt) {
+#ifdef _WIN32
+    GTEST_SKIP() << "stdin piping via popen() is unreliable on Windows";
+#endif
+    auto temp_dir = test_support::unique_temp_dir("tb_preset_piece_conflict");
+    auto input_file = temp_dir / "input.txt";
+    auto output_file = temp_dir / "output.torrent";
+    { std::ofstream(input_file) << "test content"; }
+    { std::ofstream(output_file) << "existing torrent"; }
+    {
+        std::ofstream f(temp_dir / "presets.yaml");
+        f << "version: 1\n"
+          << "presets:\n"
+          << "  capped:\n"
+          << "    piece_size: 512\n";
+    }
+
+    int exit_code = -1;
+    std::string output = exec_command(
+        "echo n| " + get_binary_path() +
+        " --no-update-check --path " + input_file.string() +
+        " --output " + output_file.string() +
+        " --preset capped --preset-file " + (temp_dir / "presets.yaml").string() +
+        " --target-piece-count 10 2>&1",
+        exit_code);
+
+    EXPECT_NE(exit_code, 0);
+    EXPECT_NE(output.find("piece size and target piece count are mutually exclusive"),
+              std::string::npos) << output;
+    EXPECT_EQ(output.find("already exists"), std::string::npos)
+        << "Preset conflict validation must run before the overwrite prompt. Output: " << output;
+    EXPECT_EQ(output.find("--piece-size"), std::string::npos)
+        << "The error must not blame a CLI flag when the value came from a preset. Output: "
+        << output;
+
+    fs::remove_all(temp_dir);
+}
+
 TEST(CLI, InteractiveRejectsUdpWebSeed) {
 #ifdef _WIN32
     GTEST_SKIP() << "stdin piping via popen() is unreliable on Windows";
@@ -874,8 +913,8 @@ TEST(CLI, OutputMatchesEquivalentPlannerConfig) {
         std::ofstream f(rules_file);
         f << "version: 1\n"
           << "trackers:\n"
-          << "  other:\n"
-          << "    domain: \"other.example\"\n"
+          << "  matching:\n"
+          << "    domain: \"tracker.example\"\n"
           << "    source: \"OTHER\"\n";
     }
     auto cli_output = temp_dir / "cli.torrent";
@@ -887,7 +926,7 @@ TEST(CLI, OutputMatchesEquivalentPlannerConfig) {
         " --no-update-check --path " + input_file.string() +
         " --output " + cli_output.string() +
         " --rules-file " + rules_file.string() +
-        " --private --no-date --comment CM --source SRC" +
+        " --private --no-date --comment CM" +
         " --tracker https://tracker.example/announce 2>&1", exit_code);
     ASSERT_EQ(exit_code, 0) << output;
 
@@ -898,7 +937,6 @@ TEST(CLI, OutputMatchesEquivalentPlannerConfig) {
     request.values.is_private = true;
     request.values.no_date = true;
     request.values.comment = "CM";
-    request.values.source = "SRC";
     request.values.trackers = std::vector<std::string>{"https://tracker.example/announce"};
     request.silent = true;
     const CreationPlan plan = CreationPlanner{}.plan(request);
@@ -917,8 +955,15 @@ TEST(CLI, OutputMatchesEquivalentPlannerConfig) {
     EXPECT_EQ(cli_meta.trackers, planner_meta.trackers);
     ASSERT_TRUE(cli_meta.source.has_value());
     ASSERT_TRUE(planner_meta.source.has_value());
-    EXPECT_EQ(*cli_meta.source, *planner_meta.source);
+    EXPECT_EQ(*cli_meta.source, "OTHER");
+    EXPECT_EQ(*planner_meta.source, "OTHER");
     EXPECT_EQ(cli_meta.comment, planner_meta.comment);
+    EXPECT_EQ(cli_meta.creation_date, planner_meta.creation_date);
+    EXPECT_FALSE(cli_meta.creation_date.has_value()) << "--no-date must omit the creation date";
+    ASSERT_TRUE(cli_meta.created_by.has_value());
+    ASSERT_TRUE(planner_meta.created_by.has_value());
+    EXPECT_EQ(*cli_meta.created_by, *planner_meta.created_by);
+    EXPECT_EQ(*cli_meta.created_by, std::string(Defaults::creator));
 
     fs::remove_all(temp_dir);
 }

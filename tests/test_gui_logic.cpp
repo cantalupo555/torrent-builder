@@ -243,7 +243,7 @@ TEST_F(GuiLogicTest, VersionMappingCoversAllEnumerators) {
     EXPECT_EQ(hybrid.to_creation_request().values.torrent_version, 3);
 }
 
-TEST_F(GuiLogicTest, DefaultVersionMatchesCli) {
+TEST_F(GuiLogicTest, DefaultVersionIsHybrid) {
     gui::CreationOptions options{};
     EXPECT_EQ(options.version, TorrentVersion::HYBRID);
     EXPECT_EQ(options.to_creation_request().values.torrent_version, 3);

@@ -447,6 +447,39 @@ TEST_F(CreationPlannerTest, PieceSizeAndTargetAreMutuallyExclusive)
     EXPECT_NE(message.find("mutually exclusive"), std::string::npos) << message;
 }
 
+TEST_F(CreationPlannerTest, ValidateRejectsPresetPieceSizeWithRequestTarget)
+{
+    ConfigValues preset;
+    preset.piece_size = 512;
+
+    CreationRequest request = base_request();
+    request.values.target_piece_count = 10;
+
+    EXPECT_THROW(CreationPlanner::validate(request, preset), std::runtime_error);
+}
+
+TEST_F(CreationPlannerTest, ValidateRejectsPresetTargetWithRequestPieceSize)
+{
+    ConfigValues preset;
+    preset.target_piece_count = 10;
+
+    CreationRequest request = base_request();
+    request.values.piece_size = 512;
+
+    EXPECT_THROW(CreationPlanner::validate(request, preset), std::runtime_error);
+}
+
+TEST_F(CreationPlannerTest, ValidateIgnoresIneffectivePresetPieceSize)
+{
+    ConfigValues preset;
+    preset.piece_size = 123; // Not an allowed size; the resolver ignores it.
+
+    CreationRequest request = base_request();
+    request.values.target_piece_count = 10;
+
+    EXPECT_NO_THROW(CreationPlanner::validate(request, preset));
+}
+
 TEST_F(CreationPlannerTest, InvalidRequestVersionThrows)
 {
     CreationRequest request = base_request();
@@ -774,12 +807,15 @@ trackers:
     CreationRequest request = base_request();
     request.values.trackers = std::vector<std::string>{"https://tracker.example/announce"};
     request.values.piece_size = 1024;
-    planner_with_rules(rules).plan(request);
+    const CreationPlan plan = planner_with_rules(rules).plan(request);
+    ASSERT_TRUE(plan.config.piece_size.has_value());
+    EXPECT_EQ(*plan.config.piece_size, 1024 * 1024);
 
     std::ifstream log_file(temp_dir_ / "torrent_builder.log");
     const std::string log((std::istreambuf_iterator<char>(log_file)),
                           std::istreambuf_iterator<char>());
-    EXPECT_NE(log.find("user-specified piece size"), std::string::npos) << log;
+    EXPECT_NE(log.find("keeping user-specified piece size"), std::string::npos) << log;
+    EXPECT_NE(log.find("may violate the rule"), std::string::npos) << log;
 }
 
 TEST_F(CreationPlannerTest, DefaultRulesDiscoveryIsOptIn)

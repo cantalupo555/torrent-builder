@@ -95,6 +95,21 @@ class CreationPlanner {
     static void validate(const CreationRequest& request);
 
     /**
+     * @brief Validate request values plus preset-derived conflicts.
+     *
+     * Frontends that resolve a preset before prompting call this overload so a
+     * preset piece size combined with a request target count (or the reverse)
+     * fails before any interactive question. Preset values that the resolver
+     * would ignore are not treated as conflicts.
+     *
+     * @param request Partial user intent.
+     * @param preset_values Resolved preset values; request values win per field.
+     * @throws std::runtime_error on the first invalid value or conflict.
+     */
+    static void validate(const CreationRequest& request,
+                         const ConfigValues& preset_values);
+
+    /**
      * @brief Resolve and validate a creation request.
      *
      * @param request Partial user intent.
