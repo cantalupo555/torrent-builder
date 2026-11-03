@@ -48,6 +48,25 @@ std::string read_log_file(const std::filesystem::path& log_dir) {
     return content;
 }
 
+// Run a child process with a temporary working directory without leaking the
+// change into the remaining tests.
+class ScopedCurrentPath {
+public:
+    explicit ScopedCurrentPath(const std::filesystem::path& path)
+        : previous_(std::filesystem::current_path()) {
+        std::filesystem::current_path(path);
+    }
+    ~ScopedCurrentPath() {
+        std::error_code ec;
+        std::filesystem::current_path(previous_, ec);
+    }
+    ScopedCurrentPath(const ScopedCurrentPath&) = delete;
+    ScopedCurrentPath& operator=(const ScopedCurrentPath&) = delete;
+
+private:
+    std::filesystem::path previous_;
+};
+
 }
 
 TEST(CLI, VersionLong) {
@@ -838,6 +857,78 @@ TEST(CLI, InteractiveRejectsUdpWebSeed) {
     TorrentInspector inspector(output_file.string());
     TorrentMetadata meta = inspector.inspect();
     EXPECT_TRUE(meta.web_seeds.empty());
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(CLI, InteractiveRulesCapTargetAndReuseContentSize) {
+#ifdef _WIN32
+    GTEST_SKIP() << "stdin piping via popen() is unreliable on Windows";
+#endif
+    namespace fs = std::filesystem;
+    auto temp_dir = test_support::unique_temp_dir("tb_interactive_rules_target");
+    auto input_file = temp_dir / "content.bin";
+    {
+        std::ofstream f(input_file, std::ios::binary);
+        std::vector<char> data(1024 * 1024, 'R');
+        f.write(data.data(), data.size());
+    }
+    auto rules_file = temp_dir / "rules.yaml";
+    {
+        std::ofstream f(rules_file);
+        f << "version: 1\n"
+          << "trackers:\n"
+          << "  cap:\n"
+          << "    domain: \"tracker.example\"\n"
+          << "    max_piece_length: 131072\n";
+    }
+    auto output_file = temp_dir / "output.torrent";
+
+    std::string inputs =
+        "'" + input_file.string() + "' "        // path
+        "'" + output_file.string() + "' "       // output
+        "3 "                                     // version (hybrid)
+        "'' "                                    // comment
+        "n "                                     // private?
+        "n "                                     // default trackers?
+        "y "                                     // custom trackers?
+        "'https://tracker.example/announce' "    // tracker
+        "'' "                                    // finish trackers
+        "'' "                                    // finish web seeds
+        "n "                                     // custom piece size?
+        "y "                                     // target piece count?
+        "4 "                                     // target count
+        "n "                                     // omit creator?
+        "'' "                                    // custom name
+        "n "                                     // omit creation date?
+        "'' "                                    // source
+        "n "                                     // entropy?
+        "n "                                     // exclude patterns?
+        "n "                                     // include patterns?
+        "n ";                                    // include system files?
+
+    int exit_code = -1;
+    std::string output;
+    std::string log;
+    {
+        ScopedCurrentPath cwd_guard(temp_dir);
+        output = exec_command(
+            "printf '%s\\n' " + inputs + "| " + get_binary_path()
+            + " --interactive --no-update-check --rules-file "
+            + rules_file.string() + " 2>&1",
+            exit_code);
+        log = read_log_file(temp_dir);
+    }
+
+    EXPECT_EQ(exit_code, 0) << output;
+    EXPECT_NE(output.find("Target: 4 pieces -> 256 KB"), std::string::npos) << output;
+    EXPECT_NE(output.find("Final piece size: 128 KB"), std::string::npos) << output;
+    EXPECT_NE(log.find("Using precomputed content size: 1048576 bytes"),
+              std::string::npos) << log;
+
+    TorrentInspector inspector(output_file.string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.piece_length, 128 * 1024);
 
     fs::remove_all(temp_dir);
 }

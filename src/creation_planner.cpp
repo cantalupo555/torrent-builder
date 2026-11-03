@@ -407,6 +407,9 @@ RulesResolution apply_rules(const CreationRequest &request, const PlannerResourc
     {
         // A frontend already walked the tree (the wizard's target preview), so
         // reuse that result instead of scanning the content a second time.
+        log_message("Using precomputed content size: "
+                        + std::to_string(*request.content_size_hint) + " bytes",
+                    LogLevel::INFO);
         content_size = *request.content_size_hint;
     }
     else if (need_content_size)
@@ -472,21 +475,9 @@ RulesResolution apply_rules(const CreationRequest &request, const PlannerResourc
                     if (current_kb && !piece_size_from_target)
                     {
                         // User-specified sizes are never overridden, only reported.
-                        std::string limit_info;
-                        if (matched_rule->max_piece_length)
-                        {
-                            limit_info = "max_piece_length ("
-                                         + std::to_string(*matched_rule->max_piece_length / 1024)
-                                         + " KB)";
-                        }
-                        else
-                        {
-                            limit_info = "rule constraint";
-                        }
                         log_message("Tracker rule '" + matched_rule->name
                                         + "': keeping user-specified piece size ("
-                                        + std::to_string(*current_kb) + " KB) despite "
-                                        + limit_info + "; recommended "
+                                        + std::to_string(*current_kb) + " KB); recommended "
                                         + std::to_string(*enforcement.adjusted_piece_length)
                                         + " KB. The torrent may violate the rule.",
                                     LogLevel::WARNING);

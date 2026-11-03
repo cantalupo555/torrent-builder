@@ -491,7 +491,14 @@ get_version: // Label to jump to if overwrite is 'n' or empty
     request.values.include_patterns = include_patterns;
     request.values.builtin_excludes = use_builtin_excludes;
 
-    return CreationPlanner(PlannerResources{nullptr, std::move(rules)}).plan(request).config;
+    const CreationPlan plan =
+        CreationPlanner(PlannerResources{nullptr, std::move(rules)}).plan(request);
+    if (target_piece_count && plan.config.piece_size)
+    {
+        print_info("Final piece size: "
+                   + std::to_string(*plan.config.piece_size / 1024) + " KB\n");
+    }
+    return plan.config;
 }
 
 namespace
