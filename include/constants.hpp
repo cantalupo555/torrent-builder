@@ -2,6 +2,9 @@
 #define CONSTANTS_HPP
 
 #include <array>
+#include <string>
+#include <string_view>
+#include <vector>
 
 /**
  * Standard torrent protocol piece sizes in bytes (16 KB to 32 MB, powers of 2).
@@ -26,6 +29,20 @@ namespace PieceSizes {
  */
 namespace AllowedPieceSizes {
     constexpr std::array<int, 12> values = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768};
+}
+
+/**
+ * Defaults shared by every creation frontend.
+ */
+namespace Defaults {
+    /// Public open trackers from the NewTrackon list, used when default trackers are requested.
+    inline const std::vector<std::string> trackers = {
+        "udp://open.stealth.si:80/announce",         "udp://tracker.opentrackr.org:1337/announce",
+        "udp://tracker.torrent.eu.org:451/announce", "udp://explodie.org:6969/announce",
+        "udp://tracker.cyberia.is:6969/announce",    "udp://retracker.hotplug.ru:2710/announce"};
+
+    /// Default value for the torrent's "created by" field.
+    inline constexpr std::string_view creator = "Torrent Builder";
 }
 
 #endif

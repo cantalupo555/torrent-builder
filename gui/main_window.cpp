@@ -100,8 +100,9 @@ protected:
  * and crashes the app. The UI tells cancel apart from success via its own
  * run state (Cancelling), not via message contents.
  */
-void run_creation(TorrentConfig config, QtOutputSink* sink) {
+void run_creation(CreationRequest request, QtOutputSink* sink) {
     try {
+        TorrentConfig config = CreationPlanner{}.plan(request, *sink).config;
         TorrentCreator creator(std::move(config), *sink,
                                [sink]() { return sink->is_cancelled(); });
         creator.create_torrent();
@@ -241,6 +242,9 @@ void MainWindow::build_create_tab() {
     version_combo_->addItem(tr("v1"), static_cast<int>(TorrentVersion::V1));
     version_combo_->addItem(tr("v2"), static_cast<int>(TorrentVersion::V2));
     version_combo_->addItem(tr("hybrid"), static_cast<int>(TorrentVersion::HYBRID));
+    // Match the CLI default (hybrid) instead of the combo's first entry.
+    version_combo_->setCurrentIndex(
+        version_combo_->findData(static_cast<int>(TorrentVersion::HYBRID)));
     form->addRow(tr("Versão:"), version_combo_);
 
     private_check_ = new QCheckBox(tr("Privado"), create_tab_);
@@ -423,10 +427,10 @@ void MainWindow::start_creation() {
 
     apply_run_state(RunState::Running);
     try {
-        TorrentConfig config = options.to_torrent_config();
-        worker_ = std::make_unique<std::thread>(run_creation, std::move(config), sink_);
+        CreationRequest request = options.to_creation_request();
+        worker_ = std::make_unique<std::thread>(run_creation, std::move(request), sink_);
     } catch (const std::exception& e) {
-        // TorrentConfig validates path existence; surface it as a failed run.
+        // Thread creation failed before the worker could report through the sink.
         append_log(kLogErrorColor, QString::fromUtf8(e.what()));
         apply_run_state(RunState::Failed, QString::fromUtf8(e.what()));
     }
