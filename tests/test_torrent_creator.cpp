@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include "torrent_creator.hpp"
+#include "torrent_inspector.hpp"
 #include "output_sink.hpp"
 
 #include <libtorrent/bdecode.hpp>
@@ -424,4 +425,22 @@ TEST_F(TorrentCreatorLayoutTest, V2DirectoryHasUniquePaths) {
     int pad_count = 0;
     EXPECT_TRUE(paths_are_unique(output, pad_count));
     EXPECT_EQ(pad_count, 0);
+}
+
+TEST_F(TorrentCreatorLayoutTest, V2SingleFileHasV2InfoHash) {
+    // Issue #88: v2-only single-file inputs must use SHA-256 piece hashes.
+    // The streaming hasher emits v1 (SHA-1) hashes, which v2_only rejects.
+    const auto input = create_file(temp_dir_, "single.bin", 100 * 1024);
+    const auto output = temp_dir_ / "single-v2.torrent";
+
+    create_torrent_file(input, output, TorrentVersion::V2);
+
+    TorrentInspector inspector(output.string());
+    const TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.info_hash_v2.size(), 64u)
+        << "v2 info hash must be a SHA-256 hex string";
+    EXPECT_TRUE(meta.info_hash_v1.empty())
+        << "v2-only torrents must not carry a v1 info hash";
+    EXPECT_FALSE(meta.is_hybrid);
+    EXPECT_GT(meta.piece_count, 0);
 }

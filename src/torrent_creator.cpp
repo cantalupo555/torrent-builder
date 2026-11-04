@@ -595,14 +595,15 @@ void TorrentCreator::create_torrent() {
         // Set the hashes with the progress callback and error code
         lt::error_code ec;
 
-        if (fs::is_directory(config_.path) || config_.version == TorrentVersion::HYBRID) {
-            // Use libtorrent's native hashing to guarantee hybrid spec compliance for:
-            // 1. Directory inputs (always require both v1 and v2 hashes)
-            // 2. Explicitly requested hybrid torrents (even with single file inputs)
+        if (fs::is_directory(config_.path) || config_.version != TorrentVersion::V1) {
+            // Native hashing is required whenever v2 hashes are generated:
+            // directories (v1/v2/hybrid) and explicit v2 or hybrid torrents,
+            // including single-file inputs. The streaming hasher only emits
+            // v1 (SHA-1) hashes, which v2_only rejects at generate() time.
             lt::set_piece_hashes(t, config_.path.parent_path().string(), progress_callback, ec);
 
         } else {
-            // For single large files, use our streaming hasher
+            // v1 single files keep the streaming hasher (parallel above 1 GB).
             if (fs::file_size(config_.path) > 1 * 1024 * 1024 * 1024) { // Below 1GB single-threaded is cheaper than thread coordination
                 hash_large_file_parallel(config_.path, t, piece_size, guard);
             } else {
