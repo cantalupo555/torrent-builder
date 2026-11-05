@@ -15,8 +15,11 @@
 #include <iomanip>
 #include <ctime>
 #include <mutex>
+#include <utility>
 
 namespace {
+thread_local std::string current_log_prefix;
+
 void portable_localtime(const time_t* timer, tm* result) {
 #ifdef _WIN32
     localtime_s(result, timer);
@@ -24,6 +27,15 @@ void portable_localtime(const time_t* timer, tm* result) {
     localtime_r(timer, result);
 #endif
 }
+}
+
+ScopedLogContext::ScopedLogContext(std::string prefix)
+    : previous_(std::move(current_log_prefix)) {
+    current_log_prefix = std::move(prefix);
+}
+
+ScopedLogContext::~ScopedLogContext() {
+    current_log_prefix = std::move(previous_);
 }
 
 void log_message(const std::string& message, LogLevel level) {
@@ -39,6 +51,10 @@ void log_message(const std::string& message, LogLevel level) {
         case LogLevel::ERR: level_str = "ERROR"; break;
     }
 
+    const std::string entry = current_log_prefix.empty()
+        ? message
+        : current_log_prefix + ": " + message;
+
     std::lock_guard<std::mutex> lock(log_mutex);
     std::ofstream logfile("torrent_builder.log", std::ios_base::app);
 
@@ -46,5 +62,5 @@ void log_message(const std::string& message, LogLevel level) {
     portable_localtime(&now_time_t, &tm_buf);
 
     logfile << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S")
-            << " [" << level_str << "] - " << message << "\n";
+            << " [" << level_str << "] - " << entry << "\n";
 }

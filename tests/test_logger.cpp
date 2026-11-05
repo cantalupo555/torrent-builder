@@ -4,6 +4,7 @@
 #include "test_temp_dir.hpp"
 #include <fstream>
 #include <filesystem>
+#include <latch>
 #include <string>
 #include <chrono>
 #include <thread>
@@ -127,4 +128,61 @@ TEST_F(LoggerTest, EntryFormat)
     std::string line = last_log_line();
     std::regex entry_re(R"(^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[WARNING\] - format check$)");
     EXPECT_TRUE(std::regex_match(line, entry_re)) << "Line: " << line;
+}
+
+TEST_F(LoggerTest, ScopedContextPrefixesAndRestores)
+{
+    {
+        ScopedLogContext context("Job 2");
+        log_message("inside context", LogLevel::INFO);
+    }
+    log_message("outside context", LogLevel::INFO);
+
+    std::string log = read_log();
+    EXPECT_NE(log.find("Job 2: inside context"), std::string::npos);
+    EXPECT_NE(log.find("outside context"), std::string::npos);
+    EXPECT_EQ(log.find("Job 2: outside context"), std::string::npos);
+}
+
+TEST_F(LoggerTest, ScopedContextNests)
+{
+    ScopedLogContext outer("outer");
+    log_message("one", LogLevel::INFO);
+    {
+        ScopedLogContext inner("inner");
+        log_message("two", LogLevel::INFO);
+    }
+    log_message("three", LogLevel::INFO);
+
+    std::string log = read_log();
+    EXPECT_NE(log.find("outer: one"), std::string::npos);
+    EXPECT_NE(log.find("inner: two"), std::string::npos);
+    EXPECT_NE(log.find("outer: three"), std::string::npos);
+}
+
+TEST_F(LoggerTest, ScopedContextIsThreadLocal)
+{
+    std::latch both_ready(2);
+    std::latch go(1);
+
+    auto log_from = [&](const char* prefix, const char* message) {
+        ScopedLogContext context(prefix);
+        both_ready.count_down();
+        go.wait();
+        log_message(message, LogLevel::INFO);
+    };
+
+    std::thread first(log_from, "thread-a", "from a");
+    std::thread second(log_from, "thread-b", "from b");
+
+    both_ready.wait();
+    go.count_down();
+    first.join();
+    second.join();
+
+    std::string log = read_log();
+    EXPECT_NE(log.find("thread-a: from a"), std::string::npos);
+    EXPECT_NE(log.find("thread-b: from b"), std::string::npos);
+    EXPECT_EQ(log.find("thread-a: from b"), std::string::npos);
+    EXPECT_EQ(log.find("thread-b: from a"), std::string::npos);
 }
