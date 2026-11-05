@@ -190,6 +190,19 @@ TEST_F(CreationPlannerTest, OutputDirectoryIsCreated)
     EXPECT_TRUE(plan.auto_named);
 }
 
+TEST_F(CreationPlannerTest, MissingInputDoesNotCreateOutputDirectory)
+{
+    const auto output_dir = temp_dir_ / "missing_input_output";
+    CreationRequest request = base_request();
+    request.input = temp_dir_ / "missing.bin";
+    request.output = std::nullopt;
+    request.output_dir = output_dir;
+
+    EXPECT_THROW(planner().plan(request), std::filesystem::filesystem_error);
+    EXPECT_FALSE(fs::exists(output_dir))
+        << "A missing input must fail before the output directory is created";
+}
+
 TEST_F(CreationPlannerTest, AutoNamingResolvesCollisions)
 {
     const auto output_dir = temp_dir_ / "generated";
@@ -816,6 +829,37 @@ trackers:
                           std::istreambuf_iterator<char>());
     EXPECT_NE(log.find("keeping user-specified piece size"), std::string::npos) << log;
     EXPECT_NE(log.find("may violate the rule"), std::string::npos) << log;
+}
+
+TEST_F(CreationPlannerTest, BuiltinExcludesLogIsSilentOnly)
+{
+    const auto original_cwd = fs::current_path();
+    CwdGuard guard{original_cwd};
+    std::error_code cwd_ec;
+    fs::current_path(temp_dir_, cwd_ec);
+    ASSERT_FALSE(cwd_ec);
+
+    CreationRequest silent_request = base_request();
+    silent_request.silent = true;
+    CreationPlanner{}.plan(silent_request);
+
+    {
+        std::ifstream log_file(temp_dir_ / "torrent_builder.log");
+        const std::string log((std::istreambuf_iterator<char>(log_file)),
+                              std::istreambuf_iterator<char>());
+        EXPECT_NE(log.find("Applying built-in exclude patterns"), std::string::npos) << log;
+    }
+
+    std::error_code remove_ec;
+    fs::remove(temp_dir_ / "torrent_builder.log", remove_ec);
+
+    CreationRequest normal_request = base_request();
+    CreationPlanner{}.plan(normal_request);
+
+    std::ifstream log_file(temp_dir_ / "torrent_builder.log");
+    const std::string log((std::istreambuf_iterator<char>(log_file)),
+                          std::istreambuf_iterator<char>());
+    EXPECT_EQ(log.find("Applying built-in exclude patterns"), std::string::npos) << log;
 }
 
 TEST_F(CreationPlannerTest, DefaultRulesDiscoveryIsOptIn)
