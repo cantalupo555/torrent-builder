@@ -164,12 +164,17 @@ TEST_F(LoggerTest, ScopedContextIsThreadLocal)
 {
     std::latch both_ready(2);
     std::latch go(1);
+    std::latch logged(2);
 
     auto log_from = [&](const char* prefix, const char* message) {
         ScopedLogContext context(prefix);
         both_ready.count_down();
         go.wait();
         log_message(message, LogLevel::INFO);
+        // Keep both guards alive while both writes happen: a global prefix
+        // would then leak across threads and fail the assertions below.
+        logged.count_down();
+        logged.wait();
     };
 
     std::thread first(log_from, "thread-a", "from a");
