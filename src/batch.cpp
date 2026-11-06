@@ -1,17 +1,14 @@
 #include "batch.hpp"
-#include "preset.hpp"
+#include "creation_planner.hpp"
 #include "logger.hpp"
-#include "output.hpp"
 #include "utils.hpp"
-#include "constants.hpp"
-#include "season_pack.hpp"
 #include <yaml-cpp/yaml.h>
+#include <memory>
 #include <thread>
 #include <atomic>
 #include <iostream>
 #include <iomanip>
 #include <sstream>
-#include <cmath>
 
 namespace
 {
@@ -28,124 +25,32 @@ std::string sanitize_for_terminal(const std::string& s)
     return result;
 }
 
-std::optional<int> validate_piece_size(int ps_kb)
+std::optional<fs::path> resolve_explicit_output(const BatchJob& job,
+                                               const std::optional<fs::path>& output_dir)
 {
-    static const std::vector<int> allowed(AllowedPieceSizes::values.begin(),
-                                          AllowedPieceSizes::values.end());
-    if (ps_kb == 0) return std::nullopt;
-    if (std::ranges::contains(allowed, ps_kb)) {
-        return ps_kb * 1024;
+    if (!job.output) {
+        return std::nullopt;
     }
-    throw std::runtime_error("Invalid piece size: " + std::to_string(ps_kb) + " KB");
+
+    fs::path output(*job.output);
+    if (output.is_relative() && output_dir && !output_dir->empty()) {
+        output = *output_dir / output;
+    }
+
+    return output;
 }
 
-TorrentVersion resolve_version(int v)
+void ensure_output_parent(const fs::path& output)
 {
-    switch (v) {
-        case 1: return TorrentVersion::V1;
-        case 2: return TorrentVersion::V2;
-        default: return TorrentVersion::HYBRID;
-    }
-}
-
-std::vector<std::regex> compile_patterns(const std::optional<std::vector<std::string>>& patterns)
-{
-    std::vector<std::regex> compiled;
-    if (patterns) {
-        for (const auto& p : *patterns) {
-            try {
-                compiled.push_back(utils::glob_to_regex(p));
-            } catch (const std::regex_error&) {
-                throw std::runtime_error("Invalid pattern: " + p);
-            }
-        }
-    }
-    return compiled;
-}
-
-TorrentConfig build_torrent_config(const ConfigValues& cv, const fs::path& default_output_dir)
-{
-    fs::path input_path(cv.path.value());
-    if (!fs::exists(input_path)) {
-        throw std::runtime_error("Path does not exist: " + input_path.string());
+    if (output.parent_path().empty()) {
+        return;
     }
 
-    fs::path output;
-    if (cv.output) {
-        output = *cv.output;
-        if (output.is_relative() && !default_output_dir.empty()) {
-            output = default_output_dir / output;
-        }
-        if (!output.parent_path().empty()) {
-            std::error_code ec;
-            fs::create_directories(output.parent_path(), ec);
-            if (ec) {
-                throw std::runtime_error("Failed to create output directory: " + output.parent_path().string() + " (" + ec.message() + ")");
-            }
-        }
-    } else {
-        auto trackers = cv.trackers.value_or(std::vector<std::string>{});
-        fs::path out_dir = default_output_dir.empty() ? fs::current_path() : default_output_dir;
-        if (!out_dir.empty() && !fs::exists(out_dir)) {
-            std::error_code ec;
-            fs::create_directories(out_dir, ec);
-            if (ec) {
-                throw std::runtime_error("Failed to create output directory: " + out_dir.string() + " (" + ec.message() + ")");
-            }
-        }
-        output = utils::generate_auto_output_path(input_path, trackers, false, 0, out_dir);
+    std::error_code ec;
+    fs::create_directories(output.parent_path(), ec);
+    if (ec) {
+        throw std::runtime_error("Failed to create output directory: " + output.parent_path().string() + " (" + ec.message() + ")");
     }
-
-    TorrentVersion version = TorrentVersion::HYBRID;
-    if (cv.torrent_version) {
-        version = resolve_version(*cv.torrent_version);
-    }
-
-    std::optional<int> piece_size_bytes;
-    if (cv.piece_size && *cv.piece_size > 0) {
-        piece_size_bytes = validate_piece_size(*cv.piece_size);
-    }
-
-    std::optional<std::string> creator = "Torrent Builder";
-    if (cv.no_creator && *cv.no_creator) {
-        creator = std::nullopt;
-        log_message("Creator omitted via no_creator setting", LogLevel::INFO);
-    } else if (cv.creator) {
-        creator = *cv.creator;
-    }
-
-    bool include_creation_date = true;
-    if (cv.no_date && *cv.no_date) {
-        include_creation_date = false;
-        log_message("Creation date omitted via no_date setting", LogLevel::INFO);
-    } else if (cv.creation_date) {
-        include_creation_date = *cv.creation_date;
-    }
-
-    bool use_builtin_excludes = cv.builtin_excludes.value_or(true);
-    if (use_builtin_excludes) {
-        log_message("Applying built-in exclude patterns (set builtin_excludes: false to disable)", LogLevel::INFO);
-    }
-
-    return TorrentConfig(
-        input_path,
-        output,
-        cv.trackers.value_or(std::vector<std::string>{}),
-        version,
-        cv.comment,
-        cv.is_private.value_or(false),
-        cv.web_seeds.value_or(std::vector<std::string>{}),
-        piece_size_bytes,
-        creator,
-        cv.name,
-        include_creation_date,
-        cv.source,
-        cv.entropy.value_or(false),
-        utils::apply_builtin_excludes(compile_patterns(cv.exclude_patterns), use_builtin_excludes),
-        compile_patterns(cv.include_patterns),
-        false,
-        cv.target_piece_count
-    );
 }
 
 }
@@ -248,7 +153,7 @@ BatchConfig BatchProcessor::parse(const fs::path& yaml_path)
     return config;
 }
 
-BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& presets, const TrackerRulesDatabase& rules, OutputSink& sink)
+BatchResult BatchProcessor::execute_job(int job_index, const PlannerResources& resources, OutputSink& sink)
 {
     const BatchJob& job = config_.jobs[job_index];
     BatchResult result;
@@ -259,116 +164,27 @@ BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& prese
     auto start = std::chrono::steady_clock::now();
 
     try {
-        ConfigValues resolved;
+        CreationRequest request;
+        request.input = fs::path(job.path);
+        request.values = job.values;
 
-        if (job.preset) {
-            resolved = presets.resolve(*job.preset);
+        // Validate before creating output directories so a typo in `path`
+        // does not leave empty directories behind.
+        if (!fs::exists(request.input)) {
+            throw std::runtime_error("Path does not exist: " + request.input.string());
         }
 
-        resolved = merge_config_values(resolved, job.values);
+        request.preset = job.preset;
+        request.output = resolve_explicit_output(job, config_.output_dir);
+        request.output_dir = config_.output_dir;
+        request.fail_on_season_warning = job.fail_on_season_warning;
+        request.silent = true;
 
-        if (!resolved.path) {
-            resolved.path = job.path;
-        }
-        if (!resolved.output && job.output) {
-            resolved.output = *job.output;
-        }
+        CreationPlanner planner(resources);
+        CreationPlan plan = planner.plan(request, sink);
+        ensure_output_parent(plan.config.output);
 
-        // Validate mutual exclusivity
-        if (resolved.piece_size && resolved.target_piece_count) {
-            throw std::runtime_error("Job " + std::to_string(job_index + 1)
-                + ": piece_size and target_piece_count are mutually exclusive");
-        }
-
-        // Compute content size once for target resolution and/or tracker rule enforcement
-        bool need_content_size = (resolved.target_piece_count && !resolved.piece_size)
-            || !resolved.trackers.value_or(std::vector<std::string>{}).empty();
-        int64_t content_size = need_content_size
-            ? utils::compute_content_size(fs::path(*resolved.path)) : 0;
-
-        // Resolve target_piece_count -> piece_size before tracker rule enforcement
-        if (resolved.target_piece_count && !resolved.piece_size) {
-            if (*resolved.target_piece_count <= 0) {
-                throw std::runtime_error("Job " + std::to_string(job_index + 1)
-                    + ": target_piece_count must be positive");
-            }
-
-            if (content_size > 0) {
-                int resolved_bytes = utils::piece_size_for_target_count(content_size, *resolved.target_piece_count);
-                resolved.piece_size = resolved_bytes / 1024;
-                int64_t resulting_pieces = (content_size + resolved_bytes - 1) / resolved_bytes;
-                log_message("Job " + std::to_string(job_index + 1) + ": target piece count "
-                    + std::to_string(*resolved.target_piece_count) + " resolved to "
-                    + std::to_string(resolved_bytes / 1024) + " KB ("
-                    + std::to_string(resulting_pieces) + " pieces)", LogLevel::INFO);
-            } else {
-                log_message("Job " + std::to_string(job_index + 1) + ": target_piece_count "
-                    + std::to_string(*resolved.target_piece_count)
-                    + " ignored: content size is 0", LogLevel::WARNING);
-                resolved.target_piece_count = std::nullopt;
-            }
-        }
-
-        auto trackers = resolved.trackers.value_or(std::vector<std::string>{});
-        if (!trackers.empty()) {
-            auto matched_rule = rules.find_matching_rule(trackers);
-            if (matched_rule) {
-                if (matched_rule->source && !resolved.source) {
-                    resolved.source = *matched_rule->source;
-                    log_message("Job " + std::to_string(job_index + 1) + ": rule '"
-                        + matched_rule->name + "' auto-set source to '" + *resolved.source + "'", LogLevel::INFO);
-                }
-
-                if (matched_rule->max_piece_length || matched_rule->max_torrent_size || !matched_rule->piece_length_overrides.empty()) {
-
-                    std::optional<int> current_kb;
-                    if (resolved.piece_size && *resolved.piece_size > 0) {
-                        current_kb = *resolved.piece_size;
-                    }
-
-                    auto enforcement = rules.enforce(*matched_rule, content_size, current_kb);
-
-                    if (enforcement.adjusted && enforcement.adjusted_piece_length) {
-                        if (current_kb) {
-                            std::string limit_info;
-                            if (matched_rule->max_piece_length) {
-                                limit_info = "max_piece_length (" + std::to_string(*matched_rule->max_piece_length / 1024) + " KB)";
-                            } else {
-                                limit_info = "rule constraint";
-                            }
-                            log_message("Job " + std::to_string(job_index + 1) + ": rule '"
-                                + matched_rule->name + "': user-specified piece size ("
-                                + std::to_string(*current_kb) + " KB) adjusted by " + limit_info, LogLevel::WARNING);
-                        } else {
-                            resolved.piece_size = *enforcement.adjusted_piece_length;
-                        }
-                    }
-
-                    if (enforcement.constraint_violation) {
-                        log_message("Job " + std::to_string(job_index + 1) + ": " + enforcement.violation_message, LogLevel::WARNING);
-                    }
-                }
-            } else {
-                log_message("Job " + std::to_string(job_index + 1) + ": no matching rule found for configured trackers", LogLevel::INFO);
-            }
-        }
-
-        fs::path output_dir;
-        if (config_.output_dir) {
-            output_dir = *config_.output_dir;
-        }
-
-        TorrentConfig tc = build_torrent_config(resolved, output_dir);
-
-        auto season_error = season_pack::evaluate_season_warning(
-            tc.path, job.fail_on_season_warning, job_index);
-        if (season_error)
-        {
-            throw std::runtime_error(*season_error);
-        }
-
-        tc.silent = true;
-        TorrentCreator creator(std::move(tc), sink);
+        TorrentCreator creator(std::move(plan.config), sink);
         creator.create_torrent();
 
         result.success = true;
@@ -384,21 +200,31 @@ BatchResult BatchProcessor::execute_job(int job_index, const PresetLoader& prese
 
 std::vector<BatchResult> BatchProcessor::run(OutputSink& sink)
 {
-    PresetLoader presets;
+    auto presets = std::make_shared<PresetLoader>();
     try {
         auto preset_path = PresetLoader::find_preset_file(config_.preset_file);
-        presets.load(preset_path);
+        presets->load(preset_path);
     } catch (const std::runtime_error& e) {
         log_message("Preset file not available: " + std::string(e.what()), LogLevel::WARNING);
+        // load() may have populated part of the file before failing; jobs must
+        // not run against a partially loaded preset set.
+        presets = std::make_shared<PresetLoader>();
     }
 
-    TrackerRulesDatabase rules;
+    auto rules = std::make_shared<TrackerRulesDatabase>();
     try {
         auto rules_path = TrackerRulesDatabase::find_rules_file(config_.rules_file);
-        rules.load(rules_path);
+        rules->load(rules_path);
     } catch (const std::runtime_error& e) {
         log_message("Rules file not available: " + std::string(e.what()), LogLevel::WARNING);
+        // Same rationale as presets: never use a partially loaded rules DB.
+        rules = std::make_shared<TrackerRulesDatabase>();
     }
+
+    // Empty-on-failure loaders are injected so the planner does not rediscover
+    // presets.yaml/rules.yaml per job and batch keeps its warn-and-continue
+    // behavior when those files are missing.
+    const PlannerResources resources{presets, rules};
 
     std::vector<BatchResult> results(config_.jobs.size());
     std::atomic<int> next_job{0};
@@ -408,17 +234,20 @@ std::vector<BatchResult> BatchProcessor::run(OutputSink& sink)
             int idx = next_job.fetch_add(1);
             if (idx >= static_cast<int>(config_.jobs.size())) break;
 
-            log_message("Job " + std::to_string(idx + 1) + " started: "
-                + sanitize_for_terminal(config_.jobs[idx].path), LogLevel::INFO);
+            // Tag every planner/creator log line with the job number so
+            // concurrent workers stay distinguishable in the log file.
+            ScopedLogContext context("Job " + std::to_string(idx + 1));
 
-            results[idx] = execute_job(idx, presets, rules, sink);
+            log_message("started: " + sanitize_for_terminal(config_.jobs[idx].path), LogLevel::INFO);
+
+            results[idx] = execute_job(idx, resources, sink);
 
             if (results[idx].success) {
-                log_message("Job " + std::to_string(idx + 1) + " completed ("
-                    + std::to_string(results[idx].elapsed_seconds) + "s)", LogLevel::INFO);
+                log_message("completed (" + std::to_string(results[idx].elapsed_seconds) + "s)",
+                    LogLevel::INFO);
             } else {
-                log_message("Job " + std::to_string(idx + 1) + " failed: "
-                    + sanitize_for_terminal(results[idx].error_message), LogLevel::ERR);
+                log_message("failed: " + sanitize_for_terminal(results[idx].error_message),
+                    LogLevel::ERR);
             }
         }
     };

@@ -54,9 +54,9 @@ struct CreationPlan {
 /**
  * @brief Preloaded resources a caller can share across planning calls.
  *
- * The CLI injects a loaded PresetLoader when `--preset` is used, and the
- * interactive wizard injects an explicit rules database. The GUI passes empty
- * resources. Batch is not migrated to the planner yet.
+ * The CLI injects a loaded PresetLoader when `--preset` is used, the
+ * interactive wizard injects an explicit rules database, and batch injects
+ * preset/rules instances loaded once in run(). The GUI passes empty resources.
  *
  * Injected resources take precedence over `preset_file` and `rules_file` in
  * the request.

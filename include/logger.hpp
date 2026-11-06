@@ -29,4 +29,24 @@ enum class LogLevel {
  */
 void log_message(const std::string& message, LogLevel level = LogLevel::INFO);
 
+/**
+ * @brief Prefix every log entry written by the current thread.
+ *
+ * Batch jobs run concurrently in a worker pool, so planner and creator
+ * messages would otherwise be indistinguishable in the log file. The prefix
+ * is thread-local and restored when the guard goes out of scope, which keeps
+ * concurrent jobs from leaking their context into each other.
+ */
+class ScopedLogContext {
+public:
+    explicit ScopedLogContext(std::string prefix);
+    ~ScopedLogContext();
+
+    ScopedLogContext(const ScopedLogContext&) = delete;
+    ScopedLogContext& operator=(const ScopedLogContext&) = delete;
+
+private:
+    std::string previous_;
+};
+
 #endif

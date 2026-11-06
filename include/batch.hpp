@@ -1,6 +1,7 @@
 #ifndef BATCH_HPP
 #define BATCH_HPP
 
+#include "creation_planner.hpp"
 #include "preset.hpp"
 #include "tracker_rules.hpp"
 #include "torrent_creator.hpp"
@@ -77,7 +78,7 @@ public:
 private:
     BatchConfig config_;
 
-    BatchResult execute_job(int job_index, const PresetLoader& presets, const TrackerRulesDatabase& rules, OutputSink& sink);
+    BatchResult execute_job(int job_index, const PlannerResources& resources, OutputSink& sink);
 };
 
 #endif

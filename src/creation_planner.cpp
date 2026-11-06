@@ -225,28 +225,10 @@ OutputResolution resolve_output(const CreationRequest &request,
     if (request.output_dir && !request.output_dir->empty())
     {
         std::error_code ec;
-        if (fs::exists(*request.output_dir, ec))
+        if (fs::exists(*request.output_dir, ec) && !fs::is_directory(*request.output_dir))
         {
-            if (!fs::is_directory(*request.output_dir))
-            {
-                throw std::runtime_error("Output directory is not a directory: "
-                                         + request.output_dir->string());
-            }
-        }
-        else
-        {
-            fs::create_directories(*request.output_dir, ec);
-            if (!ec)
-            {
-                log_message("Created output directory: " + request.output_dir->string(),
-                            LogLevel::INFO);
-            }
-            if (ec)
-            {
-                throw std::runtime_error("Failed to create output directory: "
-                                         + request.output_dir->string() + " (" + ec.message()
-                                         + ")");
-            }
+            throw std::runtime_error("Output directory is not a directory: "
+                                     + request.output_dir->string());
         }
     }
 
@@ -286,6 +268,7 @@ MetadataResolution resolve_metadata(const CreationRequest &request, const Config
     if (merged.no_creator && *merged.no_creator)
     {
         metadata.creator = std::nullopt;
+        log_message("Creator omitted via no_creator setting", LogLevel::INFO);
     }
     else if (merged.creator)
     {
@@ -295,6 +278,7 @@ MetadataResolution resolve_metadata(const CreationRequest &request, const Config
     if (merged.no_date && *merged.no_date)
     {
         metadata.include_creation_date = false;
+        log_message("Creation date omitted via no_date setting", LogLevel::INFO);
     }
     else if (merged.creation_date)
     {
@@ -337,6 +321,11 @@ MetadataResolution resolve_metadata(const CreationRequest &request, const Config
     }
 
     const bool use_builtin_excludes = merged.builtin_excludes.value_or(true);
+    if (use_builtin_excludes && request.silent)
+    {
+        log_message("Applying built-in exclude patterns (set builtin_excludes: false to disable)",
+                    LogLevel::INFO);
+    }
     metadata.exclude_regex = compile_patterns(
         merged.exclude_patterns.value_or(std::vector<std::string>{}), "exclude");
     metadata.include_regex = compile_patterns(
@@ -600,6 +589,29 @@ CreationPlan CreationPlanner::plan(const CreationRequest &request, OutputSink &s
                          metadata.include_creation_date, std::move(rules.source), metadata.entropy,
                          std::move(metadata.exclude_regex), std::move(metadata.include_regex),
                          request.silent, rules.target_piece_count);
+
+    // Create the auto-named output directory only after the TorrentConfig
+    // constructor validated the input, so a missing input does not leave an
+    // empty directory behind.
+    if (output.auto_named && request.output_dir && !request.output_dir->empty())
+    {
+        std::error_code ec;
+        if (!fs::exists(*request.output_dir, ec))
+        {
+            fs::create_directories(*request.output_dir, ec);
+            if (!ec)
+            {
+                log_message("Created output directory: " + request.output_dir->string(),
+                            LogLevel::INFO);
+            }
+            if (ec)
+            {
+                throw std::runtime_error("Failed to create output directory: "
+                                         + request.output_dir->string() + " (" + ec.message()
+                                         + ")");
+            }
+        }
+    }
 
     return CreationPlan{std::move(config), output.auto_named};
 }

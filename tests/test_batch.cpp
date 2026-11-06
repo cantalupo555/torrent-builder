@@ -6,6 +6,7 @@
 #include "torrent_inspector.hpp"
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -329,6 +330,48 @@ jobs:
     EXPECT_TRUE(fs::exists(temp_dir / "sink_out.torrent"));
 }
 
+TEST_F(BatchTest, RunLogsJobContext) {
+    struct CwdGuard {
+        fs::path previous;
+        ~CwdGuard() {
+            std::error_code ec;
+            fs::current_path(previous, ec);
+        }
+    } cwd_guard{fs::current_path()};
+
+    fs::current_path(temp_dir);
+    std::error_code remove_ec;
+    fs::remove(temp_dir / "torrent_builder.log", remove_ec);
+
+    fs::path test_file = temp_dir / "log_context.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        f << "log context content";
+    }
+
+    write_file("batch.yaml", R"(
+version: 1
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "log_context.torrent").generic_string() + R"("
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << results[0].error_message;
+
+    std::ifstream log(temp_dir / "torrent_builder.log");
+    ASSERT_TRUE(log);
+    std::string content((std::istreambuf_iterator<char>(log)),
+                        std::istreambuf_iterator<char>());
+    EXPECT_NE(content.find("Job 1: started:"), std::string::npos);
+    EXPECT_NE(content.find("Job 1: completed"), std::string::npos);
+    EXPECT_NE(content.find("Job 1: Starting torrent creation"), std::string::npos);
+}
+
 TEST_F(BatchTest, ParseNoCreatorNoDate) {
     namespace fs = std::filesystem;
     auto temp_dir = fs::temp_directory_path() / ("batch_no_creator_date_" + std::to_string(portable_getpid()));
@@ -497,6 +540,52 @@ jobs:
     ASSERT_EQ(results.size(), 1u);
     EXPECT_TRUE(results[0].success);
     EXPECT_TRUE(fs::exists(temp_dir / "rules_out.torrent"));
+
+    TorrentInspector inspector((temp_dir / "rules_out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.source.has_value());
+    EXPECT_EQ(*meta.source, "PTP");
+}
+
+TEST_F(BatchTest, RunWithEmptySourceUsesRuleSource) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    write_file("rules.yaml", R"(
+version: 1
+trackers:
+  ptp:
+    domain: "passthepopcorn.me"
+    source: "PTP"
+)");
+
+    write_file("batch.yaml", R"(
+version: 1
+rules_file: ")" + (temp_dir / "rules.yaml").generic_string() + R"("
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "empty_source.torrent").generic_string() + R"("
+    trackers:
+      - "https://passthepopcorn.me/announce"
+    source: ""
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << results[0].error_message;
+
+    TorrentInspector inspector((temp_dir / "empty_source.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    ASSERT_TRUE(meta.source.has_value());
+    EXPECT_EQ(*meta.source, "PTP")
+        << "An empty source is cleared before tracker rules apply";
 }
 
 TEST_F(BatchTest, RunWithRulesAndExplicitPieceSizePreserved) {
@@ -666,6 +755,54 @@ jobs:
     EXPECT_TRUE(fs::exists(temp_dir / "good2.torrent"));
 }
 
+TEST_F(BatchTest, RunWithMissingInputDoesNotCreateOutputDir) {
+    fs::path missing = temp_dir / "missing.bin";
+    fs::path output_dir = temp_dir / "output_not_created";
+
+    write_file("batch.yaml", R"(
+version: 1
+jobs:
+  - path: ")" + missing.generic_string() + R"("
+    output: ")" + (output_dir / "out.torrent").generic_string() + R"("
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_FALSE(results[0].success);
+    EXPECT_NE(results[0].error_message.find("Path does not exist"), std::string::npos);
+    EXPECT_FALSE(fs::exists(output_dir))
+        << "A missing input must fail before output directories are created";
+}
+
+TEST_F(BatchTest, FailedPlanDoesNotCreateOutputDir) {
+    fs::path input = temp_dir / "plan_failure.bin";
+    {
+        std::ofstream f(input, std::ios::binary);
+        f << "plan failure content";
+    }
+    fs::path output_dir = temp_dir / "plan_failure_output";
+
+    write_file("batch.yaml", R"(
+version: 1
+jobs:
+  - path: ")" + input.generic_string() + R"("
+    output: ")" + (output_dir / "out.torrent").generic_string() + R"("
+    target_piece_count: 0
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_FALSE(results[0].success);
+    EXPECT_FALSE(fs::exists(output_dir))
+        << "A failed plan must not leave output directories behind";
+}
+
 TEST_F(BatchTest, RunAutoOutputPath) {
     fs::path test_file = temp_dir / "auto_output.bin";
     {
@@ -688,6 +825,57 @@ jobs:
     ASSERT_EQ(results.size(), 1u);
     EXPECT_TRUE(results[0].success);
     EXPECT_TRUE(results[0].error_message.empty());
+    EXPECT_TRUE(fs::exists(temp_dir / "auto_output.torrent"));
+}
+
+TEST_F(BatchTest, RunAppendsTorrentExtensionToOutput) {
+    fs::path test_file = temp_dir / "extension.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        f << "extension content";
+    }
+
+    write_file("batch.yaml", R"(
+version: 1
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "custom_out").generic_string() + R"("
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << results[0].error_message;
+    EXPECT_TRUE(fs::exists(temp_dir / "custom_out.torrent"));
+    EXPECT_FALSE(fs::exists(temp_dir / "custom_out"));
+}
+
+TEST_F(BatchTest, RunWithRelativeOutputJoinedToOutputDir) {
+    fs::path test_file = temp_dir / "relative_output.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        f << "relative output content";
+    }
+
+    fs::path output_dir = temp_dir / "joined";
+
+    write_file("batch.yaml", R"(
+version: 1
+output_dir: ")" + output_dir.generic_string() + R"("
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: "nested/rel.torrent"
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << results[0].error_message;
+    EXPECT_TRUE(fs::exists(output_dir / "nested" / "rel.torrent"));
 }
 
 TEST_F(BatchTest, RunWithPresetEndToEnd) {
@@ -783,7 +971,81 @@ jobs:
     EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
 }
 
-TEST_F(BatchTest, RunWithInvalidPresetPieceSizeFails) {
+TEST_F(BatchTest, RunWithCorruptRulesFileContinues) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    write_file("rules.yaml", "version: [unclosed\n");
+
+    write_file("batch.yaml", R"(
+version: 1
+rules_file: ")" + (temp_dir / "rules.yaml").generic_string() + R"("
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "corrupt_rules.torrent").generic_string() + R"("
+    trackers:
+      - "https://tracker.example/announce"
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << results[0].error_message;
+    EXPECT_TRUE(fs::exists(temp_dir / "corrupt_rules.torrent"));
+}
+
+TEST_F(BatchTest, RunWithPartiallyInvalidRulesFileIgnoresDefaults) {
+    fs::path test_file = temp_dir / "partial_rules.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024 * 1024, 'A');
+        f.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+
+    // The default rule loads before the invalid tracker entry throws.
+    // A partially loaded DB would cap the target-derived size at 128 KiB.
+    write_file("rules.yaml", R"(
+version: 1
+default:
+  max_piece_length: 131072
+trackers:
+  bad:
+    domain: "tracker.example"
+    piece_length_overrides:
+      - piece_length: 32
+)");
+
+    write_file("batch.yaml", R"(
+version: 1
+rules_file: ")" + (temp_dir / "rules.yaml").generic_string() + R"("
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "partial_rules.torrent").generic_string() + R"("
+    trackers:
+      - "https://tracker.example/announce"
+    target_piece_count: 4
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << results[0].error_message;
+
+    TorrentInspector inspector((temp_dir / "partial_rules.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.piece_length, 256 * 1024)
+        << "A partially loaded rules file must not apply its default rule";
+}
+
+TEST_F(BatchTest, RunWithInvalidPresetPieceSizeFallsBackToAuto) {
     fs::path test_file = temp_dir / "testfile.bin";
     {
         std::ofstream f(test_file, std::ios::binary);
@@ -812,8 +1074,54 @@ jobs:
     auto results = processor.run();
 
     ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << results[0].error_message;
+    EXPECT_TRUE(fs::exists(temp_dir / "out.torrent"));
+
+    TorrentInspector inspector((temp_dir / "out.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    // Invalid preset values are ignored (CLI parity); 1 KB content uses 16 KB pieces.
+    EXPECT_EQ(meta.piece_length, 16 * 1024);
+}
+
+TEST_F(BatchTest, RunWithPartiallyInvalidPresetFileFailsJob) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    // "good" is parsed before the invalid "bad" entry throws, so a partially
+    // loaded loader would still resolve the preset.
+    write_file("presets.yaml", R"(
+version: 1
+default:
+  comment: "from default"
+presets:
+  good:
+    comment: "from good"
+  bad:
+    trackers:
+      - "not-a-url"
+)");
+
+    write_file("batch.yaml", R"(
+version: 1
+preset_file: ")" + (temp_dir / "presets.yaml").generic_string() + R"("
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "partial_preset.torrent").generic_string() + R"("
+    preset: good
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
     EXPECT_FALSE(results[0].success);
-    EXPECT_NE(results[0].error_message.find("Invalid piece size"), std::string::npos);
+    EXPECT_NE(results[0].error_message.find("Unknown preset"), std::string::npos)
+        << "A preset file that fails to load must not be partially used";
 }
 
 TEST_F(BatchTest, WorkersCappedWhenExceedingJobCount) {
@@ -1043,6 +1351,7 @@ jobs:
     ASSERT_EQ(results.size(), 1u);
     EXPECT_TRUE(results[0].success);
     EXPECT_TRUE(fs::is_directory(nested_output)) << "Output directory should have been auto-created";
+    EXPECT_TRUE(fs::exists(nested_output / "testfile.torrent"));
 }
 
 TEST_F(BatchTest, RunWithHybridVersion) {
@@ -1091,6 +1400,35 @@ jobs:
 
     ASSERT_EQ(results.size(), 1u);
     EXPECT_TRUE(results[0].success);
+}
+
+TEST_F(BatchTest, RunWithV2Version) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    write_file("batch.yaml", R"(
+version: 1
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "v2.torrent").generic_string() + R"("
+    torrent_version: 2
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << results[0].error_message;
+
+    TorrentInspector inspector((temp_dir / "v2.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_FALSE(meta.info_hash_v2.empty());
+    EXPECT_TRUE(meta.info_hash_v1.empty());
 }
 
 TEST_F(BatchTest, RunWithPieceSize) {
@@ -1145,6 +1483,92 @@ jobs:
     EXPECT_NE(results[0].error_message.find("Invalid piece size"), std::string::npos);
 }
 
+TEST_F(BatchTest, RunWithZeroPieceSizeFails) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    { std::ofstream f(test_file, std::ios::binary); f << "test content"; }
+
+    write_file("batch.yaml", R"(
+version: 1
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "out.torrent").generic_string() + R"("
+    piece_size: 0
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_FALSE(results[0].success);
+    EXPECT_NE(results[0].error_message.find("Invalid piece size"), std::string::npos);
+}
+
+TEST_F(BatchTest, RunWithInvalidTorrentVersionFails) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    { std::ofstream f(test_file, std::ios::binary); f << "test content"; }
+
+    write_file("batch.yaml", R"(
+version: 1
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "out.torrent").generic_string() + R"("
+    torrent_version: 4
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_FALSE(results[0].success);
+    EXPECT_NE(results[0].error_message.find("Invalid torrent version"), std::string::npos);
+}
+
+TEST_F(BatchTest, RunWithDuplicateTrackersFails) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    { std::ofstream f(test_file, std::ios::binary); f << "test content"; }
+
+    write_file("batch.yaml", R"(
+version: 1
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "out.torrent").generic_string() + R"("
+    trackers:
+      - "https://tracker.example/announce"
+      - "https://tracker.example/announce"
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_FALSE(results[0].success);
+    EXPECT_NE(results[0].error_message.find("Duplicate tracker URL"), std::string::npos);
+}
+
+TEST_F(BatchTest, RunWithBlankNameFails) {
+    fs::path test_file = temp_dir / "testfile.bin";
+    { std::ofstream f(test_file, std::ios::binary); f << "test content"; }
+
+    write_file("batch.yaml", R"(
+version: 1
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "out.torrent").generic_string() + R"("
+    name: "   "
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_FALSE(results[0].success);
+    EXPECT_NE(results[0].error_message.find("Torrent name cannot be empty"), std::string::npos);
+}
+
 TEST_F(BatchTest, RunWithTargetPieceCount) {
 #ifdef __MINGW32__
     GTEST_SKIP() << "Skipped on MinGW due to known SegFault in libtorrent hashing";
@@ -1175,6 +1599,50 @@ jobs:
     TorrentMetadata meta = inspector.inspect();
     // 50 MB / 100 pieces → 512 KB piece size
     EXPECT_EQ(meta.piece_length, 512 * 1024);
+}
+
+TEST_F(BatchTest, RunWithTargetPieceCountAndRulesCap) {
+#ifdef __MINGW32__
+    GTEST_SKIP() << "Skipped on MinGW due to known SegFault in libtorrent hashing";
+#endif
+    fs::path test_file = temp_dir / "capped_target.bin";
+    {
+        std::ofstream f(test_file, std::ios::binary);
+        std::vector<char> data(1024 * 1024, 'C');
+        f.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+
+    write_file("capped_rules.yaml", R"(
+version: 1
+trackers:
+  capped:
+    domain: "tracker.example"
+    max_piece_length: 131072
+)");
+
+    write_file("capped_batch.yaml", R"(
+version: 1
+rules_file: ")" + (temp_dir / "capped_rules.yaml").generic_string() + R"("
+jobs:
+  - path: ")" + test_file.generic_string() + R"("
+    output: ")" + (temp_dir / "capped_target.torrent").generic_string() + R"("
+    trackers:
+      - "https://tracker.example/announce"
+    target_piece_count: 4
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "capped_batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].success) << results[0].error_message;
+
+    TorrentInspector inspector((temp_dir / "capped_target.torrent").string());
+    TorrentMetadata meta = inspector.inspect();
+    EXPECT_EQ(meta.piece_length, 128 * 1024)
+        << "Tracker rule must cap the target-derived piece size";
+    EXPECT_EQ(meta.piece_count, 8);
 }
 
 TEST_F(BatchTest, RunWithTargetPieceCountAndPieceSizeFails) {
@@ -1253,6 +1721,41 @@ jobs:
     ASSERT_EQ(results.size(), 1u);
     EXPECT_FALSE(results[0].success);
     EXPECT_NE(results[0].error_message.find("E02"), std::string::npos);
+}
+
+TEST_F(BatchTest, AutoOutputDirNotCreatedWhenPlanFails) {
+    fs::path season_dir = temp_dir / "Show.Name.S01";
+    fs::create_directories(season_dir);
+    {
+        std::ofstream f(season_dir / "Show.Name.S01E01.mkv", std::ios::binary);
+        std::vector<char> data(1024, 'A');
+        f.write(data.data(), data.size());
+    }
+    {
+        std::ofstream f(season_dir / "Show.Name.S01E03.mkv", std::ios::binary);
+        std::vector<char> data(1024, 'A');
+        f.write(data.data(), data.size());
+    }
+
+    fs::path output_dir = temp_dir / "auto_output_failed";
+
+    write_file("batch.yaml", R"(
+version: 1
+output_dir: ")" + output_dir.generic_string() + R"("
+jobs:
+  - path: ")" + season_dir.generic_string() + R"("
+    fail_on_season_warning: true
+)");
+
+    auto config = BatchProcessor::parse(temp_dir / "batch.yaml");
+    BatchProcessor processor(std::move(config));
+    auto results = processor.run();
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_FALSE(results[0].success);
+    EXPECT_NE(results[0].error_message.find("E02"), std::string::npos);
+    EXPECT_FALSE(fs::exists(output_dir))
+        << "An auto-named failed plan must not leave the output directory behind";
 }
 
 TEST_F(BatchTest, RunWithSeasonWarningSucceedsOnCompletePack) {
