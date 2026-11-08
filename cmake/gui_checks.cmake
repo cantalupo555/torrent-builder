@@ -1,8 +1,10 @@
 # Validation helpers for the optional Qt6 GUI.
 #
 # These live in a standalone module (instead of inline in the top-level
-# CMakeLists.txt) so the fatal branches can be exercised by script-mode CTest
-# cases without a full project configure. See tests/cmake/test_gui_*.cmake.
+# CMakeLists.txt) so the project and the CTest matrix share the same helpers.
+# The matrix calls the non-fatal paths directly and exercises the fatal
+# branches through nested project configures; see
+# tests/cmake/test_gui_matrix.cmake.
 
 function(tb_validate_gui_options require_gui enable_gui)
     if(require_gui AND NOT enable_gui)
