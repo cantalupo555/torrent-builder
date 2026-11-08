@@ -35,7 +35,7 @@ option(TB_ENABLE_GUI "Build the Qt6 desktop GUI (requires Qt6)" ON)
 option(TB_REQUIRE_GUI "Fail configuration when Qt6 is required but unavailable" OFF)
 
 # The guards live in a standalone module so their fatal branches stay covered
-# by script-mode tests (tests/cmake/test_gui_*.cmake, registered below).
+# by the script-mode matrix (tests/cmake/test_gui_matrix.cmake, registered below).
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/gui_checks.cmake)
 tb_validate_gui_options(${TB_REQUIRE_GUI} ${TB_ENABLE_GUI})
 
@@ -320,73 +320,48 @@ add_test(NAME cmake_version_fallback
     COMMAND ${CMAKE_COMMAND}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_version_fallback.cmake)
 
-add_test(NAME cmake_gui_require_without_enable
-    COMMAND ${CMAKE_COMMAND}
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_require_without_enable.cmake)
+# The forwarding case needs an OpenSSL prefix that FindOpenSSL accepts on every
+# platform; OPENSSL_ROOT_DIR is often empty when the system installation was
+# found, and a non-existent root is not a harmless hint on Windows. Derive one
+# from the discovered headers.
+if(OPENSSL_ROOT_DIR)
+    set(TB_TEST_OPENSSL_ROOT_DIR "${OPENSSL_ROOT_DIR}")
+elseif(OPENSSL_INCLUDE_DIR)
+    get_filename_component(TB_TEST_OPENSSL_ROOT_DIR "${OPENSSL_INCLUDE_DIR}" DIRECTORY)
+else()
+    set(TB_TEST_OPENSSL_ROOT_DIR "")
+endif()
 
-add_test(NAME cmake_gui_require_missing_qt
-    COMMAND ${CMAKE_COMMAND}
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_require_missing_qt.cmake)
+# Matrix-driven GUI configure tests (issue #85). The forwarding block below is
+# written once and shared by every case; each case runs in its own process so
+# failures stay isolated, individually rerunnable and separately timed out.
+macro(tb_add_gui_matrix_case case_name case_timeout)
+    add_test(NAME cmake_gui_matrix_${case_name}
+        COMMAND ${CMAKE_COMMAND}
+            "-DTEST_MATRIX_CASE=${case_name}"
+            "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+            "-DTEST_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+            "-DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            "-DTEST_C_COMPILER=${CMAKE_C_COMPILER}"
+            "-DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
+            "-DTEST_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+            "-DTEST_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+            "-DTEST_OPENSSL_ROOT_DIR=${TB_TEST_OPENSSL_ROOT_DIR}"
+            "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+            "-DTEST_QT_FOUND=${Qt6_FOUND}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_matrix.cmake)
+    set_tests_properties(cmake_gui_matrix_${case_name} PROPERTIES
+        TIMEOUT ${case_timeout})
+endmacro()
 
-add_test(NAME cmake_gui_optional_missing_qt
-    COMMAND ${CMAKE_COMMAND}
-        -DTEST_GENERATOR=${CMAKE_GENERATOR}
-        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
-        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
-        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_optional_missing_qt.cmake)
-
-add_test(NAME cmake_gui_wiring_invalid_combo
-    COMMAND ${CMAKE_COMMAND}
-        -DTEST_GENERATOR=${CMAKE_GENERATOR}
-        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
-        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
-        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_wiring_invalid_combo.cmake)
-
-add_test(NAME cmake_gui_wiring_missing_qt
-    COMMAND ${CMAKE_COMMAND}
-        -DTEST_GENERATOR=${CMAKE_GENERATOR}
-        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
-        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
-        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_wiring_missing_qt.cmake)
-
-add_test(NAME cmake_gui_defaults
-    COMMAND ${CMAKE_COMMAND}
-        -DTEST_GENERATOR=${CMAKE_GENERATOR}
-        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
-        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
-        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_defaults.cmake)
-
-add_test(NAME cmake_gui_disabled_with_qt
-    COMMAND ${CMAKE_COMMAND}
-        -DTEST_GENERATOR=${CMAKE_GENERATOR}
-        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
-        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
-        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_disabled_with_qt.cmake)
-
-add_test(NAME cmake_gui_prefix_path_list
-    COMMAND ${CMAKE_COMMAND}
-        -DTEST_GENERATOR=${CMAKE_GENERATOR}
-        -DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        -DTEST_C_COMPILER=${CMAKE_C_COMPILER}
-        -DTEST_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-        "-DTEST_OPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}"
-        "-DTEST_CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_gui_prefix_path_list.cmake)
+tb_add_gui_matrix_case(defaults 300)
+tb_add_gui_matrix_case(require_without_enable 300)
+tb_add_gui_matrix_case(require_missing_qt 300)
+tb_add_gui_matrix_case(optional_missing_qt 300)
+tb_add_gui_matrix_case(disabled 300)
+tb_add_gui_matrix_case(forwarding 300)
+tb_add_gui_matrix_case(prefix_list 300)
+tb_add_gui_matrix_case(windows_executable 900)
 
 # ─── Installation ────────────────────────────────────────────
 install(TARGETS torrent_builder
