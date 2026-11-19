@@ -204,6 +204,11 @@ if ! grep -Fq 'version: 1.0.0' "$tmp/nfpm.yaml"; then
     cat "$tmp/nfpm.yaml" >&2
     exit 1
 fi
+if ! grep -Fq "arch: ${arch}" "$tmp/nfpm.yaml"; then
+    echo "rendered config does not contain the target architecture" >&2
+    cat "$tmp/nfpm.yaml" >&2
+    exit 1
+fi
 ]=])
 execute_process(
     COMMAND "${TEST_BASH}" -c "${render_setup}" _ "${TEST_PACKAGING_SCRIPT}" "${host_arch}"
