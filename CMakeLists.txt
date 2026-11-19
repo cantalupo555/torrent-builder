@@ -209,6 +209,13 @@ if(TB_ENABLE_GUI AND Qt6_FOUND)
                 "torrent_builder_gui must be a macOS app bundle; "
                 "the documented run and install paths expect .app.")
         endif()
+        # The macOS packager installs the bundle as "Torrent Builder.app";
+        # keep the Info.plist name and identifier aligned with that branding.
+        set_target_properties(torrent_builder_gui PROPERTIES
+            MACOSX_BUNDLE_BUNDLE_NAME "Torrent Builder"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.cantalupo555.torrent-builder"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
     endif()
 
     target_include_directories(torrent_builder_gui PRIVATE
