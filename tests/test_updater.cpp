@@ -355,6 +355,71 @@ TEST_F(FindMatchingAssetTest, MatchesMacosArm64)
     EXPECT_EQ(*result, "https://example.com/macos_arm64");
 }
 
+TEST_F(FindMatchingAssetTest, IgnoresLinuxGuiPackages)
+{
+    std::string json = R"({
+        "assets": [
+            {"name": "torrent_builder_1.0.0_linux_amd64.deb", "browser_download_url": "https://example.com/gui_deb"},
+            {"name": "torrent_builder_1.0.0_linux_amd64.rpm", "browser_download_url": "https://example.com/gui_rpm"},
+            {"name": "torrent_builder_1.0.0_linux_amd64", "browser_download_url": "https://example.com/linux_amd64"}
+        ]
+    })";
+    PlatformInfo platform{"linux", "amd64"};
+    auto result = Updater::find_matching_asset(json, platform);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "https://example.com/linux_amd64");
+}
+
+TEST_F(FindMatchingAssetTest, IgnoresWindowsGuiBundleZip)
+{
+    std::string json = R"({
+        "assets": [
+            {"name": "torrent_builder_1.0.0_windows_amd64.zip", "browser_download_url": "https://example.com/gui_bundle"},
+            {"name": "torrent_builder_1.0.0_windows_amd64.exe", "browser_download_url": "https://example.com/windows_amd64"}
+        ]
+    })";
+    PlatformInfo platform{"windows", "amd64"};
+    auto result = Updater::find_matching_asset(json, platform);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "https://example.com/windows_amd64");
+}
+
+TEST_F(FindMatchingAssetTest, IgnoresMacosGuiImage)
+{
+    std::string json = R"({
+        "assets": [
+            {"name": "torrent_builder_1.0.0_macos_arm64.dmg", "browser_download_url": "https://example.com/gui_dmg"},
+            {"name": "torrent_builder_1.0.0_macos_arm64.zip", "browser_download_url": "https://example.com/macos_arm64"}
+        ]
+    })";
+    PlatformInfo platform{"macos", "arm64"};
+    auto result = Updater::find_matching_asset(json, platform);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "https://example.com/macos_arm64");
+}
+
+TEST_F(FindMatchingAssetTest, GuiOnlyReleaseDoesNotMatch)
+{
+    std::string json = R"({
+        "assets": [
+            {"name": "torrent_builder_1.0.0_linux_amd64.deb", "browser_download_url": "https://example.com/gui_deb"},
+            {"name": "torrent_builder_1.0.0_linux_amd64.rpm", "browser_download_url": "https://example.com/gui_rpm"},
+            {"name": "torrent_builder_1.0.0_windows_amd64.zip", "browser_download_url": "https://example.com/gui_zip"},
+            {"name": "torrent_builder_1.0.0_macos_arm64.dmg", "browser_download_url": "https://example.com/gui_dmg"}
+        ]
+    })";
+    const PlatformInfo platforms[] = {
+        {"linux", "amd64"},
+        {"windows", "amd64"},
+        {"macos", "arm64"},
+    };
+    for (const auto& platform : platforms)
+    {
+        EXPECT_FALSE(Updater::find_matching_asset(json, platform).has_value())
+            << platform.os << "/" << platform.arch;
+    }
+}
+
 TEST_F(FindMatchingAssetTest, NoMatchReturnsNullopt)
 {
     std::string json = R"({
