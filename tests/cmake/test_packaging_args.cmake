@@ -181,17 +181,34 @@ exit 0
 STUB
 cat > "$tmp/bin/nfpm" <<'STUB'
 #!/bin/sh
+out=""
+pkg=""
 while [ $# -gt 0 ]; do
     case "$1" in
         -f) cp "$2" "$TB_CAPTURE"; shift 2 ;;
+        -t) out="$2"; shift 2 ;;
+        -p) pkg="$2"; shift 2 ;;
         *) shift ;;
     esac
 done
+if [ -n "$out" ] && [ -n "$pkg" ]; then
+    : > "$out/package.${pkg}"
+fi
 exit 0
 STUB
 chmod +x "$tmp/bin/strip" "$tmp/bin/nfpm"
 PATH="$tmp/bin:$PATH" TB_CAPTURE="$tmp/nfpm.yaml" "$script" \
-    --version 1.0.0 --arch "$arch" --no-build --build-dir "$build" --dist-dir "$tmp/dist" || true
+    --version 1.0.0 --arch "$arch" --no-build --build-dir "$build" --dist-dir "$tmp/dist"
+for asset in \
+    "$tmp/dist/torrent_builder_1.0.0_linux_${arch}" \
+    "$tmp/dist/torrent_builder_1.0.0_linux_${arch}.deb" \
+    "$tmp/dist/torrent_builder_1.0.0_linux_${arch}.rpm"
+do
+    if [ ! -f "$asset" ]; then
+        echo "missing packaged asset: $asset" >&2
+        exit 1
+    fi
+done
 if [ ! -f "$tmp/nfpm.yaml" ]; then
     echo "the fake nfpm did not capture a config" >&2
     exit 1
