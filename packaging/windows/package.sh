@@ -82,7 +82,13 @@ mkdir -p "$DIST_DIR"
 # Stage outside --dist-dir: a user-supplied output path must never lose an
 # existing directory, and the staging tree must not be published as an asset.
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/torrent-builder-win.XXXXXX")"
-cleanup() { rm -rf "$STAGE"; }
+ZIP_CHECK=""
+cleanup() {
+    rm -rf "$STAGE"
+    if [ -n "$ZIP_CHECK" ]; then
+        rm -rf "$ZIP_CHECK"
+    fi
+}
 trap cleanup EXIT
 
 cp "$BUILD_DIR/torrent_builder.exe" "$BUILD_DIR/torrent_builder_gui.exe" "$STAGE/"
@@ -146,6 +152,15 @@ for entry in torrent_builder.exe torrent_builder_gui.exe; do
         exit 1
     fi
 done
+
+# Run the smoke tests from the extracted archive: checking the staging tree is
+# not enough, because a zip missing a DLL or the platform plugin would still
+# pass unzip -t.
+echo "==> Smoke-testing the extracted archive"
+ZIP_CHECK="$(mktemp -d "${TMPDIR:-/tmp}/torrent-builder-zip.XXXXXX")"
+unzip -q "$ZIP" -d "$ZIP_CHECK"
+( cd "$ZIP_CHECK" && PATH="$SMOKE_PATH" QT_QPA_PLATFORM=offscreen ./torrent_builder_gui.exe --smoke-test )
+PATH="$SMOKE_PATH" assert_reports_version "$ZIP_CHECK/torrent_builder.exe"
 
 # Keep publishing the standalone CLI executable: torrent_builder update looks
 # for exactly this asset name.
