@@ -320,6 +320,18 @@ add_test(NAME cmake_version_fallback
     COMMAND ${CMAKE_COMMAND}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_version_fallback.cmake)
 
+# Argument validation for the packaging scripts (shared parser in
+# packaging/common.sh). Every case exits before building or calling nfpm.
+find_program(TB_TEST_BASH bash)
+if(TB_TEST_BASH)
+    add_test(NAME packaging_args
+        COMMAND ${CMAKE_COMMAND}
+            -DTEST_BASH=${TB_TEST_BASH}
+            -DTEST_PACKAGING_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/package.sh
+            -DTEST_VERIFY_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/verify.sh
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_packaging_args.cmake)
+endif()
+
 # The forwarding case needs an OpenSSL prefix that FindOpenSSL accepts on every
 # platform; OPENSSL_ROOT_DIR is often empty when the system installation was
 # found, and a non-existent root is not a harmless hint on Windows. Derive one
