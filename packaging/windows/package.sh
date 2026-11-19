@@ -129,7 +129,7 @@ echo "==> Running packaged smoke tests"
 # system directories to prove the bundle is self-contained.
 SMOKE_PATH="/c/Windows/system32:/c/Windows"
 ( cd "$STAGE" && PATH="$SMOKE_PATH" QT_QPA_PLATFORM=offscreen ./torrent_builder_gui.exe --smoke-test )
-PATH="$SMOKE_PATH" assert_reports_version "$STAGE/torrent_builder.exe"
+( PATH="$SMOKE_PATH"; assert_reports_version "$STAGE/torrent_builder.exe" )
 
 ZIP="$DIST_DIR/torrent_builder_${VERSION}_windows_${ARCH}.zip"
 rm -f "$ZIP"
@@ -160,7 +160,7 @@ echo "==> Smoke-testing the extracted archive"
 ZIP_CHECK="$(mktemp -d "${TMPDIR:-/tmp}/torrent-builder-zip.XXXXXX")"
 unzip -q "$ZIP" -d "$ZIP_CHECK"
 ( cd "$ZIP_CHECK" && PATH="$SMOKE_PATH" QT_QPA_PLATFORM=offscreen ./torrent_builder_gui.exe --smoke-test )
-PATH="$SMOKE_PATH" assert_reports_version "$ZIP_CHECK/torrent_builder.exe"
+( PATH="$SMOKE_PATH"; assert_reports_version "$ZIP_CHECK/torrent_builder.exe" )
 
 # Keep publishing the standalone CLI executable: torrent_builder update looks
 # for exactly this asset name.
