@@ -1,6 +1,6 @@
 # Exercises the argument parsers of the packaging scripts through their public
-# entry points. Cases exit before building or calling nfpm, so the test only
-# needs bash.
+# entry points. Argument cases exit before building; the render case drives the
+# packager with stub strip/nfpm binaries, so the test only needs bash.
 
 if(NOT DEFINED TEST_BASH OR NOT DEFINED TEST_PACKAGING_SCRIPT)
     message(FATAL_ERROR "TEST_BASH and TEST_PACKAGING_SCRIPT are required")
@@ -114,6 +114,12 @@ expect_exit_message("${TEST_PACKAGING_SCRIPT}" 2 "does not match the host archit
 expect_exit_message("${TEST_PACKAGING_SCRIPT}" 2 "must not contain glob characters"
     "rejects glob characters in --build-dir"
     ${SAFE_ARGS} --version 1.0.0 --arch ${host_arch} --build-dir "out[1]")
+expect_exit_message("${TEST_PACKAGING_SCRIPT}" 2 "must not contain glob characters"
+    "rejects * in --build-dir"
+    ${SAFE_ARGS} --version 1.0.0 --arch ${host_arch} --build-dir "out*1")
+expect_exit_message("${TEST_PACKAGING_SCRIPT}" 2 "must not contain glob characters"
+    "rejects ? in --build-dir"
+    ${SAFE_ARGS} --version 1.0.0 --arch ${host_arch} --build-dir "out?1")
 expect_exit_message("${TEST_PACKAGING_SCRIPT}" 1 "expected binary not found"
     "accepts valid options and checks the binaries before nfpm"
     --version 1.0.0 --arch ${host_arch} --no-build --build-dir /nonexistent-tb-build)

@@ -328,7 +328,8 @@ add_test(NAME cmake_version_fallback
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_version_fallback.cmake)
 
 # Argument validation for the packaging scripts (shared parser in
-# packaging/common.sh). Every case exits before building or calling nfpm.
+# packaging/common.sh). The argument cases exit before building; the render
+# case drives the packager with stub strip/nfpm binaries.
 find_program(TB_TEST_BASH bash)
 if(TB_TEST_BASH)
     add_test(NAME packaging_args
