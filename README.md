@@ -59,6 +59,32 @@ brew install cmake libtorrent-rasterbar openssl@3
 
 To build, you need a compatible C++23 compiler (see Prerequisites). CMake will automatically check and display a clear error if the compiler is inadequate (e.g., GCC < 13).
 
+### Release packages
+
+Every `vX.Y.Z` release ships the CLI and the Qt6 GUI for Linux, Windows and macOS.
+
+| Platform | Asset | Contents |
+| --- | --- | --- |
+| Linux (amd64/arm64) | `torrent_builder_<version>_linux_<arch>.deb` / `.rpm` | CLI + GUI, desktop entry and icon (Qt6 comes from the distribution) |
+| Linux (amd64/arm64) | `torrent_builder_<version>_linux_<arch>` | CLI used by `torrent_builder update`; needs the distro's libtorrent, OpenSSL and glibc 2.39+ |
+| Windows (amd64/arm64) | `torrent_builder_<version>_windows_<arch>.zip` | CLI + GUI with the Qt, libtorrent and OpenSSL DLLs |
+| Windows (amd64/arm64) | `torrent_builder_<version>_windows_<arch>.exe` | CLI used by `torrent_builder update`; needs the DLLs from the `.zip` |
+| macOS (arm64/amd64) | `torrent_builder_<version>_macos_<arch>.dmg` | `.app` bundle with Qt embedded, plus a self-contained CLI |
+| macOS (arm64/amd64) | `torrent_builder_<version>_macos_<arch>.zip` | CLI used by `torrent_builder update`; needs Homebrew's libtorrent and OpenSSL |
+
+**Linux**: the packages require Qt 6.4 or newer from your distribution. They are built on Ubuntu 24.04, so they need glibc 2.39 or newer (Ubuntu 24.04+, Debian 13+, Fedora 40+). Install them with the package manager so dependencies resolve:
+
+```bash
+sudo apt install ./torrent_builder_<version>_linux_amd64.deb
+sudo dnf install ./torrent_builder_<version>_linux_amd64.rpm
+```
+
+Launch the GUI with `torrent_builder_gui` or the "Torrent Builder" entry in the application menu; the CLI stays at `torrent_builder`.
+
+**Windows**: the `.zip` is portable. Extract it and run `torrent_builder_gui.exe` (or `torrent_builder.exe` for the CLI). SmartScreen may warn because the binaries are not code-signed.
+
+**macOS**: open the `.dmg`, drag `Torrent Builder.app` into Applications, and use the `CLI` folder for the command-line binary. The app is signed ad-hoc but not notarized, so the first launch needs right-click → Open, or System Settings → Privacy & Security → Open Anyway.
+
 ### Build Instructions
 ```
 mkdir build
@@ -78,6 +104,8 @@ cmake .. -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
 **Versioning**: When building from a git tag (e.g., `v0.2.0`), the version is automatically detected. Otherwise, the version defaults to `dev`. You can override with `-DTORRENT_BUILDER_VERSION=x.y.z` during cmake configuration. Use `./torrent_builder --version` to check.
 
 ### GUI (Qt6, optional)
+
+Release packages already include the GUI (see [Release packages](#release-packages)). To build it from source:
 
 The Qt6 desktop GUI is built when Qt6 is available. `TB_ENABLE_GUI` defaults to `ON`; the target is skipped when Qt6 is missing. Set `-DTB_REQUIRE_GUI=ON` to make configuration fail instead (used by CI). If configuration fails for missing Qt, install Qt6 or reconfigure with `-DTB_ENABLE_GUI=OFF -DTB_REQUIRE_GUI=OFF` for a CLI-only build; `TB_REQUIRE_GUI=ON` requires `TB_ENABLE_GUI=ON`.
 
@@ -168,6 +196,10 @@ Process multiple torrent creation jobs from a YAML config file in parallel. See 
 ```
 
 Check for newer versions and update the binary in-place from GitHub Releases. Downloads are verified against SHA-256 checksums published in each release's `checksums.txt`.
+
+> **Package installs:** reinstall the new asset (`sudo apt install ./torrent_builder_<new>...deb`, `sudo dnf upgrade ./torrent_builder_<new>...rpm`). There is no APT/DNF repository behind these packages, so `apt upgrade`/`dnf upgrade` will not pick a new release; `torrent_builder update` replaces `/usr/bin/torrent_builder` in place and leaves the package database out of sync.
+
+> **macOS bundle:** the CLI inside the `.dmg` links against the bundled `CLI/lib`. `torrent_builder update` replaces it with the standalone asset, which needs Homebrew's libtorrent and OpenSSL; update from a new `.dmg` instead.
 
 > **Note:** Requires `curl` to be installed and available on the system PATH. On macOS, `unzip` is also required.
 
