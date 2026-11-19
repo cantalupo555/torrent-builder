@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Torrent Builder
+GenericName=Torrent Creator
+Comment=Create .torrent files from files and directories
+Exec=torrent_builder_gui
+Icon=torrent-builder
+Terminal=false
+Categories=Network;FileTransfer;
+Keywords=bittorrent;torrent;magnet;tracker;
+StartupNotify=true
+StartupWMClass=torrent-builder-gui

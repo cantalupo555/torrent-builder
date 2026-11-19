@@ -209,6 +209,13 @@ if(TB_ENABLE_GUI AND Qt6_FOUND)
                 "torrent_builder_gui must be a macOS app bundle; "
                 "the documented run and install paths expect .app.")
         endif()
+        # The macOS packager installs the bundle as "Torrent Builder.app";
+        # keep the Info.plist name and identifier aligned with that branding.
+        set_target_properties(torrent_builder_gui PROPERTIES
+            MACOSX_BUNDLE_BUNDLE_NAME "Torrent Builder"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.cantalupo555.torrent-builder"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
     endif()
 
     target_include_directories(torrent_builder_gui PRIVATE
@@ -319,6 +326,19 @@ add_test(NAME cmake_version_prerelease
 add_test(NAME cmake_version_fallback
     COMMAND ${CMAKE_COMMAND}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_version_fallback.cmake)
+
+# Argument validation for the packaging scripts (shared parser in
+# packaging/common.sh). The argument cases exit before building; the render
+# case drives the packager with stub strip/nfpm binaries.
+find_program(TB_TEST_BASH bash)
+if(TB_TEST_BASH)
+    add_test(NAME packaging_args
+        COMMAND ${CMAKE_COMMAND}
+            -DTEST_BASH=${TB_TEST_BASH}
+            -DTEST_PACKAGING_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/package.sh
+            -DTEST_VERIFY_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/verify.sh
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/test_packaging_args.cmake)
+endif()
 
 # The forwarding case needs an OpenSSL prefix that FindOpenSSL accepts on every
 # platform; OPENSSL_ROOT_DIR is often empty when the system installation was

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Torrent Builder">
+  <rect width="256" height="256" rx="56" fill="#0f172a"/>
+  <path d="M78 78v58a50 50 0 0 1 100 0V78" fill="none" stroke="#3b82f6" stroke-width="28" stroke-linejoin="round"/>
+  <rect x="64" y="56" width="28" height="30" rx="4" fill="#ef4444"/>
+  <rect x="164" y="56" width="28" height="30" rx="4" fill="#ef4444"/>
+</svg>
