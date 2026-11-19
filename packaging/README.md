@@ -87,16 +87,17 @@ Anyway) on the first launch.
 
 ## Validating a release
 
-`release.yml` also runs on `workflow_dispatch`, which builds and uploads every
-artifact without publishing a release:
+The release workflow also runs on `workflow_dispatch`, which builds and uploads
+every artifact without publishing a release:
 
 ```bash
 gh workflow run release.yml --ref <branch> -f version=0.0.0-dryrun
 ```
 
-Run it before tagging: the dry run executes the same matrix — including the
-Windows and macOS packaging paths — without publishing, so a broken packager
-surfaces before the tag exists.
+This target ships with the workflow changes; on a branch without them, run the
+packagers above directly. Use the dry run before tagging: it executes the same
+matrix — including the Windows and macOS packaging paths — without publishing,
+so a broken packager surfaces before the tag exists.
 
 ## Known limitations
 
