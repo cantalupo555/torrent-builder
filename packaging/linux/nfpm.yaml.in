@@ -1,0 +1,74 @@
+name: torrent-builder
+arch: @ARCH@
+platform: linux
+version: @VERSION@
+section: utils
+priority: optional
+maintainer: cantalupo555 <cantalupo@protonmail.com>
+description: |
+  CLI and Qt6 desktop GUI for creating .torrent files from files and directories.
+  Supports v1, v2, and hybrid torrents with multi-threaded hashing.
+vendor: cantalupo555
+homepage: https://github.com/cantalupo555/torrent-builder
+license: MIT
+
+# Ubuntu 24.04 and Debian 13 renamed several libraries during the time_t
+# transition (the "t64" suffix). Offer both spellings so the package installs on
+# current distros and on ones that kept the classic names.
+depends:
+  - libc6 (>= 2.39)
+  - libstdc++6 (>= 13)
+  - libqt6widgets6t64 | libqt6widgets6
+  - libqt6gui6t64 | libqt6gui6
+  - libqt6core6t64 | libqt6core6
+  - libqt6dbus6t64 | libqt6dbus6
+  - libtorrent-rasterbar2.0t64 | libtorrent-rasterbar2.0
+  - libssl3t64 | libssl3
+  - libxcb-cursor0
+
+# nfpm writes the RPM header directly, so rpmbuild never runs its automatic
+# dependency generator. Depend on SONAMEs instead of distro package names: they
+# stay valid across Fedora, RHEL and openSUSE.
+overrides:
+  rpm:
+    depends:
+      - glibc >= 2.39
+      - libstdc++ >= 13
+      - libQt6Widgets.so.6()(64bit)
+      - libQt6Gui.so.6()(64bit)
+      - libQt6Core.so.6()(64bit)
+      - libQt6DBus.so.6()(64bit)
+      - libtorrent-rasterbar.so.2.0()(64bit)
+      - libssl.so.3()(64bit)
+      - libcrypto.so.3()(64bit)
+      - libxcb-cursor.so.0()(64bit)
+
+contents:
+  - src: '@BUILD_DIR@/torrent_builder'
+    dst: /usr/bin/torrent_builder
+    file_info:
+      mode: 0755
+  - src: '@BUILD_DIR@/torrent_builder_gui'
+    dst: /usr/bin/torrent_builder_gui
+    file_info:
+      mode: 0755
+  - src: ./packaging/desktop/torrent-builder.desktop
+    dst: /usr/share/applications/torrent-builder.desktop
+    file_info:
+      mode: 0644
+  - src: ./packaging/icons/torrent-builder.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/torrent-builder.svg
+    file_info:
+      mode: 0644
+  - src: ./packaging/icons/torrent-builder-256.png
+    dst: /usr/share/icons/hicolor/256x256/apps/torrent-builder.png
+    file_info:
+      mode: 0644
+  - src: ./README.md
+    dst: /usr/share/doc/torrent-builder/README.md
+    file_info:
+      mode: 0644
+  - src: ./LICENSE
+    dst: /usr/share/doc/torrent-builder/copyright
+    file_info:
+      mode: 0644

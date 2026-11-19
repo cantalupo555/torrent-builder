@@ -9,6 +9,9 @@
 # Ignore build files
 build/
 
+# Ignore packaging output
+dist/
+
 # Ignore generated files
 *.torrent
 
