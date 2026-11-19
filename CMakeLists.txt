@@ -193,6 +193,9 @@ if(TB_ENABLE_GUI AND Qt6_FOUND)
         gui/main.cpp
         gui/main_window.cpp
         gui/qt_output_sink.cpp
+        # Window icon embedded as a Qt resource so the packaged app shows the
+        # same artwork as the Linux desktop entry.
+        gui/resources.qrc
     )
 
     # MACOSX_BUNDLE is ignored outside Apple platforms. On macOS it makes the
@@ -209,6 +212,13 @@ if(TB_ENABLE_GUI AND Qt6_FOUND)
                 "torrent_builder_gui must be a macOS app bundle; "
                 "the documented run and install paths expect .app.")
         endif()
+        # The release renames the bundle to "Torrent Builder.app"; keep the
+        # Info.plist name and identifier aligned with that branding.
+        set_target_properties(torrent_builder_gui PROPERTIES
+            MACOSX_BUNDLE_BUNDLE_NAME "Torrent Builder"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.cantalupo555.torrent-builder"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
     endif()
 
     target_include_directories(torrent_builder_gui PRIVATE
