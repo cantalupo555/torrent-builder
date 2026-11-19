@@ -5,7 +5,8 @@
 # distro it targets and running the GUI smoke test under Xvfb, which loads the
 # xcb platform plugin the declared dependencies exist for. Metadata and
 # contents are checked first with dpkg-deb and, when rpm is available on the
-# host, with rpm, so --skip-containers still validates both packages.
+# host, with rpm, so --skip-containers validates both packages or fails when
+# the rpm tool is missing.
 set -euo pipefail
 
 usage() {
@@ -83,6 +84,7 @@ for path in \
     ./usr/share/applications/torrent-builder.desktop \
     ./usr/share/icons/hicolor/scalable/apps/torrent-builder.svg \
     ./usr/share/icons/hicolor/256x256/apps/torrent-builder.png \
+    ./usr/share/doc/torrent-builder/README.md \
     ./usr/share/doc/torrent-builder/copyright
 do
     if ! printf '%s\n' "$CONTENTS" | grep -qE "[[:space:]]${path}\$"; then
@@ -101,7 +103,8 @@ for dep in \
     'libqt6dbus6t64 | libqt6dbus6' \
     'libtorrent-rasterbar2.0t64 | libtorrent-rasterbar2.0' \
     'libssl3t64 | libssl3' \
-    'libxcb-cursor0'
+    'libxcb-cursor0' \
+    'curl'
 do
     if ! printf '%s\n' "$META" | grep -qF "$dep"; then
         echo "error: dependency '$dep' missing from $DEB" >&2
@@ -123,7 +126,8 @@ if [ -n "$RPM" ]; then
             'libtorrent-rasterbar.so.2.0()(64bit)' \
             'libssl.so.3()(64bit)' \
             'libcrypto.so.3()(64bit)' \
-            'libxcb-cursor.so.0()(64bit)'
+            'libxcb-cursor.so.0()(64bit)' \
+            'curl'
         do
             if ! printf '%s\n' "$RPM_DEPS" | grep -qF "$dep"; then
                 echo "error: dependency '$dep' missing from $RPM" >&2
@@ -134,7 +138,11 @@ if [ -n "$RPM" ]; then
         for path in \
             /usr/bin/torrent_builder \
             /usr/bin/torrent_builder_gui \
-            /usr/share/applications/torrent-builder.desktop
+            /usr/share/applications/torrent-builder.desktop \
+            /usr/share/icons/hicolor/scalable/apps/torrent-builder.svg \
+            /usr/share/icons/hicolor/256x256/apps/torrent-builder.png \
+            /usr/share/doc/torrent-builder/README.md \
+            /usr/share/doc/torrent-builder/copyright
         do
             if ! printf '%s\n' "$RPM_FILES" | grep -qx "$path"; then
                 echo "error: $path missing from $RPM" >&2
@@ -142,7 +150,8 @@ if [ -n "$RPM" ]; then
             fi
         done
     elif [ "$SKIP_CONTAINERS" -eq 1 ]; then
-        echo "warning: rpm is not installed and --skip-containers was passed; $(basename "$RPM") was not validated" >&2
+        echo "error: rpm is not installed, so $(basename "$RPM") cannot be validated; install rpm or omit --rpm" >&2
+        exit 1
     fi
 fi
 
@@ -201,10 +210,15 @@ if [ -n "$RPM" ]; then
             rpm -qpR /tmp/torrent-builder.rpm | grep -qF "libtorrent-rasterbar.so.2.0()(64bit)"
             rpm -qpR /tmp/torrent-builder.rpm | grep -qF "glibc >= 2.39"
             rpm -qpR /tmp/torrent-builder.rpm | grep -qF "libstdc++ >= 13"
+            rpm -qpR /tmp/torrent-builder.rpm | grep -qF "curl"
 
             rpm -qlp /tmp/torrent-builder.rpm | grep -qx "/usr/bin/torrent_builder"
             rpm -qlp /tmp/torrent-builder.rpm | grep -qx "/usr/bin/torrent_builder_gui"
             rpm -qlp /tmp/torrent-builder.rpm | grep -qx "/usr/share/applications/torrent-builder.desktop"
+            rpm -qlp /tmp/torrent-builder.rpm | grep -qx "/usr/share/icons/hicolor/scalable/apps/torrent-builder.svg"
+            rpm -qlp /tmp/torrent-builder.rpm | grep -qx "/usr/share/icons/hicolor/256x256/apps/torrent-builder.png"
+            rpm -qlp /tmp/torrent-builder.rpm | grep -qx "/usr/share/doc/torrent-builder/README.md"
+            rpm -qlp /tmp/torrent-builder.rpm | grep -qx "/usr/share/doc/torrent-builder/copyright"
         '
 fi
 

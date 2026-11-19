@@ -25,6 +25,7 @@ depends:
   - libtorrent-rasterbar2.0t64 | libtorrent-rasterbar2.0
   - libssl3t64 | libssl3
   - libxcb-cursor0
+  - curl
 
 # nfpm writes the RPM header directly, so rpmbuild never runs its automatic
 # dependency generator. Depend on SONAMEs instead of distro package names: they
@@ -42,6 +43,7 @@ overrides:
       - libssl.so.3()(64bit)
       - libcrypto.so.3()(64bit)
       - libxcb-cursor.so.0()(64bit)
+      - curl
 
 contents:
   - src: '@BUILD_DIR@/torrent_builder'
