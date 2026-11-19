@@ -191,12 +191,14 @@ if [ ! -f "$tmp/nfpm.yaml" ]; then
     exit 1
 fi
 yaml_path="$(printf '%s' "$build" | sed "s/'/''/g")"
-expected="src: '${yaml_path}/torrent_builder'"
-if ! grep -Fq -- "$expected" "$tmp/nfpm.yaml"; then
-    echo "rendered config does not contain: $expected" >&2
-    cat "$tmp/nfpm.yaml" >&2
-    exit 1
-fi
+for binary in torrent_builder torrent_builder_gui; do
+    expected="src: '${yaml_path}/${binary}'"
+    if ! grep -Fq -- "$expected" "$tmp/nfpm.yaml"; then
+        echo "rendered config does not contain: $expected" >&2
+        cat "$tmp/nfpm.yaml" >&2
+        exit 1
+    fi
+done
 ]=])
 execute_process(
     COMMAND "${TEST_BASH}" -c "${render_setup}" _ "${TEST_PACKAGING_SCRIPT}" "${host_arch}"
