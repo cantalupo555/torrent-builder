@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="icons/torrent-builder.png">../packaging/icons/torrent-builder-256.png</file>
+    </qresource>
+</RCC>

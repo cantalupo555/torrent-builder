@@ -193,6 +193,9 @@ if(TB_ENABLE_GUI AND Qt6_FOUND)
         gui/main.cpp
         gui/main_window.cpp
         gui/qt_output_sink.cpp
+        # Window icon embedded as a Qt resource so the packaged app shows the
+        # same artwork as the Linux desktop entry.
+        gui/resources.qrc
     )
 
     # MACOSX_BUNDLE is ignored outside Apple platforms. On macOS it makes the
